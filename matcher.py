@@ -53,7 +53,14 @@ class ReMoMatcher:
         # Инициализация Gemini
         if GEMINI_AVAILABLE:
             genai.configure(api_key=self.api_key)
-            self.model = genai.GenerativeModel('gemini-1.5-flash')
+            # Попробуем использовать предпочтительную модель, но оставим возможность
+            # падбека на альтернативы, если модель недоступна в текущем API.
+            preferred = 'gemini-1.5-flash'
+            try:
+                self.model = genai.GenerativeModel(preferred)
+            except Exception:
+                # отложенная инициализация — модель может быть недоступна, создадим None
+                self.model = None
         else:
             raise ImportError("Установите google-generativeai")
         
@@ -289,8 +296,20 @@ class ReMoMatcher:
 """
         
         try:
-            response = self.model.generate_content(prompt, stream=False)
-            raw_text = response.text.strip()
+            # если модель не инициализирована корректно при старте — пробуем создать её "лениво"
+            if self.model is None:
+                try:
+                    self.model = genai.GenerativeModel('gemini-1.5-flash')
+                except Exception:
+                    # оставим модель None и продолжим — далее попытаемся с падбеками
+                    self.model = None
+
+            # если есть модель, попробуем выполнить запрос
+            if self.model is not None:
+                response = self.model.generate_content(prompt, stream=False)
+                raw_text = response.text.strip()
+            else:
+                raise RuntimeError('Gemini model not initialized')
             
             # Парсить JSON из ответа
             try:
@@ -348,16 +367,34 @@ class ReMoMatcher:
             return result
             
         except Exception as e:
-            logger.error(f"❌ Ошибка Gemini API: {e}", exc_info=True)
-            return {
-                'found_name': None,
-                'price': None,
-                'article': None,
-                'similarity_score': 0,
-                'from_cache': False,
-                'success': False,
-                'error': str(e)
-            }
+            # Попытка падбека на другие модели, если исходная модель не поддерживается
+            logger.warning(f"Gemini API error, attempting fallback models: {e}")
+            fallback_models = ['text-bison-001', 'text-bison', 'gemini-1.0']
+            for alt in fallback_models:
+                try:
+                    logger.info(f"Попытка падбека на модель: {alt}")
+                    alt_model = genai.GenerativeModel(alt)
+                    response = alt_model.generate_content(prompt, stream=False)
+                    raw_text = response.text.strip()
+                    # заменим текущую модель на рабочую
+                    self.model = alt_model
+                    logger.info(f"Успешный падбек на модель: {alt}")
+                    break
+                except Exception as e2:
+                    logger.warning(f"Падбек модель {alt} не сработала: {e2}")
+                    raw_text = None
+
+            if not raw_text:
+                logger.error(f"❌ Ошибка Gemini API: {e}", exc_info=True)
+                return {
+                    'found_name': None,
+                    'price': None,
+                    'article': None,
+                    'similarity_score': 0,
+                    'from_cache': False,
+                    'success': False,
+                    'error': str(e)
+                }
     
     def save_to_history(self, query: str, found_name: str, price: Optional[float], 
                         article: str, user_approved: bool, correction_note: str = ""):
