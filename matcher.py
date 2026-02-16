@@ -1,0 +1,524 @@
+"""
+ReMo Matcher v1.0
+Семантическое сопоставление номенклатуры с использованием Gemini API
+"""
+
+import pandas as pd
+import json
+import sqlite3
+from datetime import datetime
+from typing import List, Dict, Optional, Tuple
+import logging
+import hashlib
+import os
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+try:
+    import google.generativeai as genai
+    GEMINI_AVAILABLE = True
+except ImportError:
+    logger.warning("google-generativeai не установлен. Установите: pip install google-generativeai")
+    GEMINI_AVAILABLE = False
+
+
+class ReMoMatcher:
+    """
+    Основной класс для семантического сопоставления номенклатуры
+    
+    Workflow:
+    1. Загрузить товарную БД (price_clean.csv)
+    2. Для каждого товара из КП найти соответствие в БД
+    3. Вернуть: (найденное имя, цена, артикул)
+    """
+    
+    def __init__(self, gemini_api_key: str, db_csv_path: str, cache_db: str = "matcher_cache.db"):
+        """
+        Args:
+            gemini_api_key: API ключ Google Gemini
+            db_csv_path: Путь к price_clean.csv с товарной базой
+            cache_db: БД для кэширования результатов сопоставления
+        """
+        self.api_key = gemini_api_key
+        self.db_csv_path = db_csv_path
+        self.cache_db = cache_db
+        self.catalog = None
+        self.catalog_dict = None
+        self.catalog_text = None
+        
+        # Инициализация Gemini
+        if GEMINI_AVAILABLE:
+            genai.configure(api_key=self.api_key)
+            self.model = genai.GenerativeModel('gemini-1.5-flash')
+        else:
+            raise ImportError("Установите google-generativeai")
+        
+        # Инициализация кэша
+        self._init_cache_db()
+        self._load_catalog()
+        
+        logger.info("✓ ReMoMatcher инициализирован")
+    
+    def _init_cache_db(self):
+        """Инициализировать БД кэша"""
+        conn = sqlite3.connect(self.cache_db)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS match_cache (
+                query_hash TEXT PRIMARY KEY,
+                original_query TEXT,
+                found_name TEXT,
+                price REAL,
+                article TEXT,
+                similarity_score FLOAT,
+                created_at TIMESTAMP,
+                gemini_raw_response TEXT
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS match_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                original_query TEXT,
+                found_name TEXT,
+                price REAL,
+                article TEXT,
+                user_approved BOOLEAN,
+                correction_note TEXT,
+                created_at TIMESTAMP
+            )
+        ''')
+        
+        conn.commit()
+        conn.close()
+        logger.info("✓ Cache DB инициализирована")
+    
+    def _load_catalog(self):
+        """Загрузить товарный каталог"""
+        logger.info(f"📦 Загрузка каталога из {self.db_csv_path}")
+        
+        self.catalog = pd.read_csv(self.db_csv_path, sep=';', encoding='utf-8')
+        logger.info(f"✓ Загружено товаров: {len(self.catalog)}")
+        
+        # Подготовить словарь для быстрого поиска
+        self.catalog_dict = {}
+        for idx, row in self.catalog.iterrows():
+            name = str(row.get('Наименование', '')).strip()
+            article = str(row.get('Артикул', '')).strip()
+            price = float(row.get('Цена розничная', 0)) if 'Цена розничная' in row else None
+            
+            if name:
+                self.catalog_dict[name.lower()] = {
+                    'name': name,
+                    'article': article,
+                    'price': price,
+                    'row_idx': idx
+                }
+        
+        # Подготовить текстовый формат каталога для Gemini
+        self._prepare_catalog_text()
+    
+    def _prepare_catalog_text(self, max_items: int = 500):
+        """Подготовить каталог в текстовом формате для контекста Gemini"""
+        sample = self.catalog.sample(n=min(max_items, len(self.catalog)))
+        
+        catalog_lines = []
+        for idx, row in sample.iterrows():
+            line = f"• {row.get('Наименование', 'N/A')} | Артикул: {row.get('Артикул', 'N/A')} | Цена: {row.get('Цена розничная', 'N/A')}"
+            catalog_lines.append(line)
+        
+        self.catalog_text = "\n".join(catalog_lines[:300])  # Ограничить для контекста
+        logger.info(f"✓ Каталог подготовлен ({len(catalog_lines)} товаров в контексте)")
+    
+    def _hash_query(self, query: str) -> str:
+        """Хэш запроса для кэша"""
+        return hashlib.md5(query.lower().encode()).hexdigest()
+    
+    def _get_from_cache(self, query: str) -> Optional[Dict]:
+        """Получить результат из кэша"""
+        query_hash = self._hash_query(query)
+        
+        try:
+            conn = sqlite3.connect(self.cache_db)
+            cursor = conn.cursor()
+            
+            cursor.execute(
+                'SELECT found_name, price, article, similarity_score FROM match_cache WHERE query_hash = ?',
+                (query_hash,)
+            )
+            result = cursor.fetchone()
+            conn.close()
+            
+            if result:
+                logger.debug(f"💾 Результат найден в кэше: {query}")
+                return {
+                    'found_name': result[0],
+                    'price': result[1],
+                    'article': result[2],
+                    'similarity_score': result[3],
+                    'from_cache': True
+                }
+        except Exception as e:
+            logger.warning(f"⚠️ Ошибка чтения кэша: {e}")
+        
+        return None
+    
+    def _save_to_cache(self, query: str, found_name: str, price: Optional[float], 
+                       article: str, similarity_score: float, raw_response: str):
+        """Сохранить результат в кэш"""
+        query_hash = self._hash_query(query)
+        
+        try:
+            conn = sqlite3.connect(self.cache_db)
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                INSERT OR REPLACE INTO match_cache 
+                (query_hash, original_query, found_name, price, article, similarity_score, created_at, gemini_raw_response)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (query_hash, query, found_name, price, article, similarity_score, datetime.now(), raw_response))
+            
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.warning(f"⚠️ Ошибка сохранения в кэш: {e}")
+    
+    def match(self, query: str, use_cache: bool = True) -> Dict:
+        """
+        Сопоставить номенклатуру из КП с товарной БД
+        
+        Args:
+            query: Наименование из столбца B КП
+            use_cache: Использовать кэш?
+        
+        Returns:
+            {
+                'found_name': 'Найденное имя из БД',
+                'price': 1234.56,
+                'article': 'ART-001',
+                'similarity_score': 0.95,
+                'from_cache': False,
+                'success': True,
+                'error': None
+            }
+        """
+        
+        # Проверить кэш
+        if use_cache:
+            cached = self._get_from_cache(query)
+            if cached:
+                return cached
+        
+        try:
+            # Точное совпадение в словаре
+            exact_match = self.catalog_dict.get(query.lower())
+            if exact_match:
+                logger.info(f"✓ Точное совпадение найдено: {query}")
+                self._save_to_cache(query, exact_match['name'], exact_match['price'], 
+                                   exact_match['article'], 1.0, "exact_match")
+                return {
+                    'found_name': exact_match['name'],
+                    'price': exact_match['price'],
+                    'article': exact_match['article'],
+                    'similarity_score': 1.0,
+                    'from_cache': False,
+                    'success': True,
+                    'error': None
+                }
+            
+            # Использовать Gemini для семантического поиска
+            logger.info(f"🔍 Поиск в Gemini: {query}")
+            result = self._match_with_gemini(query)
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка сопоставления: {e}", exc_info=True)
+            return {
+                'found_name': None,
+                'price': None,
+                'article': None,
+                'similarity_score': 0,
+                'from_cache': False,
+                'success': False,
+                'error': str(e)
+            }
+    
+    def _match_with_gemini(self, query: str) -> Dict:
+        """Использовать Gemini для сопоставления"""
+        
+        prompt = f"""Ты эксперт по технической номенклатуре оборудования, кабеля и материалов.
+
+Задача: Найти в каталоге товар, который ТОЧНО соответствует запросу пользователя.
+
+КАТАЛОГ ДОСТУПНЫХ ТОВАРОВ:
+{self.catalog_text}
+
+ЗАПРОС ПОЛЬЗОВАТЕЛЯ: "{query}"
+
+ИНСТРУКЦИИ:
+1. Внимательно проанализируй запрос пользователя
+2. Найди в каталоге товар с МАКСИМАЛЬНЫМ семантическим совпадением
+3. Учитывай:
+   - Технические характеристики (сечение, вольтаж, материал, размеры)
+   - Назначение товара (кабель, кондиционер, сварочный аппарат и т.д.)
+   - Альтернативные названия и аббревиатуры
+4. Если точного аналога нет, выведи НАИБОЛЕЕ ПОДХОДЯЩИЙ товар
+5. Вывод ТОЛЬКО в формате JSON (без лишнего текста)
+
+ФОРМАТ ОТВЕТА:
+{{
+    "found_name": "Точное название из каталога",
+    "article": "Артикул товара",
+    "confidence": 0.95,
+    "reasoning": "Краткое объяснение почему это совпадение"
+}}
+
+Если товар не найден:
+{{
+    "found_name": null,
+    "article": null,
+    "confidence": 0,
+    "reasoning": "товар не найден в каталоге"
+}}
+"""
+        
+        try:
+            response = self.model.generate_content(prompt, stream=False)
+            raw_text = response.text.strip()
+            
+            # Парсить JSON из ответа
+            try:
+                # Попробовать найти JSON в ответе
+                start_idx = raw_text.find('{')
+                end_idx = raw_text.rfind('}') + 1
+                if start_idx != -1 and end_idx > start_idx:
+                    json_str = raw_text[start_idx:end_idx]
+                    gemini_result = json.loads(json_str)
+                else:
+                    raise ValueError("JSON не найден в ответе")
+            except json.JSONDecodeError as e:
+                logger.error(f"Ошибка парсинга JSON от Gemini: {e}")
+                logger.error(f"Сырой ответ: {raw_text}")
+                return {
+                    'found_name': None,
+                    'price': None,
+                    'article': None,
+                    'similarity_score': 0,
+                    'from_cache': False,
+                    'success': False,
+                    'error': f"Ошибка парсинга ответа Gemini"
+                }
+            
+            found_name = gemini_result.get('found_name')
+            article = gemini_result.get('article')
+            confidence = gemini_result.get('confidence', 0)
+            
+            # Получить цену из каталога
+            price = None
+            if found_name:
+                match = self.catalog_dict.get(found_name.lower())
+                if match:
+                    price = match['price']
+                    article = article or match['article']
+            
+            result = {
+                'found_name': found_name,
+                'price': price,
+                'article': article,
+                'similarity_score': confidence,
+                'from_cache': False,
+                'success': found_name is not None,
+                'error': None
+            }
+            
+            # Сохранить в кэш
+            self._save_to_cache(query, found_name, price, article or '', confidence, raw_text)
+            
+            if found_name:
+                logger.info(f"✓ Найдено: {found_name} (confidence: {confidence})")
+            else:
+                logger.warning(f"⚠️ Товар не найден для: {query}")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка Gemini API: {e}", exc_info=True)
+            return {
+                'found_name': None,
+                'price': None,
+                'article': None,
+                'similarity_score': 0,
+                'from_cache': False,
+                'success': False,
+                'error': str(e)
+            }
+    
+    def save_to_history(self, query: str, found_name: str, price: Optional[float], 
+                        article: str, user_approved: bool, correction_note: str = ""):
+        """Сохранить результат в историю"""
+        try:
+            conn = sqlite3.connect(self.cache_db)
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                INSERT INTO match_history 
+                (original_query, found_name, price, article, user_approved, correction_note, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (query, found_name, price, article, user_approved, correction_note, datetime.now()))
+            
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.warning(f"⚠️ Ошибка сохранения в историю: {e}")
+    
+    def process_excel(self, excel_path: str, output_path: str = None) -> Tuple[pd.DataFrame, Dict]:
+        """
+        Обработать весь Excel файл КП
+        
+        Args:
+            excel_path: Путь к исходному Excel файлу
+            output_path: Путь для сохранения результата (если не указан, использует исходный путь с _matched суффиксом)
+        
+        Returns:
+            (обработанный DataFrame, статистика)
+        """
+        logger.info(f"📊 Начало обработки: {excel_path}")
+        
+        # Загрузить Excel
+        try:
+            df = pd.read_excel(excel_path)
+        except Exception as e:
+            logger.error(f"❌ Ошибка загрузки Excel: {e}")
+            raise
+        
+        # Найти столбец B (по названию или номеру)
+        col_b = None
+        for col in df.columns:
+            if 'наименование' in str(col).lower() and 'оборудование' in str(col).lower():
+                col_b = col
+                break
+        
+        if col_b is None and len(df.columns) > 1:
+            col_b = df.columns[1]  # Столбец B (индекс 1)
+        
+        if col_b is None:
+            raise ValueError("Не найден столбец 'Наименование оборудования, материалов и кабелей'")
+        
+        logger.info(f"✓ Найден столбец: {col_b}")
+        
+        # Подготовить столбцы для результатов
+        if 'G' not in df.columns or 'Цена' not in str(df.columns[6] if len(df.columns) > 6 else ""):
+            df.insert(len(df.columns), 'Цена', None)
+        
+        if 'H' not in df.columns or 'Найденная номенклатура' not in str(df.columns[7] if len(df.columns) > 7 else ""):
+            df.insert(len(df.columns), 'Найденная номенклатура', None)
+        
+        if 'I' not in df.columns or 'Артикул' not in str(df.columns[8] if len(df.columns) > 8 else ""):
+            df.insert(len(df.columns), 'Артикул', None)
+        
+        # Обработать каждую строку
+        stats = {
+            'total': 0,
+            'found': 0,
+            'not_found': 0,
+            'from_cache': 0,
+            'errors': 0
+        }
+        
+        for idx, row in df.iterrows():
+            query = str(row[col_b]).strip()
+            
+            if not query or query.lower() == 'nan':
+                continue
+            
+            stats['total'] += 1
+            
+            # Сопоставить
+            result = self.match(query, use_cache=True)
+            
+            # Заполнить результаты
+            if result['success']:
+                df.at[idx, 'Цена'] = result['price']
+                df.at[idx, 'Найденная номенклатура'] = result['found_name']
+                df.at[idx, 'Артикул'] = result['article']
+                
+                if result['from_cache']:
+                    stats['from_cache'] += 1
+                
+                if result['found_name']:
+                    stats['found'] += 1
+                else:
+                    stats['not_found'] += 1
+            else:
+                stats['errors'] += 1
+                logger.warning(f"⚠️ [{idx+1}] Ошибка: {result['error']}")
+            
+            # Логирование прогресса
+            if (idx + 1) % 10 == 0:
+                logger.info(f"⏳ Обработано {idx+1}/{len(df)} строк")
+        
+        # Сохранить результат
+        if output_path is None:
+            output_path = excel_path.replace('.xlsx', '_matched.xlsx').replace('.xls', '_matched.xls')
+        
+        try:
+            df.to_excel(output_path, index=False)
+            logger.info(f"✓ Результат сохранен: {output_path}")
+        except Exception as e:
+            logger.error(f"❌ Ошибка сохранения Excel: {e}")
+            raise
+        
+        # Вывести статистику
+        logger.info("\n" + "="*60)
+        logger.info("📊 СТАТИСТИКА ОБРАБОТКИ")
+        logger.info("="*60)
+        logger.info(f"Всего строк:        {stats['total']}")
+        logger.info(f"Найдено товаров:    {stats['found']}")
+        logger.info(f"Не найдено:         {stats['not_found']}")
+        logger.info(f"Из кэша:            {stats['from_cache']}")
+        logger.info(f"Ошибок:             {stats['errors']}")
+        logger.info(f"Успешность:         {stats['found']/stats['total']*100:.1f}%" if stats['total'] > 0 else "N/A")
+        logger.info("="*60 + "\n")
+        
+        return df, stats
+
+
+if __name__ == "__main__":
+    # Пример использования
+    API_KEY = os.getenv('GEMINI_API_KEY')
+    if not API_KEY:
+        print("⚠️ Установите переменную окружения GEMINI_API_KEY")
+        print("На Windows: set GEMINI_API_KEY=ваш_ключ")
+        print("На Linux/Mac: export GEMINI_API_KEY=ваш_ключ")
+        exit(1)
+    
+    matcher = ReMoMatcher(
+        gemini_api_key=API_KEY,
+        db_csv_path=r"D:\Data\Downloads\upload\price_clean.csv"
+    )
+    
+    # Тестовое сопоставление
+    test_queries = [
+        "Кабель медный 4кв.мм",
+        "Провод Cu 4x2.5",
+        "Сварочный аппарат инвертор",
+    ]
+    
+    print("\n" + "="*60)
+    print("🧪 ТЕСТОВОЕ СОПОСТАВЛЕНИЕ")
+    print("="*60 + "\n")
+    
+    for query in test_queries:
+        result = matcher.match(query)
+        print(f"Запрос:     {query}")
+        print(f"Найдено:    {result['found_name']}")
+        print(f"Артикул:    {result['article']}")
+        print(f"Цена:       {result['price']}")
+        print(f"Уверенность: {result['similarity_score']}")
+        print("-" * 60)
