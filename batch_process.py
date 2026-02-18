@@ -16,6 +16,10 @@ import pandas as pd
 
 from matcher import ReMoMatcher, MISSING_POSITION_TEXT
 
+import sys
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
 
 def load_api_key(explicit: str | None) -> str:
     if explicit:
