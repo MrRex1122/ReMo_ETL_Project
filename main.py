@@ -23,13 +23,24 @@ def convert_csv(input_path: str | Path, output_path: str | Path) -> Path:
     if not input_path.exists():
         raise FileNotFoundError(f"Input CSV not found: {input_path}")
 
-    df = pd.read_csv(
-        input_path,
-        sep=";",
-        encoding="cp1251",
-        decimal=".",
-        low_memory=False,
-    )
+    last_error: Exception | None = None
+    for enc in ("utf-8-sig", "utf-8", "cp1251"):
+        try:
+            df = pd.read_csv(
+                input_path,
+                sep=";",
+                encoding=enc,
+                decimal=".",
+                low_memory=False,
+            )
+            break
+        except UnicodeDecodeError as e:
+            last_error = e
+    else:
+        raise ValueError(
+            "Failed to read CSV with supported encodings: cp1251, utf-8-sig, utf-8. "
+            f"Last error: {last_error}"
+        )
 
     # Если есть пустой технический последний столбец — удаляем.
     if len(df.columns) > 0 and (str(df.columns[-1]).startswith("Unnamed") or str(df.columns[-1]) == ""):

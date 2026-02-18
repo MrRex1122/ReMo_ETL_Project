@@ -46,7 +46,10 @@ def load_api_key(explicit: str | None) -> str:
 
 
 def iter_excel_files(folder: Path) -> List[Path]:
-    files = sorted([*folder.glob("*.xlsx"), *folder.glob("*.xls")])
+    files = sorted(
+        [f for f in folder.iterdir() if f.is_file() and f.suffix.lower() in {".xlsx", ".xls"}],
+        key=lambda p: p.name.lower(),
+    )
     return [
         f for f in files
         if not f.name.startswith("~$") and "_matched" not in f.stem.lower()

@@ -30,6 +30,21 @@ class MainConvertTests(unittest.TestCase):
             self.assertEqual(list(out_df.columns), ["name", "price"])
             self.assertEqual(len(out_df), 2)
 
+    def test_convert_csv_reads_utf8_input_too(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            source = tmp / "input_utf8.csv"
+            target = tmp / "converted.csv"
+
+            df = pd.DataFrame({"name": ["позиция"], "price": [99.9]})
+            df.to_csv(source, sep=";", encoding="utf-8", index=False)
+
+            convert_csv(source, target)
+
+            out_df = pd.read_csv(target, sep=";", encoding="utf-8")
+            self.assertEqual(out_df.loc[0, "name"], "позиция")
+            self.assertEqual(float(out_df.loc[0, "price"]), 99.9)
+
 
 if __name__ == "__main__":
     unittest.main()
