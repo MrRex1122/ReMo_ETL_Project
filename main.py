@@ -24,7 +24,7 @@ def convert_csv(input_path: str | Path, output_path: str | Path) -> Path:
         raise FileNotFoundError(f"Input CSV not found: {input_path}")
 
     supported_encodings = ("utf-8-sig", "utf-8", "cp1251")
-    supported_separators = (";", ",")
+    supported_separators = (";", ",", "\t")
     last_error: Exception | None = None
     df = None
 

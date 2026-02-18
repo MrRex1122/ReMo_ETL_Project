@@ -47,7 +47,7 @@ def load_api_key(explicit: str | None) -> str:
 
 def iter_excel_files(folder: Path) -> List[Path]:
     files = sorted(
-        [f for f in folder.iterdir() if f.is_file() and f.suffix.lower() in {".xlsx", ".xls"}],
+        [f for f in folder.iterdir() if f.is_file() and f.suffix.lower() in {".xlsx", ".xls", ".xlsm"}],
         key=lambda p: p.name.lower(),
     )
     return [

@@ -12,13 +12,14 @@ class BatchProcessTests(unittest.TestCase):
             tmp = Path(tmpdir)
             (tmp / "A.XLSX").write_text("x")
             (tmp / "b.xls").write_text("x")
+            (tmp / "macro.XLSM").write_text("x")
             (tmp / "~$temp.xlsx").write_text("x")
             (tmp / "file_matched.xlsx").write_text("x")
             (tmp / "notes.txt").write_text("x")
 
             files = iter_excel_files(tmp)
 
-            self.assertEqual([f.name for f in files], ["A.XLSX", "b.xls"])
+            self.assertEqual([f.name for f in files], ["A.XLSX", "b.xls", "macro.XLSM"])
 
     def test_load_api_key_strips_whitespace(self):
         previous = os.environ.get("GEMINI_API_KEY")
