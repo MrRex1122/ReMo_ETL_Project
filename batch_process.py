@@ -58,9 +58,10 @@ def iter_excel_files(folder: Path) -> List[Path]:
 
 def process_one(matcher: ReMoMatcher, src: Path, out_dir: Path) -> Dict:
     out_file = out_dir / f"{src.stem}_matched{src.suffix}"
-    df, stats = matcher.process_excel(str(src), str(out_file))
+    _df, stats = matcher.process_excel(str(src), str(out_file))
 
-    missing_rows = int((df["Найденная номенклатура"] == MISSING_POSITION_TEXT).sum()) if "Найденная номенклатура" in df.columns else 0
+    # Use matcher stats to avoid brittle dependency on localized/encoded column names.
+    missing_rows = int(stats.get("not_found", 0))
 
     return {
         "file": src.name,
@@ -98,8 +99,11 @@ def main() -> None:
         raise SystemExit(f"No Excel files found in {input_dir}")
 
     api_key = load_api_key(args.api_key)
-    catalog_csv = str(get_catalog_csv_path(args.db_csv))
-    matcher = ReMoMatcher(api_key, catalog_csv)
+    catalog_path = get_catalog_csv_path(args.db_csv)
+    if not catalog_path.exists():
+        raise SystemExit(f"Catalog CSV not found: {catalog_path}")
+
+    matcher = ReMoMatcher(api_key, str(catalog_path))
 
     report: List[Dict] = []
     for file_path in files:
