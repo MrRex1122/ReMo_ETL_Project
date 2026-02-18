@@ -46,7 +46,10 @@ def load_api_key(explicit: str | None) -> str:
 
 def iter_excel_files(folder: Path) -> List[Path]:
     files = sorted([*folder.glob("*.xlsx"), *folder.glob("*.xls")])
-    return [f for f in files if not f.name.startswith("~$")]
+    return [
+        f for f in files
+        if not f.name.startswith("~$") and "_matched" not in f.stem.lower()
+    ]
 
 
 def process_one(matcher: ReMoMatcher, src: Path, out_dir: Path) -> Dict:
