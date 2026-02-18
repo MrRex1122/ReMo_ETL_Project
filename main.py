@@ -1,28 +1,59 @@
-import pandas as pd
+from __future__ import annotations
+
 import argparse
-from config import get_price_raw_csv_path, get_price_converted_csv_path
+import sys
+from pathlib import Path
 
-parser = argparse.ArgumentParser(description="Convert source price CSV to UTF-8")
-parser.add_argument("--input", default=str(get_price_raw_csv_path()), help="Path to source price.csv")
-parser.add_argument("--output", default=str(get_price_converted_csv_path()), help="Path to converted CSV")
-args = parser.parse_args()
+import pandas as pd
 
-df = pd.read_csv(
-    args.input,
-    sep=";",
-    encoding="cp1251",
-    decimal=".",
-    low_memory=False
-)
+from config import get_price_converted_csv_path, get_price_raw_csv_path
 
-# если парсер/логика ломается из-за пустого последнего столбца:
-if df.columns[-1].startswith("Unnamed") or df.columns[-1] == "":
-    df = df.iloc[:, :-1]
 
-print(df.shape)
-print(df.head(3))
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Convert source price CSV to UTF-8")
+    parser.add_argument("--input", default=str(get_price_raw_csv_path()), help="Path to source price.csv")
+    parser.add_argument("--output", default=str(get_price_converted_csv_path()), help="Path to converted CSV")
+    return parser.parse_args()
 
-# Сохранить конвертированный файл в UTF-8
-output_path = args.output
-df.to_csv(output_path, sep=";", encoding="utf-8", index=False)
-print(f"\n✓ Файл сохранен: {output_path}")
+
+def convert_csv(input_path: str | Path, output_path: str | Path) -> Path:
+    input_path = Path(input_path)
+    output_path = Path(output_path)
+
+    if not input_path.exists():
+        raise FileNotFoundError(f"Input CSV not found: {input_path}")
+
+    df = pd.read_csv(
+        input_path,
+        sep=";",
+        encoding="cp1251",
+        decimal=".",
+        low_memory=False,
+    )
+
+    # Если есть пустой технический последний столбец — удаляем.
+    if len(df.columns) > 0 and (str(df.columns[-1]).startswith("Unnamed") or str(df.columns[-1]) == ""):
+        df = df.iloc[:, :-1]
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(output_path, sep=";", encoding="utf-8", index=False)
+
+    print(df.shape)
+    preview = df.head(3).to_string()
+    safe_preview = preview.encode(sys.stdout.encoding or "utf-8", errors="backslashreplace").decode(
+        sys.stdout.encoding or "utf-8", errors="ignore"
+    )
+    print(safe_preview)
+    print(f"\nFile saved: {output_path}")
+    return output_path
+
+
+def main() -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    args = parse_args()
+    convert_csv(args.input, args.output)
+
+
+if __name__ == "__main__":
+    main()
