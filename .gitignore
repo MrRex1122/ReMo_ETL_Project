@@ -56,6 +56,7 @@ matcher_cache.db
 # Logs
 *.log
 logs/
+batch_output/
 
 # Temporary
 *.tmp
