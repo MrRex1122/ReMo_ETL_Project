@@ -68,6 +68,16 @@ streamlit run app.py
 
 Приложение откроется на `http://localhost:8501`
 
+### 5. Batch-режим (обработка набора файлов)
+
+```bash
+python batch_process.py --input-dir "D:\\Data\\Downloads\\upload" --output-dir "batch_output"
+```
+
+Скрипт обработает все `.xlsx/.xls` в папке, создаст выходные файлы и два отчёта:
+- `batch_report_*.json`
+- `batch_report_*.csv`
+
 ---
 
 ## 📖 Инструкция по использованию

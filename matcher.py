@@ -18,6 +18,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+MISSING_POSITION_TEXT = "Позиция отсутствует"
+
 try:
     import google.generativeai as genai
     GEMINI_AVAILABLE = True
@@ -163,12 +165,15 @@ class ReMoMatcher:
             
             if result:
                 logger.debug(f"💾 Результат найден в кэше: {query}")
+                found_name = result[0] or MISSING_POSITION_TEXT
                 return {
-                    'found_name': result[0],
+                    'found_name': found_name,
                     'price': result[1],
                     'article': result[2],
-                    'similarity_score': result[3],
-                    'from_cache': True
+                    'similarity_score': result[3] or 0,
+                    'from_cache': True,
+                    'success': True,
+                    'error': None
                 }
         except Exception as e:
             logger.warning(f"⚠️ Ошибка чтения кэша: {e}")
@@ -258,7 +263,7 @@ class ReMoMatcher:
     
     def _match_with_gemini(self, query: str) -> Dict:
         """Использовать Gemini для сопоставления"""
-        
+
         prompt = f"""Ты эксперт по технической номенклатуре оборудования, кабеля и материалов.
 
 Задача: Найти в каталоге товар, который ТОЧНО соответствует запросу пользователя.
@@ -275,7 +280,7 @@ class ReMoMatcher:
    - Технические характеристики (сечение, вольтаж, материал, размеры)
    - Назначение товара (кабель, кондиционер, сварочный аппарат и т.д.)
    - Альтернативные названия и аббревиатуры
-4. Если точного аналога нет, выведи НАИБОЛЕЕ ПОДХОДЯЩИЙ товар
+4. Если релевантного аналога нет, верни found_name=null
 5. Вывод ТОЛЬКО в формате JSON (без лишнего текста)
 
 ФОРМАТ ОТВЕТА:
@@ -294,107 +299,78 @@ class ReMoMatcher:
     "reasoning": "товар не найден в каталоге"
 }}
 """
-        
-        try:
-            # если модель не инициализирована корректно при старте — пробуем создать её "лениво"
-            if self.model is None:
-                try:
-                    self.model = genai.GenerativeModel('gemini-1.5-flash')
-                except Exception:
-                    # оставим модель None и продолжим — далее попытаемся с падбеками
-                    self.model = None
 
-            # если есть модель, попробуем выполнить запрос
-            if self.model is not None:
-                response = self.model.generate_content(prompt, stream=False)
-                raw_text = response.text.strip()
-            else:
-                raise RuntimeError('Gemini model not initialized')
-            
-            # Парсить JSON из ответа
-            try:
-                # Попробовать найти JSON в ответе
-                start_idx = raw_text.find('{')
-                end_idx = raw_text.rfind('}') + 1
-                if start_idx != -1 and end_idx > start_idx:
-                    json_str = raw_text[start_idx:end_idx]
-                    gemini_result = json.loads(json_str)
-                else:
-                    raise ValueError("JSON не найден в ответе")
-            except json.JSONDecodeError as e:
-                logger.error(f"Ошибка парсинга JSON от Gemini: {e}")
-                logger.error(f"Сырой ответ: {raw_text}")
-                return {
-                    'found_name': None,
-                    'price': None,
-                    'article': None,
-                    'similarity_score': 0,
-                    'from_cache': False,
-                    'success': False,
-                    'error': f"Ошибка парсинга ответа Gemini"
-                }
-            
+        def parse_result(raw_text: str) -> Dict:
+            start_idx = raw_text.find('{')
+            end_idx = raw_text.rfind('}') + 1
+            if start_idx == -1 or end_idx <= start_idx:
+                raise ValueError("JSON не найден в ответе")
+
+            gemini_result = json.loads(raw_text[start_idx:end_idx])
             found_name = gemini_result.get('found_name')
             article = gemini_result.get('article')
-            confidence = gemini_result.get('confidence', 0)
-            
-            # Получить цену из каталога
+            confidence = float(gemini_result.get('confidence', 0) or 0)
+
             price = None
             if found_name:
-                match = self.catalog_dict.get(found_name.lower())
+                match = self.catalog_dict.get(str(found_name).lower())
                 if match:
                     price = match['price']
                     article = article or match['article']
-            
+            else:
+                found_name = MISSING_POSITION_TEXT
+
             result = {
                 'found_name': found_name,
                 'price': price,
                 'article': article,
                 'similarity_score': confidence,
                 'from_cache': False,
-                'success': found_name is not None,
+                'success': True,
                 'error': None
             }
-            
-            # Сохранить в кэш
             self._save_to_cache(query, found_name, price, article or '', confidence, raw_text)
-            
-            if found_name:
-                logger.info(f"✓ Найдено: {found_name} (confidence: {confidence})")
-            else:
-                logger.warning(f"⚠️ Товар не найден для: {query}")
-            
             return result
-            
-        except Exception as e:
-            # Попытка падбека на другие модели, если исходная модель не поддерживается
-            logger.warning(f"Gemini API error, attempting fallback models: {e}")
-            fallback_models = ['text-bison-001', 'text-bison', 'gemini-1.0']
-            for alt in fallback_models:
-                try:
-                    logger.info(f"Попытка падбека на модель: {alt}")
-                    alt_model = genai.GenerativeModel(alt)
-                    response = alt_model.generate_content(prompt, stream=False)
-                    raw_text = response.text.strip()
-                    # заменим текущую модель на рабочую
-                    self.model = alt_model
-                    logger.info(f"Успешный падбек на модель: {alt}")
-                    break
-                except Exception as e2:
-                    logger.warning(f"Падбек модель {alt} не сработала: {e2}")
-                    raw_text = None
 
-            if not raw_text:
-                logger.error(f"❌ Ошибка Gemini API: {e}", exc_info=True)
-                return {
-                    'found_name': None,
-                    'price': None,
-                    'article': None,
-                    'similarity_score': 0,
-                    'from_cache': False,
-                    'success': False,
-                    'error': str(e)
-                }
+        try:
+            models_to_try = []
+            if self.model is not None:
+                models_to_try.append(self.model)
+            models_to_try.extend([
+                genai.GenerativeModel('gemini-1.5-flash'),
+                genai.GenerativeModel('gemini-1.5-pro'),
+                genai.GenerativeModel('gemini-1.0-pro'),
+            ])
+
+            last_error = None
+            for model in models_to_try:
+                try:
+                    response = model.generate_content(prompt, stream=False)
+                    raw_text = (response.text or '').strip()
+                    parsed = parse_result(raw_text)
+                    self.model = model  # закрепить рабочую модель
+                    if parsed['found_name'] == MISSING_POSITION_TEXT:
+                        logger.warning(f"⚠️ Товар не найден для: {query}")
+                    else:
+                        logger.info(f"✓ Найдено: {parsed['found_name']} (confidence: {parsed['similarity_score']})")
+                    return parsed
+                except Exception as model_error:
+                    last_error = model_error
+                    logger.warning(f"Модель не сработала: {model_error}")
+
+            raise RuntimeError(f"Gemini fallback exhausted: {last_error}")
+
+        except Exception as e:
+            logger.error(f"❌ Ошибка Gemini API: {e}", exc_info=True)
+            return {
+                'found_name': MISSING_POSITION_TEXT,
+                'price': None,
+                'article': None,
+                'similarity_score': 0,
+                'from_cache': False,
+                'success': False,
+                'error': str(e)
+            }
     
     def save_to_history(self, query: str, found_name: str, price: Optional[float], 
                         article: str, user_approved: bool, correction_note: str = ""):
@@ -480,21 +456,22 @@ class ReMoMatcher:
             result = self.match(query, use_cache=True)
             
             # Заполнить результаты
-            if result['success']:
-                df.at[idx, 'Цена'] = result['price']
-                df.at[idx, 'Найденная номенклатура'] = result['found_name']
-                df.at[idx, 'Артикул'] = result['article']
-                
-                if result['from_cache']:
-                    stats['from_cache'] += 1
-                
-                if result['found_name']:
-                    stats['found'] += 1
-                else:
-                    stats['not_found'] += 1
+            found_name = result.get('found_name') or MISSING_POSITION_TEXT
+            df.at[idx, 'Цена'] = result.get('price')
+            df.at[idx, 'Найденная номенклатура'] = found_name
+            df.at[idx, 'Артикул'] = result.get('article')
+
+            if result.get('from_cache'):
+                stats['from_cache'] += 1
+
+            if found_name == MISSING_POSITION_TEXT:
+                stats['not_found'] += 1
             else:
+                stats['found'] += 1
+
+            if not result.get('success', True):
                 stats['errors'] += 1
-                logger.warning(f"⚠️ [{idx+1}] Ошибка: {result['error']}")
+                logger.warning(f"⚠️ [{idx+1}] Ошибка: {result.get('error')}")
             
             # Логирование прогресса
             if (idx + 1) % 10 == 0:
