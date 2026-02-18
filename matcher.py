@@ -11,6 +11,7 @@ from typing import List, Dict, Optional, Tuple
 import logging
 import hashlib
 import os
+from pathlib import Path
 from config import get_catalog_csv_path
 
 logging.basicConfig(
@@ -533,7 +534,8 @@ class ReMoMatcher:
         
         # Сохранить результат
         if output_path is None:
-            output_path = excel_path.replace('.xlsx', '_matched.xlsx').replace('.xls', '_matched.xls')
+            src = Path(excel_path)
+            output_path = str(src.with_name(f"{src.stem}_matched{src.suffix}"))
         
         try:
             df.to_excel(output_path, index=False)
