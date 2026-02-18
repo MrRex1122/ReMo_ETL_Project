@@ -93,6 +93,8 @@ def main() -> None:
 
     if not input_dir.exists():
         raise SystemExit(f"Input dir not found: {input_dir}")
+    if not input_dir.is_dir():
+        raise SystemExit(f"Input path is not a directory: {input_dir}")
 
     files = iter_excel_files(input_dir)
     if not files:

@@ -45,6 +45,28 @@ class MainConvertTests(unittest.TestCase):
             self.assertEqual(out_df.loc[0, "name"], "позиция")
             self.assertEqual(float(out_df.loc[0, "price"]), 99.9)
 
+    def test_convert_csv_removes_any_unnamed_and_blank_columns(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            source = tmp / "input_noise_cols.csv"
+            target = tmp / "converted.csv"
+
+            df = pd.DataFrame(
+                {
+                    "name": ["товар"],
+                    "Unnamed: 1": [""],
+                    " ": [""],
+                    "price": [15.0],
+                }
+            )
+            df.to_csv(source, sep=";", encoding="utf-8", index=False)
+
+            convert_csv(source, target)
+
+            out_df = pd.read_csv(target, sep=";", encoding="utf-8")
+            self.assertEqual(list(out_df.columns), ["name", "price"])
+            self.assertEqual(float(out_df.loc[0, "price"]), 15.0)
+
 
 if __name__ == "__main__":
     unittest.main()

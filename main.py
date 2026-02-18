@@ -44,9 +44,10 @@ def convert_csv(input_path: str | Path, output_path: str | Path) -> Path:
             f"Last error: {last_error}"
         )
 
-    # Если есть пустой технический последний столбец — удаляем.
-    if len(df.columns) > 0 and (str(df.columns[-1]).startswith("Unnamed") or str(df.columns[-1]) == ""):
-        df = df.iloc[:, :-1]
+    # Нормализуем заголовки и удаляем технические/пустые колонки (часто появляются из Excel-экспорта).
+    normalized_columns = [str(col).replace("\ufeff", "").strip() for col in df.columns]
+    df.columns = normalized_columns
+    df = df.loc[:, [c for c in df.columns if c and not c.startswith("Unnamed")]]
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(output_path, sep=";", encoding="utf-8", index=False)
