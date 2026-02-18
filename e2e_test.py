@@ -17,11 +17,15 @@ def load_api_key():
     key = os.getenv('GEMINI_API_KEY')
     if key:
         return key
+
     secrets_path = os.path.join(os.path.dirname(__file__), '.streamlit', 'secrets.toml')
     if os.path.exists(secrets_path):
-        with open(secrets_path, 'rb') as f:
-            data = tomllib.load(f)
-            return data.get('GEMINI_API_KEY')
+        try:
+            with open(secrets_path, 'rb') as f:
+                data = tomllib.load(f)
+                return data.get('GEMINI_API_KEY')
+        except Exception:
+            return None
     return None
 
 
@@ -45,9 +49,15 @@ def main():
         folder = get_upload_dir()
         if not folder.exists():
             raise SystemExit(f'Upload folder not found: {folder}')
-        files = [f for f in os.listdir(folder) if f.lower().endswith('.xlsx')]
+        files = sorted(
+            [
+                f
+                for f in os.listdir(folder)
+                if f.lower().endswith('.xlsx') and not f.startswith('~$')
+            ]
+        )
         if not files:
-            raise SystemExit('No xlsx file found in upload folder to run E2E')
+            raise SystemExit('No valid xlsx file found in upload folder to run E2E')
         sample_xlsx = folder / files[0]
 
     print('Using sample file:', str(sample_xlsx))
