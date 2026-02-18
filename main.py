@@ -24,24 +24,36 @@ def convert_csv(input_path: str | Path, output_path: str | Path) -> Path:
         raise FileNotFoundError(f"Input CSV not found: {input_path}")
 
     supported_encodings = ("utf-8-sig", "utf-8", "cp1251")
+    supported_separators = (";", ",")
     last_error: Exception | None = None
-    for enc in supported_encodings:
-        try:
-            df = pd.read_csv(
-                input_path,
-                sep=";",
-                encoding=enc,
-                decimal=".",
-                low_memory=False,
-            )
+    df = None
+
+    for sep in supported_separators:
+        for enc in supported_encodings:
+            try:
+                candidate = pd.read_csv(
+                    input_path,
+                    sep=sep,
+                    encoding=enc,
+                    decimal=".",
+                    low_memory=False,
+                )
+                # Guard against wrong delimiter producing a single wide column.
+                if candidate.shape[1] <= 1:
+                    continue
+                df = candidate
+                break
+            except (UnicodeDecodeError, pd.errors.ParserError) as e:
+                last_error = e
+        if df is not None:
             break
-        except UnicodeDecodeError as e:
-            last_error = e
-    else:
+
+    if df is None:
         encodings_text = ", ".join(supported_encodings)
+        separators_text = ", ".join(repr(s) for s in supported_separators)
         raise ValueError(
-            f"Failed to read CSV with supported encodings: {encodings_text}. "
-            f"Last error: {last_error}"
+            f"Failed to read CSV with supported encodings ({encodings_text}) "
+            f"and separators ({separators_text}). Last error: {last_error}"
         )
 
     # Нормализуем заголовки и удаляем технические/пустые колонки (часто появляются из Excel-экспорта).

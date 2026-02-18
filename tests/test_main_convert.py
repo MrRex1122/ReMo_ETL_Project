@@ -67,6 +67,22 @@ class MainConvertTests(unittest.TestCase):
             self.assertEqual(list(out_df.columns), ["name", "price"])
             self.assertEqual(float(out_df.loc[0, "price"]), 15.0)
 
+    def test_convert_csv_reads_comma_delimited_input(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            source = tmp / "input_comma.csv"
+            target = tmp / "converted.csv"
+
+            df = pd.DataFrame({"name": ["позиция"], "price": [42.0]})
+            df.to_csv(source, sep=",", encoding="utf-8", index=False)
+
+            convert_csv(source, target)
+
+            out_df = pd.read_csv(target, sep=";", encoding="utf-8")
+            self.assertEqual(list(out_df.columns), ["name", "price"])
+            self.assertEqual(out_df.loc[0, "name"], "позиция")
+            self.assertEqual(float(out_df.loc[0, "price"]), 42.0)
+
 
 if __name__ == "__main__":
     unittest.main()
