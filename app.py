@@ -354,10 +354,17 @@ def main():
                 | (df['Найденная номенклатура'].astype(str).str.strip() == '')
                 | (df['Найденная номенклатура'].astype(str).str.strip() == MISSING_POSITION_TEXT)
             )
+            error_mask = (
+                df['Ошибка сопоставления'].notna()
+                & (df['Ошибка сопоставления'].astype(str).str.strip() != '')
+            ) if 'Ошибка сопоставления' in df.columns else pd.Series(False, index=df.index)
+
             if show_filter == "Найдены":
                 df_view = df[~missing_mask]
             elif show_filter == "Не найдены":
                 df_view = df[missing_mask]
+            elif show_filter == "С ошибками":
+                df_view = df[error_mask]
             else:
                 df_view = df
             

@@ -477,7 +477,7 @@ class ReMoMatcher:
         else:
             df['Цена'] = pd.to_numeric(df['Цена'], errors='coerce').astype('float64')
 
-        for text_col in ('Найденная номенклатура', 'Артикул'):
+        for text_col in ('Найденная номенклатура', 'Артикул', 'Ошибка сопоставления'):
             if text_col not in df.columns:
                 df[text_col] = None
             else:
@@ -515,6 +515,7 @@ class ReMoMatcher:
             df.at[idx, 'Цена'] = result.get('price')
             df.at[idx, 'Найденная номенклатура'] = found_name
             df.at[idx, 'Артикул'] = result.get('article')
+            df.at[idx, 'Ошибка сопоставления'] = result.get('error')
 
             if result.get('from_cache'):
                 stats['from_cache'] += 1
