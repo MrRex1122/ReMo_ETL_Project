@@ -136,8 +136,10 @@ def main() -> None:
     total_files = len(report)
     total_rows = sum(r.get("total", 0) for r in report)
     total_missing = sum(r.get("missing_position_rows", 0) for r in report)
+    failed_files = sum(1 for r in report if r.get("errors", 0) > 0)
 
     print(f"Processed files: {total_files}")
+    print(f"Failed files: {failed_files}")
     print(f"Rows processed: {total_rows}")
     print(f"Rows with '{MISSING_POSITION_TEXT}': {total_missing}")
     print(f"Report JSON: {json_path}")

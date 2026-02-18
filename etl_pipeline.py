@@ -3,6 +3,7 @@ import numpy as np
 from datetime import datetime
 import logging
 import argparse
+from pathlib import Path
 from config import get_price_converted_csv_path, get_catalog_csv_path
 
 # Настройка логирования
@@ -60,7 +61,7 @@ class PriceETL:
         # 4. Нормализация текстовых полей (удалить лишние пробелы)
         string_cols = self.df.select_dtypes(include=['object']).columns
         for col in string_cols:
-            self.df[col] = self.df[col].str.strip()
+            self.df[col] = self.df[col].map(lambda value: value.strip() if isinstance(value, str) else value)
         logger.info(f"  ✓ Нормализованы текстовые поля ({len(string_cols)} колонок)")
         
         # 5. Приведение регистра для категорий
@@ -107,8 +108,10 @@ class PriceETL:
     def load(self):
         """Этап Load: сохранение очищенных данных"""
         logger.info(f"💾 Сохранение данных в {self.output_path}")
+        output_path = Path(self.output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         self.df.to_csv(
-            self.output_path,
+            output_path,
             sep=';',
             encoding='utf-8',
             index=False
