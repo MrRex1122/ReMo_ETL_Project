@@ -471,9 +471,16 @@ class ReMoMatcher:
         
         # Подготовить столбцы для результатов без дублирования имен.
         # Это убирает ошибку вида: "cannot insert Артикул, already exists".
-        for column in ('Цена', 'Найденная номенклатура', 'Артикул'):
-            if column not in df.columns:
-                df[column] = None
+        if 'Цена' not in df.columns:
+            df['Цена'] = pd.Series([None] * len(df), dtype='float64')
+        else:
+            df['Цена'] = pd.to_numeric(df['Цена'], errors='coerce').astype('float64')
+
+        for text_col in ('Найденная номенклатура', 'Артикул'):
+            if text_col not in df.columns:
+                df[text_col] = None
+            else:
+                df[text_col] = df[text_col].astype(object)
         
         # Обработать каждую строку
         stats = {

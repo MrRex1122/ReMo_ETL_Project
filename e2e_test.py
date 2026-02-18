@@ -4,8 +4,13 @@ import json
 import time
 import argparse
 from pathlib import Path
+import sys
 from matcher import ReMoMatcher
 from config import get_catalog_csv_path, get_sample_excel_path, get_upload_dir
+
+# Корректный вывод кириллицы в Windows-консоли.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 # Найти GEMINI_API_KEY: сначала переменные окружения, иначе .streamlit/secrets.toml
 def load_api_key():
