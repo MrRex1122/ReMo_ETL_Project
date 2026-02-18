@@ -46,7 +46,7 @@ pip install -r requirements.txt
 Процесс займет 1-2 минуты. Проверить установку:
 
 ```bash
-python -c "import pandas, streamlit, google.generativeai; print('✓ All packages installed')"
+python -c "import pandas, streamlit; from google import genai; print('✓ All packages installed')"
 ```
 
 Вывод должен быть:
@@ -213,7 +213,7 @@ maxUploadSize = 200
 
 **Решение:**
 ```bash
-pip install google-generativeai --upgrade
+pip install google-genai --upgrade
 ```
 
 ### 3. Файл price_clean.csv не найден

@@ -22,11 +22,11 @@ logger = logging.getLogger(__name__)
 MISSING_POSITION_TEXT = "Позиция отсутствует"
 
 try:
-    import google.generativeai as genai
-    GEMINI_AVAILABLE = True
+    from google import genai as genai_sdk
+    GENAI_SDK_AVAILABLE = True
 except ImportError:
-    logger.warning("google-generativeai не установлен. Установите: pip install google-generativeai")
-    GEMINI_AVAILABLE = False
+    genai_sdk = None
+    GENAI_SDK_AVAILABLE = False
 
 
 class ReMoMatcher:
@@ -52,20 +52,34 @@ class ReMoMatcher:
         self.catalog = None
         self.catalog_dict = None
         self.catalog_text = None
+        self.backend = None
+        self.client = None
+        self.legacy_genai = None
+        self.model = None
+        self.model_name = None
         
         # Инициализация Gemini
-        if GEMINI_AVAILABLE:
-            genai.configure(api_key=self.api_key)
-            # Попробуем использовать предпочтительную модель, но оставим возможность
-            # падбека на альтернативы, если модель недоступна в текущем API.
-            preferred = 'gemini-1.5-flash'
+        if GENAI_SDK_AVAILABLE:
             try:
-                self.model = genai.GenerativeModel(preferred)
-            except Exception:
-                # отложенная инициализация — модель может быть недоступна, создадим None
-                self.model = None
-        else:
-            raise ImportError("Установите google-generativeai")
+                self.client = genai_sdk.Client(api_key=self.api_key)
+                self.backend = "google-genai"
+                logger.info("✓ Gemini backend: google-genai")
+            except Exception as e:
+                logger.warning(f"Не удалось инициализировать google-genai: {e}")
+
+        if self.backend is None:
+            try:
+                import google.generativeai as legacy_genai
+            except ImportError as e:
+                raise ImportError(
+                    "Установите Gemini SDK: pip install google-genai "
+                    "(fallback: google-generativeai)"
+                ) from e
+
+            legacy_genai.configure(api_key=self.api_key)
+            self.legacy_genai = legacy_genai
+            self.backend = "google-generativeai"
+            logger.info("✓ Gemini backend: google-generativeai (fallback)")
         
         # Инициализация кэша
         self._init_cache_db()
@@ -261,6 +275,44 @@ class ReMoMatcher:
                 'success': False,
                 'error': str(e)
             }
+
+    def _candidate_models(self) -> List[str]:
+        preferred = [
+            self.model_name,
+            'gemini-2.5-flash',
+            'gemini-2.5-flash-lite',
+            'gemini-2.0-flash',
+            'gemini-2.0-flash-lite',
+            'gemini-1.5-flash',
+            'gemini-1.5-flash-8b',
+            'gemini-1.5-pro',
+            'gemini-pro',
+        ]
+        result = []
+        seen = set()
+        for name in preferred:
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            result.append(name)
+        return result
+
+    def _generate_gemini_text(self, prompt: str, model_name: str) -> str:
+        if self.backend == "google-genai":
+            response = self.client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+            )
+            return (getattr(response, 'text', None) or '').strip()
+
+        if self.backend == "google-generativeai":
+            if self.model is None or self.model_name != model_name:
+                self.model = self.legacy_genai.GenerativeModel(model_name)
+                self.model_name = model_name
+            response = self.model.generate_content(prompt, stream=False)
+            return (response.text or '').strip()
+
+        raise RuntimeError("Gemini backend не инициализирован")
     
     def _match_with_gemini(self, query: str) -> Dict:
         """Использовать Gemini для сопоставления"""
@@ -334,35 +386,13 @@ class ReMoMatcher:
             return result
 
         try:
-            models_to_try = []
-            if self.model is not None:
-                models_to_try.append(self.model)
-
-            candidate_names = [
-                'gemini-2.0-flash',
-                'gemini-2.0-flash-lite',
-                'gemini-1.5-flash',
-                'gemini-1.5-flash-8b',
-                'gemini-1.5-pro',
-                'gemini-pro',
-            ]
-            seen = set()
-            for name in candidate_names:
-                if name in seen:
-                    continue
-                seen.add(name)
-                try:
-                    models_to_try.append(genai.GenerativeModel(name))
-                except Exception as init_err:
-                    logger.warning(f"Не удалось инициализировать модель {name}: {init_err}")
-
+            candidate_names = self._candidate_models()
             last_error = None
-            for model in models_to_try:
+            for model_name in candidate_names:
                 try:
-                    response = model.generate_content(prompt, stream=False)
-                    raw_text = (response.text or '').strip()
+                    raw_text = self._generate_gemini_text(prompt, model_name)
                     parsed = parse_result(raw_text)
-                    self.model = model  # закрепить рабочую модель
+                    self.model_name = model_name
                     if parsed['found_name'] == MISSING_POSITION_TEXT:
                         logger.warning(f"⚠️ Товар не найден для: {query}")
                     else:
@@ -370,7 +400,7 @@ class ReMoMatcher:
                     return parsed
                 except Exception as model_error:
                     last_error = model_error
-                    logger.warning(f"Модель не сработала: {model_error}")
+                    logger.warning(f"Модель {model_name} не сработала: {model_error}")
 
             raise RuntimeError(f"Gemini fallback exhausted: {last_error}")
 
