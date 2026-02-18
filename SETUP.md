@@ -102,6 +102,12 @@ Test-Path "D:\Data\Downloads\upload\price_clean.csv"
 
 Вывод должен быть `True`.
 
+Если БД находится в другом месте, задайте путь через переменную:
+
+```powershell
+$env:REMO_DB_CSV = "D:\MyData\price_clean.csv"
+```
+
 Если файл не найден - запустить ETL:
 
 ```bash
@@ -120,13 +126,13 @@ streamlit run app.py
 ```
   You can now view your Streamlit app in your browser.
 
-  Local URL: http://localhost:8501
-  Network URL: http://192.168.1.100:8501
+  Local URL: http://localhost:8502
+  Network URL: http://192.168.1.100:8502
 
   For better performance, install Watchdog.
 ```
 
-**Окно браузера должно открыться автоматически на http://localhost:8501**
+**Окно браузера должно открыться автоматически на http://localhost:8502**
 
 Если браузер не открылся - скопировать URL в адресную строку вручную.
 
@@ -176,9 +182,9 @@ streamlit run app.py
 [theme]
 primaryColor = "#2E86AB"
 
-# Порт сервера (можно изменить если 8501 занят)
+# Порт сервера (можно изменить если 8502 занят)
 [server]
-port = 8501
+port = 8502
 
 # Максимальный размер загружаемого файла (МБ)
 maxUploadSize = 200
@@ -213,13 +219,19 @@ pip install google-generativeai --upgrade
 ### 3. Файл price_clean.csv не найден
 
 ```
-❌ FileNotFoundError: D:\Data\Downloads\upload\price_clean.csv
+❌ FileNotFoundError: ...\price_clean.csv
 ```
 
 **Решение:**
 ```bash
 # Запустить ETL для создания файла
 python etl_pipeline.py
+```
+
+Или указать явный путь:
+
+```powershell
+$env:REMO_DB_CSV = "D:\MyData\price_clean.csv"
 ```
 
 ### 4. Ошибка подключения к Gemini
@@ -240,7 +252,7 @@ python etl_pipeline.py
 - [ ] Python 3.8+ установлен (`python --version`)
 - [ ] Создан файл `.streamlit/secrets.toml` с API ключом
 - [ ] Зависимости установлены (`pip list | grep streamlit`)
-- [ ] Файл `price_clean.csv` находится в `D:\Data\Downloads\upload\`
+- [ ] Файл `price_clean.csv` доступен по пути `REMO_DB_CSV` или по умолчанию в `D:\Data\Downloads\upload\`
 - [ ] Приложение запускается без ошибок (`streamlit run app.py`)
 - [ ] Можно загрузить и обработать тестовый файл
 

@@ -66,7 +66,7 @@ $env:GEMINI_API_KEY = "ваш_ключ"
 streamlit run app.py
 ```
 
-Приложение откроется на `http://localhost:8501`
+Приложение откроется на `http://localhost:8502` (порт задан в `.streamlit/config.toml`)
 
 ### 5. Batch-режим (обработка набора файлов)
 
@@ -77,6 +77,16 @@ python batch_process.py --input-dir "D:\\Data\\Downloads\\upload" --output-dir "
 Скрипт обработает все `.xlsx/.xls` в папке, создаст выходные файлы и два отчёта:
 - `batch_report_*.json`
 - `batch_report_*.csv`
+
+### 6. Настройка путей к данным (без хардкода)
+
+По умолчанию проект использует каталог `D:\Data\Downloads\upload`, но путь можно переопределить:
+- UI: поле "Путь к price_clean.csv" в боковой панели
+- CLI: флаг `--db-csv` (batch/e2e), `--input`/`--output` (etl/main)
+- ENV:
+  - `REMO_DB_CSV` — путь к `price_clean.csv`
+  - `REMO_UPLOAD_DIR` — базовая папка данных
+  - `REMO_PRICE_RAW_CSV`, `REMO_PRICE_CONVERTED_CSV`, `REMO_SAMPLE_XLSX` — точечные override
 
 ---
 
@@ -156,6 +166,7 @@ python batch_process.py --input-dir "D:\\Data\\Downloads\\upload" --output-dir "
 |------|-----------|
 | `matcher.py` | Основной класс ReMoMatcher, работа с Gemini |
 | `app.py` | Streamlit UI приложение |
+| `config.py` | Единая конфигурация путей и env-переопределений |
 | `price_clean.csv` | Товарная база (17259 товаров) |
 | `matcher_cache.db` | SQLite база кэша и истории |
 | `requirements.txt` | Python зависимости |
@@ -324,7 +335,7 @@ RUN pip install -r requirements.txt
 
 COPY . .
 
-CMD ["streamlit", "run", "app.py", "--server.port=8501"]
+CMD ["streamlit", "run", "app.py", "--server.port=8502"]
 ```
 
 ---

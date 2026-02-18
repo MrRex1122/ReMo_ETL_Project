@@ -11,6 +11,7 @@ from typing import List, Dict, Optional, Tuple
 import logging
 import hashlib
 import os
+from config import get_catalog_csv_path
 
 logging.basicConfig(
     level=logging.INFO,
@@ -336,11 +337,24 @@ class ReMoMatcher:
             models_to_try = []
             if self.model is not None:
                 models_to_try.append(self.model)
-            models_to_try.extend([
-                genai.GenerativeModel('gemini-1.5-flash'),
-                genai.GenerativeModel('gemini-1.5-pro'),
-                genai.GenerativeModel('gemini-1.0-pro'),
-            ])
+
+            candidate_names = [
+                'gemini-2.0-flash',
+                'gemini-2.0-flash-lite',
+                'gemini-1.5-flash',
+                'gemini-1.5-flash-8b',
+                'gemini-1.5-pro',
+                'gemini-pro',
+            ]
+            seen = set()
+            for name in candidate_names:
+                if name in seen:
+                    continue
+                seen.add(name)
+                try:
+                    models_to_try.append(genai.GenerativeModel(name))
+                except Exception as init_err:
+                    logger.warning(f"Не удалось инициализировать модель {name}: {init_err}")
 
             last_error = None
             for model in models_to_try:
@@ -425,15 +439,11 @@ class ReMoMatcher:
         
         logger.info(f"✓ Найден столбец: {col_b}")
         
-        # Подготовить столбцы для результатов
-        if 'G' not in df.columns or 'Цена' not in str(df.columns[6] if len(df.columns) > 6 else ""):
-            df.insert(len(df.columns), 'Цена', None)
-        
-        if 'H' not in df.columns or 'Найденная номенклатура' not in str(df.columns[7] if len(df.columns) > 7 else ""):
-            df.insert(len(df.columns), 'Найденная номенклатура', None)
-        
-        if 'I' not in df.columns or 'Артикул' not in str(df.columns[8] if len(df.columns) > 8 else ""):
-            df.insert(len(df.columns), 'Артикул', None)
+        # Подготовить столбцы для результатов без дублирования имен.
+        # Это убирает ошибку вида: "cannot insert Артикул, already exists".
+        for column in ('Цена', 'Найденная номенклатура', 'Артикул'):
+            if column not in df.columns:
+                df[column] = None
         
         # Обработать каждую строку
         stats = {
@@ -448,6 +458,13 @@ class ReMoMatcher:
             query = str(row[col_b]).strip()
             
             if not query or query.lower() == 'nan':
+                continue
+
+            if query.strip().lower() in {
+                'наименование',
+                'наименование оборудования, материалов и кабелей',
+                'nomenclature',
+            }:
                 continue
             
             stats['total'] += 1
@@ -514,7 +531,7 @@ if __name__ == "__main__":
     
     matcher = ReMoMatcher(
         gemini_api_key=API_KEY,
-        db_csv_path=r"D:\Data\Downloads\upload\price_clean.csv"
+        db_csv_path=str(get_catalog_csv_path())
     )
     
     # Тестовое сопоставление

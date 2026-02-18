@@ -6,13 +6,14 @@ Streamlit интерфейс для семантического сопоста�
 import streamlit as st
 import pandas as pd
 import os
-from matcher import ReMoMatcher
+from matcher import ReMoMatcher, MISSING_POSITION_TEXT
 from pathlib import Path
 import tempfile
 from datetime import datetime
 import sqlite3
 import logging
 import io
+from config import get_catalog_csv_path
 
 # ============ ЛОГИРОВАНИЕ ============
 logging.basicConfig(
@@ -70,11 +71,21 @@ if 'stats' not in st.session_state:
     st.session_state.stats = None
 if 'corrections' not in st.session_state:
     st.session_state.corrections = {}
+if 'db_csv_path' not in st.session_state:
+    st.session_state.db_csv_path = str(get_catalog_csv_path())
+if 'matcher_db_csv' not in st.session_state:
+    st.session_state.matcher_db_csv = None
 
 
 def get_matcher() -> ReMoMatcher:
     """Получить или инициализировать экземпляр matcher"""
-    if st.session_state.matcher is None:
+    db_csv = str(get_catalog_csv_path(st.session_state.get('db_csv_path')))
+    needs_reinit = (
+        st.session_state.matcher is None
+        or st.session_state.matcher_db_csv != db_csv
+    )
+
+    if needs_reinit:
         logger.info("🔄 Инициализация ReMoMatcher...")
         api_key = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
         
@@ -94,8 +105,6 @@ def get_matcher() -> ReMoMatcher:
             """)
             st.stop()
         
-        db_csv = r"D:\Data\Downloads\upload\price_clean.csv"
-        
         if not Path(db_csv).exists():
             logger.error(f"❌ Файл не найден: {db_csv}")
             st.error(f"❌ Файл не найден: {db_csv}")
@@ -104,6 +113,7 @@ def get_matcher() -> ReMoMatcher:
         with st.spinner("⏳ Инициализация ReMo Matcher..."):
             try:
                 st.session_state.matcher = ReMoMatcher(api_key, db_csv)
+                st.session_state.matcher_db_csv = db_csv
                 logger.info("✓ ReMoMatcher успешно инициализирован")
             except Exception as e:
                 logger.error(f"❌ Ошибка инициализации: {e}", exc_info=True)
@@ -172,7 +182,12 @@ def show_corrections_table(df):
     show_only_missing = st.checkbox("Показать только не найденные позиции", value=False)
     
     if show_only_missing:
-        df_view = df[df['Найденная номенклатура'].isna() | (df['Найденная номенклатура'] == '')].copy()
+        missing_mask = (
+            df['Найденная номенклатура'].isna()
+            | (df['Найденная номенклатура'].astype(str).str.strip() == '')
+            | (df['Найденная номенклатура'].astype(str).str.strip() == MISSING_POSITION_TEXT)
+        )
+        df_view = df[missing_mask].copy()
         st.info(f"📌 Найдено {len(df_view)} позиций без сопоставления")
     else:
         df_view = df.copy()
@@ -201,13 +216,14 @@ def main():
         st.header("⚙️ Настройки")
         
         st.subheader("1️⃣ Товарная база данных")
-        db_path = st.text_input(
+        st.text_input(
             "Путь к price_clean.csv",
-            value=r"D:\Data\Downloads\upload\price_clean.csv"
+            key="db_csv_path"
         )
         
         if st.button("🔄 Перезагрузить БД"):
             st.session_state.matcher = None
+            st.session_state.matcher_db_csv = None
             st.success("✓ БД перезагружена")
         
         st.divider()
@@ -333,10 +349,15 @@ def main():
                 page_size = st.slider("Строк на странице", 5, 50, 20)
             
             # Применить фильтр
+            missing_mask = (
+                df['Найденная номенклатура'].isna()
+                | (df['Найденная номенклатура'].astype(str).str.strip() == '')
+                | (df['Найденная номенклатура'].astype(str).str.strip() == MISSING_POSITION_TEXT)
+            )
             if show_filter == "Найдены":
-                df_view = df[df['Найденная номенклатура'].notna() & (df['Найденная номенклатура'] != '')]
+                df_view = df[~missing_mask]
             elif show_filter == "Не найдены":
-                df_view = df[df['Найденная номенклатура'].isna() | (df['Найденная номенклатура'] == '')]
+                df_view = df[missing_mask]
             else:
                 df_view = df
             

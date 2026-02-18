@@ -15,6 +15,7 @@ from typing import List, Dict
 import pandas as pd
 
 from matcher import ReMoMatcher, MISSING_POSITION_TEXT
+from config import get_catalog_csv_path
 
 import sys
 if hasattr(sys.stdout, "reconfigure"):
@@ -74,7 +75,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="ReMo batch processor")
     parser.add_argument("--input-dir", required=True, help="Folder with input Excel files")
     parser.add_argument("--output-dir", default="batch_output", help="Folder for processed files")
-    parser.add_argument("--db-csv", default=r"D:\Data\Downloads\upload\price_clean.csv", help="Path to catalog csv")
+    parser.add_argument(
+        "--db-csv",
+        default=str(get_catalog_csv_path()),
+        help="Path to catalog csv (or set REMO_DB_CSV)",
+    )
     parser.add_argument("--api-key", default=None, help="Gemini API key (optional)")
     args = parser.parse_args()
 
@@ -90,7 +95,8 @@ def main() -> None:
         raise SystemExit(f"No Excel files found in {input_dir}")
 
     api_key = load_api_key(args.api_key)
-    matcher = ReMoMatcher(api_key, args.db_csv)
+    catalog_csv = str(get_catalog_csv_path(args.db_csv))
+    matcher = ReMoMatcher(api_key, catalog_csv)
 
     report: List[Dict] = []
     for file_path in files:

@@ -2,6 +2,8 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 import logging
+import argparse
+from config import get_price_converted_csv_path, get_catalog_csv_path
 
 # Настройка логирования
 logging.basicConfig(
@@ -138,10 +140,12 @@ class PriceETL:
 
 # ============ ЗАПУСК ETL ============
 if __name__ == "__main__":
-    INPUT = r"D:\Data\Downloads\upload\price_converted.csv"
-    OUTPUT = r"D:\Data\Downloads\upload\price_clean.csv"
-    
-    etl = PriceETL(INPUT, OUTPUT)
+    parser = argparse.ArgumentParser(description="ETL for price list normalization")
+    parser.add_argument("--input", default=str(get_price_converted_csv_path()), help="Path to source CSV")
+    parser.add_argument("--output", default=str(get_catalog_csv_path()), help="Path to output clean CSV")
+    args = parser.parse_args()
+
+    etl = PriceETL(args.input, args.output)
     clean_df = etl.run()
     
     # Вывести статистику финального датасета

@@ -2,7 +2,10 @@ import os
 import tomllib
 import json
 import time
+import argparse
+from pathlib import Path
 from matcher import ReMoMatcher
+from config import get_catalog_csv_path, get_sample_excel_path, get_upload_dir
 
 # Найти GEMINI_API_KEY: сначала переменные окружения, иначе .streamlit/secrets.toml
 def load_api_key():
@@ -18,34 +21,40 @@ def load_api_key():
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Run end-to-end matcher test")
+    parser.add_argument("--db-csv", default=None, help="Path to price_clean.csv")
+    parser.add_argument("--sample-xlsx", default=None, help="Path to input Excel file")
+    args = parser.parse_args()
+
     api_key = load_api_key()
     if not api_key:
         raise SystemExit('GEMINI_API_KEY not found in environment or .streamlit/secrets.toml')
 
-    db_csv = r"D:\Data\Downloads\upload\price_clean.csv"
-    if not os.path.exists(db_csv):
+    db_csv = str(get_catalog_csv_path(args.db_csv))
+    if not Path(db_csv).exists():
         raise SystemExit(f'price_clean.csv not found at {db_csv}. Run ETL first.')
 
-    # Пример входного файла (в папке upload)
-    sample_xlsx = r"D:\Data\Downloads\upload\РеМо_Шаблон_коммерческого_предложения_020625.xlsx"
-    if not os.path.exists(sample_xlsx):
-        # pick any .xlsx in folder
-        folder = os.path.dirname(sample_xlsx)
+    sample_xlsx = get_sample_excel_path(args.sample_xlsx)
+    if not sample_xlsx.exists():
+        # pick any .xlsx in upload folder
+        folder = get_upload_dir()
+        if not folder.exists():
+            raise SystemExit(f'Upload folder not found: {folder}')
         files = [f for f in os.listdir(folder) if f.lower().endswith('.xlsx')]
         if not files:
             raise SystemExit('No xlsx file found in upload folder to run E2E')
-        sample_xlsx = os.path.join(folder, files[0])
+        sample_xlsx = folder / files[0]
 
-    print('Using sample file:', sample_xlsx)
+    print('Using sample file:', str(sample_xlsx))
 
     matcher = ReMoMatcher(api_key, db_csv)
 
     start = time.time()
-    df_out, stats = matcher.process_excel(sample_xlsx)
+    df_out, stats = matcher.process_excel(str(sample_xlsx))
     duration = time.time() - start
 
     report = {
-        'sample_file': sample_xlsx,
+        'sample_file': str(sample_xlsx),
         'rows_processed': stats.get('total', 0),
         'found': stats.get('found', 0),
         'not_found': stats.get('not_found', 0),
@@ -55,11 +64,11 @@ def main():
         'duration_seconds': duration
     }
 
-    out_path = os.path.join(os.path.dirname(sample_xlsx), 'e2e_report.json')
+    out_path = sample_xlsx.parent / 'e2e_report.json'
     with open(out_path, 'w', encoding='utf-8') as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
 
-    print('\nE2E report saved to:', out_path)
+    print('\nE2E report saved to:', str(out_path))
     print(json.dumps(report, indent=2, ensure_ascii=False))
 
 if __name__ == '__main__':

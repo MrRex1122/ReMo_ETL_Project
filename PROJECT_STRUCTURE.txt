@@ -6,6 +6,11 @@ ReMo Matcher v1.0 - Project Structure
 ├── 📄 app.py                      [Streamlit UI - основное приложение]
 │   └── Запуск: streamlit run app.py
 │
+├── 📄 config.py                   [Единая конфигурация путей и env]
+│   ├── REMO_DB_CSV
+│   ├── REMO_UPLOAD_DIR
+│   └── пути для ETL/E2E/Batch
+│
 ├── 📄 matcher.py                  [Основной класс ReMoMatcher]
 │   ├── load_catalog()             - Загрузка товарной БД
 │   ├── match()                    - Сопоставление одной позиции
@@ -47,7 +52,7 @@ ReMo Matcher v1.0 - Project Structure
 
 2️⃣  ЗАПУСК ПРИЛОЖЕНИЯ
    └── streamlit run app.py
-       └── Откроется браузер на http://localhost:8501
+       └── Откроется браузер на http://localhost:8502
 
 3️⃣  ОБРАБОТКА КОММЕРЧЕСКОГО ПРЕДЛОЖЕНИЯ
    ├── 🔼 Загрузить Excel файл (вкладка "📤 Загрузка")
