@@ -23,8 +23,9 @@ def convert_csv(input_path: str | Path, output_path: str | Path) -> Path:
     if not input_path.exists():
         raise FileNotFoundError(f"Input CSV not found: {input_path}")
 
+    supported_encodings = ("utf-8-sig", "utf-8", "cp1251")
     last_error: Exception | None = None
-    for enc in ("utf-8-sig", "utf-8", "cp1251"):
+    for enc in supported_encodings:
         try:
             df = pd.read_csv(
                 input_path,
@@ -37,8 +38,9 @@ def convert_csv(input_path: str | Path, output_path: str | Path) -> Path:
         except UnicodeDecodeError as e:
             last_error = e
     else:
+        encodings_text = ", ".join(supported_encodings)
         raise ValueError(
-            "Failed to read CSV with supported encodings: cp1251, utf-8-sig, utf-8. "
+            f"Failed to read CSV with supported encodings: {encodings_text}. "
             f"Last error: {last_error}"
         )
 

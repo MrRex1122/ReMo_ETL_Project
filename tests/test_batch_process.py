@@ -1,8 +1,9 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
 
-from batch_process import iter_excel_files
+from batch_process import iter_excel_files, load_api_key
 
 
 class BatchProcessTests(unittest.TestCase):
@@ -18,6 +19,18 @@ class BatchProcessTests(unittest.TestCase):
             files = iter_excel_files(tmp)
 
             self.assertEqual([f.name for f in files], ["A.XLSX", "b.xls"])
+
+    def test_load_api_key_strips_whitespace(self):
+        previous = os.environ.get("GEMINI_API_KEY")
+        os.environ["GEMINI_API_KEY"] = "  env-key  "
+        try:
+            self.assertEqual(load_api_key("  cli-key  "), "cli-key")
+            self.assertEqual(load_api_key(None), "env-key")
+        finally:
+            if previous is None:
+                os.environ.pop("GEMINI_API_KEY", None)
+            else:
+                os.environ["GEMINI_API_KEY"] = previous
 
 
 if __name__ == "__main__":

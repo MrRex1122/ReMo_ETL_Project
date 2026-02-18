@@ -23,12 +23,12 @@ if hasattr(sys.stdout, "reconfigure"):
 
 
 def load_api_key(explicit: str | None) -> str:
-    if explicit:
-        return explicit
+    if explicit and explicit.strip():
+        return explicit.strip()
 
     env = os.getenv("GEMINI_API_KEY")
-    if env:
-        return env
+    if env and env.strip():
+        return env.strip()
 
     secrets = Path(__file__).resolve().parent / ".streamlit" / "secrets.toml"
     if secrets.exists():
@@ -37,8 +37,8 @@ def load_api_key(explicit: str | None) -> str:
 
             data = tomllib.loads(secrets.read_text(encoding="utf-8"))
             key = data.get("GEMINI_API_KEY")
-            if key:
-                return key
+            if key and str(key).strip():
+                return str(key).strip()
         except Exception:
             pass
 
