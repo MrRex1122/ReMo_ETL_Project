@@ -84,7 +84,6 @@ python batch_process.py --input-dir "D:\\Data\\Downloads\\upload" --output-dir "
 По умолчанию проект использует каталог проекта (например, `/app` в контейнере), но путь можно переопределить:
 - UI: поле "Путь к price_clean.csv" в боковой панели
 - UI: загрузчик CSV-каталогов поставщиков в боковой панели (поддержка нескольких файлов)
-- UI: опция "Прогнать ETL перед сохранением каталога" для автоматической подготовки сырого прайса
 - CLI: флаг `--db-csv` (batch/e2e), `--input`/`--output` (etl/main)
 - ENV:
   - `REMO_DB_CSV` — путь к `price_clean.csv`
@@ -95,11 +94,6 @@ python batch_process.py --input-dir "D:\\Data\\Downloads\\upload" --output-dir "
 
 В репозитории настроен GitHub Actions pipeline: `pytest` -> deploy (по `push` в `main`).
 Пошаговая инструкция: `DEPLOYMENT.md`.
-
-### 8. Деплой на Railway
-
-Если хотите развернуть без собственного сервера, используйте Railway.
-Пошаговая инструкция: `RAILWAY_DEPLOY.md`.
 
 
 ---
