@@ -94,11 +94,6 @@ python batch_process.py --input-dir "D:\\Data\\Downloads\\upload" --output-dir "
 В репозитории настроен GitHub Actions pipeline: `pytest` -> deploy (по `push` в `main`).
 Пошаговая инструкция: `DEPLOYMENT.md`.
 
-### 8. Деплой на Railway
-
-Если хотите развернуть без собственного сервера, используйте Railway.
-Пошаговая инструкция: `RAILWAY_DEPLOY.md`.
-
 
 ---
 
