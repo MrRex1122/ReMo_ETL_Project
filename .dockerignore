@@ -1,0 +1,14 @@
+.git
+.gitignore
+.pytest_cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.log
+.venv
+venv
+.env
+.streamlit/secrets.toml
+batch_output

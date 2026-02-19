@@ -88,6 +88,12 @@ python batch_process.py --input-dir "D:\\Data\\Downloads\\upload" --output-dir "
   - `REMO_UPLOAD_DIR` — базовая папка данных
   - `REMO_PRICE_RAW_CSV`, `REMO_PRICE_CONVERTED_CSV`, `REMO_SAMPLE_XLSX` — точечные override
 
+### 7. CI/CD и автодеплой после тестов
+
+В репозитории настроен GitHub Actions pipeline: `pytest` -> deploy (по `push` в `main`).
+Пошаговая инструкция: `DEPLOYMENT.md`.
+
+
 ---
 
 ## 📖 Инструкция по использованию
