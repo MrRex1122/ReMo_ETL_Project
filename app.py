@@ -87,7 +87,15 @@ def get_matcher() -> ReMoMatcher:
 
     if needs_reinit:
         logger.info("🔄 Инициализация ReMoMatcher...")
-        api_key = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
+        api_key = None
+        try:
+            api_key = st.secrets.get("GEMINI_API_KEY")
+        except Exception:
+            # Например, в Railway может не быть .streamlit/secrets.toml.
+            # В таком случае используем переменные окружения.
+            api_key = None
+
+        api_key = api_key or os.getenv("GEMINI_API_KEY")
         
         if not api_key:
             logger.error("❌ GEMINI_API_KEY не установлен")
@@ -108,6 +116,11 @@ def get_matcher() -> ReMoMatcher:
         if not Path(db_csv).exists():
             logger.error(f"❌ Файл не найден: {db_csv}")
             st.error(f"❌ Файл не найден: {db_csv}")
+            st.info(
+                "Для Railway задайте путь к каталогу через переменную окружения "
+                "`REMO_DB_CSV` (или `REMO_UPLOAD_DIR`) и убедитесь, что файл "
+                "`price_clean.csv` существует в контейнере."
+            )
             st.stop()
         
         with st.spinner("⏳ Инициализация ReMo Matcher..."):

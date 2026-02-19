@@ -37,6 +37,14 @@ class ConfigPathTests(unittest.TestCase):
         os.environ["REMO_UPLOAD_DIR"] = "   "
         self.assertEqual(config.get_upload_dir(), config.DEFAULT_UPLOAD_DIR)
 
+    def test_windows_style_path_is_not_prefixed_with_project_root(self):
+        os.environ["REMO_DB_CSV"] = r"D:\Data\Downloads\upload\price_clean.csv"
+        actual = config.get_catalog_csv_path()
+        self.assertEqual(str(actual), r"D:\Data\Downloads\upload\price_clean.csv")
+
+    def test_default_upload_dir_is_project_root(self):
+        self.assertEqual(config.DEFAULT_UPLOAD_DIR, config.PROJECT_ROOT)
+
 
 if __name__ == "__main__":
     unittest.main()
