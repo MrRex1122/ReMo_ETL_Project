@@ -79,6 +79,8 @@ if 'db_csv_path' not in st.session_state:
     st.session_state.db_csv_path = str(get_catalog_csv_path())
 if 'matcher_db_csv' not in st.session_state:
     st.session_state.matcher_db_csv = None
+if 'processing' not in st.session_state:
+    st.session_state.processing = False
 
 SUPPLIER_CATALOGS_DIRNAME = "supplier_catalogs"
 MASTER_CATALOG_FILENAME = "price_clean.csv"
@@ -433,13 +435,18 @@ def main():
             
             col1, col2 = st.columns([1, 1])
             with col1:
-                process_button = st.button("🚀 Начать обработку", key="process_btn")
+                process_button = st.button(
+                    "🚀 Начать обработку",
+                    key="process_btn",
+                    disabled=st.session_state.processing,
+                )
             
             with col2:
                 st.markdown("")  # Выравнивание
             
             if process_button:
                 logger.info("🔘 Пользователь нажал кнопку 'Начать обработку'")
+                st.session_state.processing = True
                 try:
                     df_result, stats = process_uploaded_file(uploaded_file)
                     
@@ -480,6 +487,8 @@ def main():
                     st.markdown(f'<div class="error-box">❌ Ошибка: {str(e)}</div>', 
                                unsafe_allow_html=True)
                     st.error(str(e))
+                finally:
+                    st.session_state.processing = False
     
     with tab2:
         st.header("📋 Результаты обработки")
