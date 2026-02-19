@@ -80,7 +80,7 @@ python batch_process.py --input-dir "D:\\Data\\Downloads\\upload" --output-dir "
 
 ### 6. Настройка путей к данным (без хардкода)
 
-По умолчанию проект использует каталог `D:\Data\Downloads\upload`, но путь можно переопределить:
+По умолчанию проект использует каталог проекта (например, `/app` в контейнере), но путь можно переопределить:
 - UI: поле "Путь к price_clean.csv" в боковой панели
 - CLI: флаг `--db-csv` (batch/e2e), `--input`/`--output` (etl/main)
 - ENV:
