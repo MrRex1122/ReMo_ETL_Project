@@ -12,6 +12,7 @@ import logging
 import hashlib
 import os
 from pathlib import Path
+import re
 from config import get_catalog_csv_path
 
 logging.basicConfig(
@@ -52,6 +53,7 @@ class ReMoMatcher:
         self.cache_db = cache_db
         self.catalog = None
         self.catalog_dict = None
+        self.catalog_normalized_dict = None
         self.catalog_text = None
         self.backend = None
         self.client = None
@@ -132,18 +134,23 @@ class ReMoMatcher:
         
         # Подготовить словарь для быстрого поиска
         self.catalog_dict = {}
+        self.catalog_normalized_dict = {}
         for idx, row in self.catalog.iterrows():
             name = str(row.get('Наименование', '')).strip()
             article = str(row.get('Артикул', '')).strip()
             price = float(row.get('Цена розничная', 0)) if 'Цена розничная' in row else None
             
             if name:
-                self.catalog_dict[name.lower()] = {
+                item = {
                     'name': name,
                     'article': article,
                     'price': price,
                     'row_idx': idx
                 }
+                self.catalog_dict[name.lower()] = item
+                normalized_name = self._normalize_text(name)
+                if normalized_name and normalized_name not in self.catalog_normalized_dict:
+                    self.catalog_normalized_dict[normalized_name] = item
         
         # Подготовить текстовый формат каталога для Gemini
         self._prepare_catalog_text()
@@ -163,6 +170,10 @@ class ReMoMatcher:
     def _hash_query(self, query: str) -> str:
         """Хэш запроса для кэша"""
         return hashlib.md5(query.lower().encode()).hexdigest()
+
+    def _normalize_text(self, text: str) -> str:
+        cleaned = re.sub(r"[^\w\dа-яА-ЯёЁ]+", " ", str(text).lower(), flags=re.UNICODE)
+        return " ".join(cleaned.split())
     
     def _get_from_cache(self, query: str) -> Optional[Dict]:
         """Получить результат из кэша"""
@@ -254,6 +265,29 @@ class ReMoMatcher:
                     'price': exact_match['price'],
                     'article': exact_match['article'],
                     'similarity_score': 1.0,
+                    'from_cache': False,
+                    'success': True,
+                    'error': None
+                }
+
+            # Нормализованное совпадение (ускоряет кейсы с лишними символами/пробелами)
+            normalized_query = self._normalize_text(query)
+            normalized_match = self.catalog_normalized_dict.get(normalized_query)
+            if normalized_match:
+                logger.info(f"✓ Нормализованное совпадение найдено: {query}")
+                self._save_to_cache(
+                    query,
+                    normalized_match['name'],
+                    normalized_match['price'],
+                    normalized_match['article'],
+                    0.98,
+                    "normalized_match",
+                )
+                return {
+                    'found_name': normalized_match['name'],
+                    'price': normalized_match['price'],
+                    'article': normalized_match['article'],
+                    'similarity_score': 0.98,
                     'from_cache': False,
                     'success': True,
                     'error': None
