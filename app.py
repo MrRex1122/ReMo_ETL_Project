@@ -13,7 +13,7 @@ from datetime import datetime
 import sqlite3
 import logging
 import io
-from config import get_catalog_csv_path
+from config import get_catalog_csv_path, get_upload_dir
 
 # ============ ЛОГИРОВАНИЕ ============
 logging.basicConfig(
@@ -87,7 +87,15 @@ def get_matcher() -> ReMoMatcher:
 
     if needs_reinit:
         logger.info("🔄 Инициализация ReMoMatcher...")
-        api_key = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
+        api_key = None
+        try:
+            api_key = st.secrets.get("GEMINI_API_KEY")
+        except Exception:
+            # Например, в Railway может не быть .streamlit/secrets.toml.
+            # В таком случае используем переменные окружения.
+            api_key = None
+
+        api_key = api_key or os.getenv("GEMINI_API_KEY")
         
         if not api_key:
             logger.error("❌ GEMINI_API_KEY не установлен")
@@ -108,6 +116,11 @@ def get_matcher() -> ReMoMatcher:
         if not Path(db_csv).exists():
             logger.error(f"❌ Файл не найден: {db_csv}")
             st.error(f"❌ Файл не найден: {db_csv}")
+            st.info(
+                "Для Railway задайте путь к каталогу через переменную окружения "
+                "`REMO_DB_CSV` (или `REMO_UPLOAD_DIR`) и убедитесь, что файл "
+                "`price_clean.csv` существует в контейнере."
+            )
             st.stop()
         
         with st.spinner("⏳ Инициализация ReMo Matcher..."):
@@ -151,6 +164,26 @@ def process_uploaded_file(uploaded_file) -> tuple:
     finally:
         os.unlink(tmp_path)
         logger.info(f"🗑️ Временный файл удален")
+
+
+def save_uploaded_catalog(uploaded_catalog) -> Path:
+    """Сохранить загруженный CSV каталога в рабочую папку данных."""
+    storage_dir = get_upload_dir()
+    storage_dir.mkdir(parents=True, exist_ok=True)
+
+    target_path = storage_dir / Path(uploaded_catalog.name).name
+    with open(target_path, 'wb') as fh:
+        fh.write(uploaded_catalog.getbuffer())
+
+    logger.info(f"📚 Каталог сохранен: {target_path}")
+    return target_path
+
+
+def list_available_catalogs() -> list[Path]:
+    """Вернуть список доступных CSV-каталогов в рабочей папке данных."""
+    storage_dir = get_upload_dir()
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    return sorted(storage_dir.glob("*.csv"))
 
 
 def show_statistics(stats):
@@ -216,6 +249,36 @@ def main():
         st.header("⚙️ Настройки")
         
         st.subheader("1️⃣ Товарная база данных")
+
+        catalog_upload = st.file_uploader(
+            "Загрузить CSV каталог(и) поставщика",
+            type=['csv'],
+            accept_multiple_files=True,
+            help="Файлы будут сохранены в рабочую папку данных (например, /data в Railway Volume)."
+        )
+
+        if catalog_upload and st.button("💾 Сохранить каталоги", key="save_catalogs_btn"):
+            for uploaded_catalog in catalog_upload:
+                try:
+                    saved_path = save_uploaded_catalog(uploaded_catalog)
+                    st.success(f"✓ Сохранен каталог: {saved_path.name}")
+                except Exception as e:
+                    logger.error(f"❌ Ошибка сохранения каталога: {e}", exc_info=True)
+                    st.error(f"❌ Не удалось сохранить {uploaded_catalog.name}: {e}")
+
+            st.session_state.matcher = None
+            st.session_state.matcher_db_csv = None
+
+        available_catalogs = list_available_catalogs()
+        if available_catalogs:
+            selected_catalog = st.selectbox(
+                "Выбрать активный каталог",
+                options=[str(path) for path in available_catalogs],
+                index=0,
+            )
+            if selected_catalog != st.session_state.get('db_csv_path'):
+                st.session_state.db_csv_path = selected_catalog
+
         st.text_input(
             "Путь к price_clean.csv",
             key="db_csv_path"
