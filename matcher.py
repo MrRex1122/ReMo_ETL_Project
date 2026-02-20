@@ -12,6 +12,8 @@ import logging
 import hashlib
 import os
 from pathlib import Path
+import re
+from difflib import SequenceMatcher
 from config import get_catalog_csv_path
 
 logging.basicConfig(
@@ -52,6 +54,9 @@ class ReMoMatcher:
         self.cache_db = cache_db
         self.catalog = None
         self.catalog_dict = None
+        self.catalog_normalized_dict = None
+        self.catalog_items = None
+        self.token_index = None
         self.catalog_text = None
         self.backend = None
         self.client = None
@@ -132,18 +137,30 @@ class ReMoMatcher:
         
         # Подготовить словарь для быстрого поиска
         self.catalog_dict = {}
+        self.catalog_normalized_dict = {}
+        self.catalog_items = []
+        self.token_index = {}
         for idx, row in self.catalog.iterrows():
             name = str(row.get('Наименование', '')).strip()
             article = str(row.get('Артикул', '')).strip()
             price = float(row.get('Цена розничная', 0)) if 'Цена розничная' in row else None
             
             if name:
-                self.catalog_dict[name.lower()] = {
+                item = {
                     'name': name,
+                    'name_lc': name.lower(),
                     'article': article,
                     'price': price,
-                    'row_idx': idx
+                    'row_idx': idx,
                 }
+                self.catalog_dict[name.lower()] = item
+                normalized_name = self._normalize_text(name)
+                item['normalized_name'] = normalized_name
+                if normalized_name and normalized_name not in self.catalog_normalized_dict:
+                    self.catalog_normalized_dict[normalized_name] = item
+                self.catalog_items.append(item)
+                for token in self._tokenize(normalized_name):
+                    self.token_index.setdefault(token, []).append(item)
         
         # Подготовить текстовый формат каталога для Gemini
         self._prepare_catalog_text()
@@ -162,7 +179,60 @@ class ReMoMatcher:
     
     def _hash_query(self, query: str) -> str:
         """Хэш запроса для кэша"""
-        return hashlib.md5(query.lower().encode()).hexdigest()
+        normalized = self._normalize_text(query)
+        value = normalized if normalized else str(query).lower()
+        return hashlib.md5(value.encode()).hexdigest()
+
+    def _normalize_text(self, text: str) -> str:
+        cleaned = re.sub(r"[^\w\dа-яА-ЯёЁ]+", " ", str(text).lower(), flags=re.UNICODE)
+        return " ".join(cleaned.split())
+
+    def _tokenize(self, normalized_text: str) -> List[str]:
+        return [token for token in normalized_text.split() if len(token) >= 2]
+
+    def _select_candidates(self, query: str, limit: int = 40) -> List[Dict]:
+        """Выбрать топ-кандидатов из каталога для передачи в Gemini."""
+        normalized_query = self._normalize_text(query)
+        query_tokens = self._tokenize(normalized_query)
+        if not query_tokens:
+            return self.catalog_items[:limit]
+
+        candidate_map = {}
+        for token in query_tokens:
+            for item in self.token_index.get(token, []):
+                key = item['name_lc']
+                if key not in candidate_map:
+                    candidate_map[key] = item
+
+        if not candidate_map:
+            candidate_map = {item['name_lc']: item for item in self.catalog_items[: min(800, len(self.catalog_items))]}
+
+        scored = []
+        query_set = set(query_tokens)
+        for item in candidate_map.values():
+            candidate_tokens = set(self._tokenize(item.get('normalized_name', '')))
+            if not candidate_tokens:
+                continue
+            overlap = len(query_set & candidate_tokens)
+            union = len(query_set | candidate_tokens)
+            jaccard = overlap / union if union else 0
+            ratio = SequenceMatcher(None, normalized_query, item.get('normalized_name', '')).ratio()
+            score = (jaccard * 0.75) + (ratio * 0.25)
+            scored.append((score, item))
+
+        scored.sort(key=lambda pair: pair[0], reverse=True)
+        return [item for score, item in scored[:limit] if score > 0]
+
+    def _build_catalog_context(self, candidates: List[Dict], max_lines: int = 60) -> str:
+        if not candidates:
+            return self.catalog_text
+
+        lines = []
+        for item in candidates[:max_lines]:
+            lines.append(
+                f"• {item.get('name', 'N/A')} | Артикул: {item.get('article', 'N/A')} | Цена: {item.get('price', 'N/A')}"
+            )
+        return "\n".join(lines)
     
     def _get_from_cache(self, query: str) -> Optional[Dict]:
         """Получить результат из кэша"""
@@ -258,6 +328,29 @@ class ReMoMatcher:
                     'success': True,
                     'error': None
                 }
+
+            # Нормализованное совпадение (ускоряет кейсы с лишними символами/пробелами)
+            normalized_query = self._normalize_text(query)
+            normalized_match = self.catalog_normalized_dict.get(normalized_query)
+            if normalized_match:
+                logger.info(f"✓ Нормализованное совпадение найдено: {query}")
+                self._save_to_cache(
+                    query,
+                    normalized_match['name'],
+                    normalized_match['price'],
+                    normalized_match['article'],
+                    0.98,
+                    "normalized_match",
+                )
+                return {
+                    'found_name': normalized_match['name'],
+                    'price': normalized_match['price'],
+                    'article': normalized_match['article'],
+                    'similarity_score': 0.98,
+                    'from_cache': False,
+                    'success': True,
+                    'error': None
+                }
             
             # Использовать Gemini для семантического поиска
             logger.info(f"🔍 Поиск в Gemini: {query}")
@@ -318,12 +411,15 @@ class ReMoMatcher:
     def _match_with_gemini(self, query: str) -> Dict:
         """Использовать Gemini для сопоставления"""
 
+        candidates = self._select_candidates(query, limit=40)
+        catalog_context = self._build_catalog_context(candidates)
+
         prompt = f"""Ты эксперт по технической номенклатуре оборудования, кабеля и материалов.
 
 Задача: Найти в каталоге товар, который ТОЧНО соответствует запросу пользователя.
 
 КАТАЛОГ ДОСТУПНЫХ ТОВАРОВ:
-{self.catalog_text}
+{catalog_context}
 
 ЗАПРОС ПОЛЬЗОВАТЕЛЯ: "{query}"
 

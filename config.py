@@ -6,10 +6,11 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import re
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 
-DEFAULT_UPLOAD_DIR = Path(r"D:\Data\Downloads\upload")
+DEFAULT_UPLOAD_DIR = PROJECT_ROOT
 DEFAULT_CATALOG_CSV_NAME = "price_clean.csv"
 DEFAULT_PRICE_RAW_CSV_NAME = "price.csv"
 DEFAULT_PRICE_CONVERTED_CSV_NAME = "price_converted.csv"
@@ -18,6 +19,11 @@ DEFAULT_SAMPLE_XLSX_NAME = "РеМо_Шаблон_коммерческого_п�
 
 def _normalize_path(raw: str | Path) -> Path:
     text = str(raw).strip()
+    # На Linux/macOS pathlib не считает путь вида D:\... абсолютным.
+    # Не префиксуем такие пути PROJECT_ROOT, чтобы не получать /app/D:\...
+    if re.match(r"^[A-Za-z]:[\\/]", text) or text.startswith("\\\\"):
+        return Path(text)
+
     path = Path(text).expanduser()
     if not path.is_absolute():
         path = PROJECT_ROOT / path
