@@ -13,9 +13,7 @@ from datetime import datetime
 import sqlite3
 import logging
 import io
-from contextlib import redirect_stdout
-from config import get_catalog_csv_path, get_upload_dir
-from merge_catalogs import merge_catalogs
+from config import get_catalog_csv_path, get_upload_dir, get_matcher_cache_db_path
 from main import convert_csv
 from etl_pipeline import PriceETL
 
@@ -81,25 +79,6 @@ if 'matcher_db_csv' not in st.session_state:
     st.session_state.matcher_db_csv = None
 if 'processing' not in st.session_state:
     st.session_state.processing = False
-
-SUPPLIER_CATALOGS_DIRNAME = "supplier_catalogs"
-MASTER_CATALOG_FILENAME = "price_clean.csv"
-CATALOG_MERGE_KEY = "Код ЭТМ"
-
-
-def get_supplier_catalogs_dir() -> Path:
-    storage_dir = get_upload_dir()
-    storage_dir.mkdir(parents=True, exist_ok=True)
-
-    supplier_dir = storage_dir / SUPPLIER_CATALOGS_DIRNAME
-    supplier_dir.mkdir(parents=True, exist_ok=True)
-    return supplier_dir
-
-
-def get_master_catalog_path() -> Path:
-    storage_dir = get_upload_dir()
-    storage_dir.mkdir(parents=True, exist_ok=True)
-    return storage_dir / MASTER_CATALOG_FILENAME
 
 
 def get_matcher() -> ReMoMatcher:
@@ -191,78 +170,50 @@ def process_uploaded_file(uploaded_file) -> tuple:
         logger.info(f"🗑️ Временный файл удален")
 
 
-def save_uploaded_catalog(uploaded_catalog) -> Path:
-    """Save uploaded supplier catalog (raw) to the persistent supplier directory."""
-    supplier_dir = get_supplier_catalogs_dir()
-    original_name = Path(uploaded_catalog.name).name
-    stem = Path(original_name).stem or "catalog"
-    suffix = Path(original_name).suffix or ".csv"
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    target_path = supplier_dir / f"{stem}_{timestamp}_raw{suffix}"
-    with open(target_path, 'wb') as fh:
+def save_uploaded_catalog(uploaded_catalog, run_etl: bool = False) -> Path:
+    """Сохранить загруженный CSV каталога в рабочую папку данных."""
+    storage_dir = get_upload_dir()
+    storage_dir.mkdir(parents=True, exist_ok=True)
+
+    source_name = Path(uploaded_catalog.name).name
+    source_stem = Path(source_name).stem
+
+    raw_dir = storage_dir / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    raw_path = raw_dir / source_name
+
+    with open(raw_path, 'wb') as fh:
         fh.write(uploaded_catalog.getbuffer())
 
-    logger.info(f"📚 Каталог сохранен: {target_path}")
-    return target_path
+    if not run_etl:
+        target_path = storage_dir / source_name
+        raw_path.replace(target_path)
+        logger.info(f"📚 Каталог сохранен без ETL: {target_path}")
+        return target_path
 
+    converted_dir = storage_dir / "converted"
+    clean_dir = storage_dir / "clean"
+    converted_dir.mkdir(parents=True, exist_ok=True)
+    clean_dir.mkdir(parents=True, exist_ok=True)
 
-def prepare_uploaded_catalog(raw_catalog_path: Path) -> Path:
-    """Convert and ETL-clean one raw supplier CSV, returning clean catalog path."""
-    base_name = raw_catalog_path.name
-    if base_name.lower().endswith(".csv"):
-        base_name = base_name[:-4]
-    if base_name.lower().endswith("_raw"):
-        base_name = base_name[:-4]
+    converted_path = converted_dir / f"{source_stem}_converted.csv"
+    clean_path = clean_dir / f"{source_stem}_clean.csv"
 
-    converted_path = raw_catalog_path.with_name(f"{base_name}_converted.csv")
-    clean_path = raw_catalog_path.with_name(f"{base_name}_clean.csv")
+    convert_csv(raw_path, converted_path)
+    PriceETL(str(converted_path), str(clean_path)).run()
 
-    # convert_csv prints previews; keep Streamlit logs clean.
-    with redirect_stdout(io.StringIO()):
-        convert_csv(raw_catalog_path, converted_path)
-
-    etl = PriceETL(str(converted_path), str(clean_path))
-    etl.run()
-    logger.info(f"🧼 Каталог подготовлен: {clean_path}")
+    logger.info(f"📚 Каталог сохранен после ETL: {clean_path}")
     return clean_path
-
-
-def update_master_catalog(new_catalog_paths: list[Path]) -> tuple[Path, int, int]:
-    """Append new supplier catalogs into one master catalog in storage volume."""
-    master_path = get_master_catalog_path()
-
-    merge_inputs: list[Path] = []
-    if master_path.exists():
-        merge_inputs.append(master_path)
-    merge_inputs.extend(new_catalog_paths)
-
-    merged_df = merge_catalogs(
-        merge_inputs,
-        key_col=CATALOG_MERGE_KEY,
-        encoding="utf-8",
-    )
-
-    temp_path = master_path.with_suffix(".tmp.csv")
-    merged_df.to_csv(temp_path, sep=';', encoding='utf-8', index=False)
-    temp_path.replace(master_path)
-
-    logger.info(
-        f"🧩 Обновлен общий каталог: {master_path} "
-        f"({len(merged_df)} строк, {len(merged_df.columns)} колонок)"
-    )
-    return master_path, len(merged_df), len(merged_df.columns)
 
 
 def list_available_catalogs() -> list[Path]:
     """Вернуть список доступных CSV-каталогов в рабочей папке данных."""
     storage_dir = get_upload_dir()
     storage_dir.mkdir(parents=True, exist_ok=True)
-    catalogs = sorted(storage_dir.glob("*.csv"))
-    master_path = get_master_catalog_path()
-    if master_path in catalogs:
-        catalogs.remove(master_path)
-        catalogs.insert(0, master_path)
-    return catalogs
+    top_level = set(storage_dir.glob("*.csv"))
+    clean_dir = storage_dir / "clean"
+    clean_level = set(clean_dir.glob("*.csv")) if clean_dir.exists() else set()
+    return sorted(top_level | clean_level)
 
 
 def show_statistics(stats):
@@ -333,46 +284,37 @@ def main():
             "Загрузить CSV каталог(и) поставщика",
             type=['csv'],
             accept_multiple_files=True,
+            help="Файлы будут сохранены в рабочую папку данных (например, /data в Railway Volume)."
+        )
+
+        run_etl_before_save = st.checkbox(
+            "Прогнать ETL перед сохранением каталога",
+            value=True,
             help=(
-                "Можно загружать сырые CSV: файл автоматически пройдет convert+ETL, "
-                "после чего объединится в общий /data/price_clean.csv по ключу 'Код ЭТМ'."
+                "Рекомендуется для "
+                "сырого CSV из 1С/Excel: сначала конвертация кодировки/разделителя, "
+                "потом очистка и нормализация."
             )
         )
 
-        if catalog_upload and st.button("💾 Загрузить, очистить и объединить", key="save_catalogs_btn"):
-            cleaned_catalogs: list[Path] = []
+        if catalog_upload and st.button("💾 Сохранить каталоги", key="save_catalogs_btn"):
             for uploaded_catalog in catalog_upload:
                 try:
-                    raw_path = save_uploaded_catalog(uploaded_catalog)
-                    clean_path = prepare_uploaded_catalog(raw_path)
-                    cleaned_catalogs.append(clean_path)
-                    st.success(f"✓ Подготовлен каталог: {uploaded_catalog.name} -> {clean_path.name}")
+                    saved_path = save_uploaded_catalog(uploaded_catalog, run_etl=run_etl_before_save)
+                    st.success(f"✓ Сохранен каталог: {saved_path.name}")
                 except Exception as e:
-                    logger.error(f"❌ Ошибка подготовки каталога: {e}", exc_info=True)
-                    st.error(f"❌ Не удалось подготовить {uploaded_catalog.name}: {e}")
+                    logger.error(f"❌ Ошибка сохранения каталога: {e}", exc_info=True)
+                    st.error(f"❌ Не удалось сохранить {uploaded_catalog.name}: {e}")
 
-            if cleaned_catalogs:
-                try:
-                    with st.spinner("🧩 Обновление общего каталога..."):
-                        master_path, rows, cols = update_master_catalog(cleaned_catalogs)
-
-                    st.session_state.db_csv_path = str(master_path)
-                    st.session_state.matcher = None
-                    st.session_state.matcher_db_csv = None
-                    st.success(f"✅ Общий каталог обновлен: {master_path.name} ({rows} строк, {cols} колонок)")
-                except Exception as e:
-                    logger.error(f"❌ Ошибка объединения каталогов: {e}", exc_info=True)
-                    st.error(f"❌ Не удалось обновить общий каталог: {e}")
+            st.session_state.matcher = None
+            st.session_state.matcher_db_csv = None
 
         available_catalogs = list_available_catalogs()
         if available_catalogs:
-            current_catalog = st.session_state.get('db_csv_path')
-            options = [str(path) for path in available_catalogs]
-            selected_index = options.index(current_catalog) if current_catalog in options else 0
             selected_catalog = st.selectbox(
                 "Выбрать активный каталог",
-                options=options,
-                index=selected_index,
+                options=[str(path) for path in available_catalogs],
+                index=0,
             )
             if selected_catalog != st.session_state.get('db_csv_path'):
                 st.session_state.db_csv_path = selected_catalog

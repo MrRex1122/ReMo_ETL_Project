@@ -12,13 +12,16 @@ import logging
 import hashlib
 import os
 from pathlib import Path
-from catalog_schema import (
-    CANONICAL_ARTICLE_COLUMN,
-    CANONICAL_NAME_COLUMN,
-    CANONICAL_PRICE_COLUMN,
-    canonicalize_catalog_columns,
+import re
+from difflib import SequenceMatcher
+from config import (
+    get_catalog_csv_path,
+    get_matcher_cache_db_path,
+    get_matcher_models,
+    get_matcher_candidate_limit,
+    get_matcher_context_lines,
+    get_matcher_catalog_sample_items,
 )
-from config import get_catalog_csv_path
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,44 +31,39 @@ logger = logging.getLogger(__name__)
 
 MISSING_POSITION_TEXT = "Позиция отсутствует"
 
-DEFAULT_MATCH_PROMPT_TEMPLATE = dedent(
-    """
-    Ты эксперт по технической номенклатуре оборудования, кабеля и материалов.
+DEFAULT_MATCH_PROMPT_TEMPLATE = """
+You are an expert in technical nomenclature for equipment, cables and materials.
 
-    Задача: Найти в каталоге товар, который ТОЧНО соответствует запросу пользователя.
+Task: find a catalog item that BEST matches the user query.
 
-    КАТАЛОГ ДОСТУПНЫХ ТОВАРОВ:
-    {catalog_context}
+AVAILABLE CATALOG ITEMS:
+{catalog_context}
 
-    ЗАПРОС ПОЛЬЗОВАТЕЛЯ: "{query}"
+USER QUERY: "{query}"
 
-    ИНСТРУКЦИИ:
-    1. Внимательно проанализируй запрос пользователя
-    2. Найди в каталоге товар с МАКСИМАЛЬНЫМ семантическим совпадением
-    3. Учитывай:
-       - Технические характеристики (сечение, вольтаж, материал, размеры)
-       - Назначение товара (кабель, кондиционер, сварочный аппарат и т.д.)
-       - Альтернативные названия и аббревиатуры
-    4. Если релевантного аналога нет, верни found_name=null
-    5. Вывод ТОЛЬКО в формате JSON (без лишнего текста)
+RULES:
+1. Analyze the query carefully.
+2. Pick the most semantically relevant item from catalog.
+3. Consider technical specs, product purpose, synonyms and abbreviations.
+4. If nothing relevant exists, return found_name=null.
+5. Output JSON only.
 
-    ФОРМАТ ОТВЕТА:
-    {{
-        "found_name": "Точное название из каталога",
-        "article": "Артикул товара",
-        "confidence": 0.95,
-        "reasoning": "Краткое объяснение почему это совпадение"
-    }}
+RESPONSE FORMAT:
+{{
+    "found_name": "Exact catalog name",
+    "article": "Catalog article",
+    "confidence": 0.95,
+    "reasoning": "Short explanation"
+}}
 
-    Если товар не найден:
-    {{
-        "found_name": null,
-        "article": null,
-        "confidence": 0,
-        "reasoning": "товар не найден в каталоге"
-    }}
-    """
-).strip()
+If not found:
+{{
+    "found_name": null,
+    "article": null,
+    "confidence": 0,
+    "reasoning": "item not found in catalog"
+}}
+""".strip()
 
 try:
     from google import genai as genai_sdk
@@ -98,6 +96,8 @@ class ReMoMatcher:
         self.catalog = None
         self.catalog_dict = None
         self.catalog_normalized_dict = None
+        self.catalog_items = None
+        self.token_index = None
         self.catalog_text = None
         self.backend = None
         self.client = None
@@ -111,29 +111,29 @@ class ReMoMatcher:
             try:
                 self.client = genai_sdk.Client(api_key=self.api_key)
                 self.backend = "google-genai"
-                logger.info("âœ“ Gemini backend: google-genai")
+                logger.info("Gemini backend: google-genai")
             except Exception as e:
-                logger.warning(f"ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ Ð¸Ð½Ð¸Ñ†Ð¸Ð°Ð»Ð¸Ð·Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ google-genai: {e}")
+                logger.warning(f"Failed to initialize google-genai: {e}")
 
         if self.backend is None:
             try:
                 import google.generativeai as legacy_genai
             except ImportError as e:
                 raise ImportError(
-                    "Ð£ÑÑ‚Ð°Ð½Ð¾Ð²Ð¸Ñ‚Ðµ Gemini SDK: pip install google-genai "
+                    "Install Gemini SDK: pip install google-genai "
                     "(fallback: google-generativeai)"
                 ) from e
 
             legacy_genai.configure(api_key=self.api_key)
             self.legacy_genai = legacy_genai
             self.backend = "google-generativeai"
-            logger.info("âœ“ Gemini backend: google-generativeai (fallback)")
+            logger.info("Gemini backend: google-generativeai (fallback)")
         
         # Ð˜Ð½Ð¸Ñ†Ð¸Ð°Ð»Ð¸Ð·Ð°Ñ†Ð¸Ñ ÐºÑÑˆÐ°
         self._init_cache_db()
         self._load_catalog()
         
-        logger.info("âœ“ ReMoMatcher Ð¸Ð½Ð¸Ñ†Ð¸Ð°Ð»Ð¸Ð·Ð¸Ñ€Ð¾Ð²Ð°Ð½")
+        logger.info("ReMoMatcher initialized")
     
     def _init_cache_db(self):
         """Ð˜Ð½Ð¸Ñ†Ð¸Ð°Ð»Ð¸Ð·Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ Ð‘Ð” ÐºÑÑˆÐ°"""
@@ -168,7 +168,7 @@ class ReMoMatcher:
         
         conn.commit()
         conn.close()
-        logger.info("âœ“ Cache DB Ð¸Ð½Ð¸Ñ†Ð¸Ð°Ð»Ð¸Ð·Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð°")
+        logger.info("Cache DB initialized")
     
     @staticmethod
     def _clean_text_value(value: object) -> str:
@@ -203,21 +203,16 @@ class ReMoMatcher:
 
     def _load_catalog(self):
         """Загрузить товарный каталог"""
-        logger.info(f"📦 Загрузка каталога из {self.db_csv_path}")
-
-        raw_catalog = pd.read_csv(self.db_csv_path, sep=';', encoding='utf-8')
-        self.catalog = canonicalize_catalog_columns(raw_catalog, create_missing=False)
-        logger.info(f"✓ Загружено товаров: {len(self.catalog)}")
-
-        if CANONICAL_NAME_COLUMN not in self.catalog.columns:
-            raise ValueError(
-                f"В каталоге не найдена колонка '{CANONICAL_NAME_COLUMN}'. "
-                f"Доступные колонки: {list(self.catalog.columns)}"
-            )
-
+        logger.info(f"Loading catalog from {self.db_csv_path}")
+        
+        self.catalog = pd.read_csv(self.db_csv_path, sep=';', encoding='utf-8')
+        logger.info(f"Loaded catalog items: {len(self.catalog)}")
+        
         # Подготовить словарь для быстрого поиска
         self.catalog_dict = {}
         self.catalog_normalized_dict = {}
+        self.catalog_items = []
+        self.token_index = {}
         for idx, row in self.catalog.iterrows():
             name = self._clean_text_value(row.get(CANONICAL_NAME_COLUMN, ""))
             article = self._clean_text_value(row.get(CANONICAL_ARTICLE_COLUMN, ""))
@@ -231,11 +226,19 @@ class ReMoMatcher:
                     'price': price,
                     'row_idx': idx,
                 }
-
+                self.catalog_dict[name.lower()] = item
+                normalized_name = self._normalize_text(name)
+                item['normalized_name'] = normalized_name
+                if normalized_name and normalized_name not in self.catalog_normalized_dict:
+                    self.catalog_normalized_dict[normalized_name] = item
+                self.catalog_items.append(item)
+                for token in self._tokenize(normalized_name):
+                    self.token_index.setdefault(token, []).append(item)
+        
         # Подготовить текстовый формат каталога для Gemini
         self._prepare_catalog_text()
-
-    def _prepare_catalog_text(self, max_items: int = 500):
+    
+    def _prepare_catalog_text(self, max_items: int | None = None):
         """Подготовить каталог в текстовом формате для контекста Gemini"""
         if max_items is None:
             max_items = get_matcher_catalog_sample_items()
@@ -249,17 +252,93 @@ class ReMoMatcher:
                 f"Цена: {row.get(CANONICAL_PRICE_COLUMN, 'N/A')}"
             )
             catalog_lines.append(line)
-
-        self.catalog_text = "\n".join(catalog_lines[:300])
-        logger.info(f"✓ Каталог подготовлен ({len(catalog_lines)} товаров в контексте)")
-
+        
+        self.catalog_text = "\n".join(catalog_lines[:300])  # Ограничить для контекста
+        logger.info(f"Catalog context prepared ({len(catalog_lines)} items sampled)")
+    
     def _hash_query(self, query: str) -> str:
-        """Ð¥ÑÑˆ Ð·Ð°Ð¿Ñ€Ð¾ÑÐ° Ð´Ð»Ñ ÐºÑÑˆÐ°"""
-        return hashlib.md5(query.lower().encode()).hexdigest()
+        """Хэш запроса для кэша"""
+        normalized = self._normalize_text(query)
+        value = normalized if normalized else str(query).lower()
+        return hashlib.md5(value.encode()).hexdigest()
 
     def _normalize_text(self, text: str) -> str:
         cleaned = re.sub(r"[^\w\dа-яА-ЯёЁ]+", " ", str(text).lower(), flags=re.UNICODE)
         return " ".join(cleaned.split())
+
+    def _tokenize(self, normalized_text: str) -> List[str]:
+        return [token for token in normalized_text.split() if len(token) >= 2]
+
+    def _load_prompt_template(self) -> str:
+        """Загрузить шаблон prompt из файла или вернуть дефолтный."""
+        path_raw = os.getenv("REMO_MATCH_PROMPT_TEMPLATE_PATH")
+        if not path_raw:
+            return DEFAULT_MATCH_PROMPT_TEMPLATE
+
+        path = Path(path_raw)
+        if not path.exists():
+            logger.warning(f"Prompt template not found at {path}; using default template")
+            return DEFAULT_MATCH_PROMPT_TEMPLATE
+
+        try:
+            custom_template = path.read_text(encoding="utf-8").strip()
+            if "{catalog_context}" not in custom_template or "{query}" not in custom_template:
+                logger.warning(
+                    "Custom prompt template misses required placeholders {catalog_context}/{query}; using default"
+                )
+                return DEFAULT_MATCH_PROMPT_TEMPLATE
+            logger.info(f"✓ Custom prompt template loaded: {path}")
+            return custom_template
+        except Exception as e:
+            logger.warning(f"Failed to read custom prompt template: {e}; using default")
+            return DEFAULT_MATCH_PROMPT_TEMPLATE
+
+    def _build_match_prompt(self, query: str, catalog_context: str) -> str:
+        return self.prompt_template.format(query=query, catalog_context=catalog_context)
+
+    def _select_candidates(self, query: str, limit: int = 40) -> List[Dict]:
+        """Выбрать топ-кандидатов из каталога для передачи в Gemini."""
+        normalized_query = self._normalize_text(query)
+        query_tokens = self._tokenize(normalized_query)
+        if not query_tokens:
+            return self.catalog_items[:limit]
+
+        candidate_map = {}
+        for token in query_tokens:
+            for item in self.token_index.get(token, []):
+                key = item['name_lc']
+                if key not in candidate_map:
+                    candidate_map[key] = item
+
+        if not candidate_map:
+            candidate_map = {item['name_lc']: item for item in self.catalog_items[: min(800, len(self.catalog_items))]}
+
+        scored = []
+        query_set = set(query_tokens)
+        for item in candidate_map.values():
+            candidate_tokens = set(self._tokenize(item.get('normalized_name', '')))
+            if not candidate_tokens:
+                continue
+            overlap = len(query_set & candidate_tokens)
+            union = len(query_set | candidate_tokens)
+            jaccard = overlap / union if union else 0
+            ratio = SequenceMatcher(None, normalized_query, item.get('normalized_name', '')).ratio()
+            score = (jaccard * 0.75) + (ratio * 0.25)
+            scored.append((score, item))
+
+        scored.sort(key=lambda pair: pair[0], reverse=True)
+        return [item for score, item in scored[:limit] if score > 0]
+
+    def _build_catalog_context(self, candidates: List[Dict], max_lines: int = 60) -> str:
+        if not candidates:
+            return self.catalog_text
+
+        lines = []
+        for item in candidates[:max_lines]:
+            lines.append(
+                f"• {item.get('name', 'N/A')} | Артикул: {item.get('article', 'N/A')} | Цена: {item.get('price', 'N/A')}"
+            )
+        return "\n".join(lines)
     
     def _get_from_cache(self, query: str) -> Optional[Dict]:
         """ÐŸÐ¾Ð»ÑƒÑ‡Ð¸Ñ‚ÑŒ Ñ€ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚ Ð¸Ð· ÐºÑÑˆÐ°"""
@@ -289,7 +368,7 @@ class ReMoMatcher:
                     'error': None
                 }
         except Exception as e:
-            logger.warning(f"âš ï¸ ÐžÑˆÐ¸Ð±ÐºÐ° Ñ‡Ñ‚ÐµÐ½Ð¸Ñ ÐºÑÑˆÐ°: {e}")
+                logger.warning(f"Cache read error: {e}")
         
         return None
     
@@ -311,7 +390,7 @@ class ReMoMatcher:
             conn.commit()
             conn.close()
         except Exception as e:
-            logger.warning(f"âš ï¸ ÐžÑˆÐ¸Ð±ÐºÐ° ÑÐ¾Ñ…Ñ€Ð°Ð½ÐµÐ½Ð¸Ñ Ð² ÐºÑÑˆ: {e}")
+            logger.warning(f"Cache write error: {e}")
     
     def match(self, query: str, use_cache: bool = True) -> Dict:
         """
@@ -343,7 +422,7 @@ class ReMoMatcher:
             # Ð¢Ð¾Ñ‡Ð½Ð¾Ðµ ÑÐ¾Ð²Ð¿Ð°Ð´ÐµÐ½Ð¸Ðµ Ð² ÑÐ»Ð¾Ð²Ð°Ñ€Ðµ
             exact_match = self.catalog_dict.get(query.lower())
             if exact_match:
-                logger.info(f"âœ“ Ð¢Ð¾Ñ‡Ð½Ð¾Ðµ ÑÐ¾Ð²Ð¿Ð°Ð´ÐµÐ½Ð¸Ðµ Ð½Ð°Ð¹Ð´ÐµÐ½Ð¾: {query}")
+                logger.info(f"Exact match found: {query}")
                 self._save_to_cache(query, exact_match['name'], exact_match['price'], 
                                    exact_match['article'], 1.0, "exact_match")
                 return {
@@ -360,7 +439,7 @@ class ReMoMatcher:
             normalized_query = self._normalize_text(query)
             normalized_match = self.catalog_normalized_dict.get(normalized_query)
             if normalized_match:
-                logger.info(f"✓ Нормализованное совпадение найдено: {query}")
+                logger.info(f"Normalized match found: {query}")
                 self._save_to_cache(
                     query,
                     normalized_match['name'],
@@ -379,14 +458,14 @@ class ReMoMatcher:
                     'error': None
                 }
             
-            # Ð˜ÑÐ¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÑŒ Gemini Ð´Ð»Ñ ÑÐµÐ¼Ð°Ð½Ñ‚Ð¸Ñ‡ÐµÑÐºÐ¾Ð³Ð¾ Ð¿Ð¾Ð¸ÑÐºÐ°
-            logger.info(f"ðŸ” ÐŸÐ¾Ð¸ÑÐº Ð² Gemini: {query}")
+            # Использовать Gemini для семантического поиска
+            logger.info(f"Gemini search: {query}")
             result = self._match_with_gemini(query)
             
             return result
             
         except Exception as e:
-            logger.error(f"âŒ ÐžÑˆÐ¸Ð±ÐºÐ° ÑÐ¾Ð¿Ð¾ÑÑ‚Ð°Ð²Ð»ÐµÐ½Ð¸Ñ: {e}", exc_info=True)
+            logger.error(f"Matching error: {e}", exc_info=True)
             return {
                 'found_name': None,
                 'price': None,
@@ -423,52 +502,20 @@ class ReMoMatcher:
             response = self.model.generate_content(prompt, stream=False)
             return (response.text or '').strip()
 
-        raise RuntimeError("Gemini backend Ð½Ðµ Ð¸Ð½Ð¸Ñ†Ð¸Ð°Ð»Ð¸Ð·Ð¸Ñ€Ð¾Ð²Ð°Ð½")
+        raise RuntimeError("Gemini backend is not initialized")
     
     def _match_with_gemini(self, query: str) -> Dict:
         """Ð˜ÑÐ¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÑŒ Gemini Ð´Ð»Ñ ÑÐ¾Ð¿Ð¾ÑÑ‚Ð°Ð²Ð»ÐµÐ½Ð¸Ñ"""
 
-        prompt = f"""Ð¢Ñ‹ ÑÐºÑÐ¿ÐµÑ€Ñ‚ Ð¿Ð¾ Ñ‚ÐµÑ…Ð½Ð¸Ñ‡ÐµÑÐºÐ¾Ð¹ Ð½Ð¾Ð¼ÐµÐ½ÐºÐ»Ð°Ñ‚ÑƒÑ€Ðµ Ð¾Ð±Ð¾Ñ€ÑƒÐ´Ð¾Ð²Ð°Ð½Ð¸Ñ, ÐºÐ°Ð±ÐµÐ»Ñ Ð¸ Ð¼Ð°Ñ‚ÐµÑ€Ð¸Ð°Ð»Ð¾Ð².
-
-Ð—Ð°Ð´Ð°Ñ‡Ð°: ÐÐ°Ð¹Ñ‚Ð¸ Ð² ÐºÐ°Ñ‚Ð°Ð»Ð¾Ð³Ðµ Ñ‚Ð¾Ð²Ð°Ñ€, ÐºÐ¾Ñ‚Ð¾Ñ€Ñ‹Ð¹ Ð¢ÐžÐ§ÐÐž ÑÐ¾Ð¾Ñ‚Ð²ÐµÑ‚ÑÑ‚Ð²ÑƒÐµÑ‚ Ð·Ð°Ð¿Ñ€Ð¾ÑÑƒ Ð¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÐµÐ»Ñ.
-
-ÐšÐÐ¢ÐÐ›ÐžÐ“ Ð”ÐžÐ¡Ð¢Ð£ÐŸÐÐ«Ð¥ Ð¢ÐžÐ’ÐÐ ÐžÐ’:
-{self.catalog_text}
-
-Ð—ÐÐŸÐ ÐžÐ¡ ÐŸÐžÐ›Ð¬Ð—ÐžÐ’ÐÐ¢Ð•Ð›Ð¯: "{query}"
-
-Ð˜ÐÐ¡Ð¢Ð Ð£ÐšÐ¦Ð˜Ð˜:
-1. Ð’Ð½Ð¸Ð¼Ð°Ñ‚ÐµÐ»ÑŒÐ½Ð¾ Ð¿Ñ€Ð¾Ð°Ð½Ð°Ð»Ð¸Ð·Ð¸Ñ€ÑƒÐ¹ Ð·Ð°Ð¿Ñ€Ð¾Ñ Ð¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÐµÐ»Ñ
-2. ÐÐ°Ð¹Ð´Ð¸ Ð² ÐºÐ°Ñ‚Ð°Ð»Ð¾Ð³Ðµ Ñ‚Ð¾Ð²Ð°Ñ€ Ñ ÐœÐÐšÐ¡Ð˜ÐœÐÐ›Ð¬ÐÐ«Ðœ ÑÐµÐ¼Ð°Ð½Ñ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ð¼ ÑÐ¾Ð²Ð¿Ð°Ð´ÐµÐ½Ð¸ÐµÐ¼
-3. Ð£Ñ‡Ð¸Ñ‚Ñ‹Ð²Ð°Ð¹:
-   - Ð¢ÐµÑ…Ð½Ð¸Ñ‡ÐµÑÐºÐ¸Ðµ Ñ…Ð°Ñ€Ð°ÐºÑ‚ÐµÑ€Ð¸ÑÑ‚Ð¸ÐºÐ¸ (ÑÐµÑ‡ÐµÐ½Ð¸Ðµ, Ð²Ð¾Ð»ÑŒÑ‚Ð°Ð¶, Ð¼Ð°Ñ‚ÐµÑ€Ð¸Ð°Ð», Ñ€Ð°Ð·Ð¼ÐµÑ€Ñ‹)
-   - ÐÐ°Ð·Ð½Ð°Ñ‡ÐµÐ½Ð¸Ðµ Ñ‚Ð¾Ð²Ð°Ñ€Ð° (ÐºÐ°Ð±ÐµÐ»ÑŒ, ÐºÐ¾Ð½Ð´Ð¸Ñ†Ð¸Ð¾Ð½ÐµÑ€, ÑÐ²Ð°Ñ€Ð¾Ñ‡Ð½Ñ‹Ð¹ Ð°Ð¿Ð¿Ð°Ñ€Ð°Ñ‚ Ð¸ Ñ‚.Ð´.)
-   - ÐÐ»ÑŒÑ‚ÐµÑ€Ð½Ð°Ñ‚Ð¸Ð²Ð½Ñ‹Ðµ Ð½Ð°Ð·Ð²Ð°Ð½Ð¸Ñ Ð¸ Ð°Ð±Ð±Ñ€ÐµÐ²Ð¸Ð°Ñ‚ÑƒÑ€Ñ‹
-4. Ð•ÑÐ»Ð¸ Ñ€ÐµÐ»ÐµÐ²Ð°Ð½Ñ‚Ð½Ð¾Ð³Ð¾ Ð°Ð½Ð°Ð»Ð¾Ð³Ð° Ð½ÐµÑ‚, Ð²ÐµÑ€Ð½Ð¸ found_name=null
-5. Ð’Ñ‹Ð²Ð¾Ð´ Ð¢ÐžÐ›Ð¬ÐšÐž Ð² Ñ„Ð¾Ñ€Ð¼Ð°Ñ‚Ðµ JSON (Ð±ÐµÐ· Ð»Ð¸ÑˆÐ½ÐµÐ³Ð¾ Ñ‚ÐµÐºÑÑ‚Ð°)
-
-Ð¤ÐžÐ ÐœÐÐ¢ ÐžÐ¢Ð’Ð•Ð¢Ð:
-{{
-    "found_name": "Ð¢Ð¾Ñ‡Ð½Ð¾Ðµ Ð½Ð°Ð·Ð²Ð°Ð½Ð¸Ðµ Ð¸Ð· ÐºÐ°Ñ‚Ð°Ð»Ð¾Ð³Ð°",
-    "article": "ÐÑ€Ñ‚Ð¸ÐºÑƒÐ» Ñ‚Ð¾Ð²Ð°Ñ€Ð°",
-    "confidence": 0.95,
-    "reasoning": "ÐšÑ€Ð°Ñ‚ÐºÐ¾Ðµ Ð¾Ð±ÑŠÑÑÐ½ÐµÐ½Ð¸Ðµ Ð¿Ð¾Ñ‡ÐµÐ¼Ñƒ ÑÑ‚Ð¾ ÑÐ¾Ð²Ð¿Ð°Ð´ÐµÐ½Ð¸Ðµ"
-}}
-
-Ð•ÑÐ»Ð¸ Ñ‚Ð¾Ð²Ð°Ñ€ Ð½Ðµ Ð½Ð°Ð¹Ð´ÐµÐ½:
-{{
-    "found_name": null,
-    "article": null,
-    "confidence": 0,
-    "reasoning": "Ñ‚Ð¾Ð²Ð°Ñ€ Ð½Ðµ Ð½Ð°Ð¹Ð´ÐµÐ½ Ð² ÐºÐ°Ñ‚Ð°Ð»Ð¾Ð³Ðµ"
-}}
-"""
+        candidates = self._select_candidates(query, limit=get_matcher_candidate_limit())
+        catalog_context = self._build_catalog_context(candidates, max_lines=get_matcher_context_lines())
+        prompt = self._build_match_prompt(query, catalog_context)
 
         def parse_result(raw_text: str) -> Dict:
             start_idx = raw_text.find('{')
             end_idx = raw_text.rfind('}') + 1
             if start_idx == -1 or end_idx <= start_idx:
-                raise ValueError("JSON Ð½Ðµ Ð½Ð°Ð¹Ð´ÐµÐ½ Ð² Ð¾Ñ‚Ð²ÐµÑ‚Ðµ")
+                raise ValueError("JSON not found in model response")
 
             gemini_result = json.loads(raw_text[start_idx:end_idx])
             found_name = gemini_result.get('found_name')
@@ -505,18 +552,18 @@ class ReMoMatcher:
                     parsed = parse_result(raw_text)
                     self.model_name = model_name
                     if parsed['found_name'] == MISSING_POSITION_TEXT:
-                        logger.warning(f"âš ï¸ Ð¢Ð¾Ð²Ð°Ñ€ Ð½Ðµ Ð½Ð°Ð¹Ð´ÐµÐ½ Ð´Ð»Ñ: {query}")
+                        logger.warning(f"Item not found for query: {query}")
                     else:
-                        logger.info(f"âœ“ ÐÐ°Ð¹Ð´ÐµÐ½Ð¾: {parsed['found_name']} (confidence: {parsed['similarity_score']})")
+                        logger.info(f"Found: {parsed['found_name']} (confidence: {parsed['similarity_score']})")
                     return parsed
                 except Exception as model_error:
                     last_error = model_error
-                    logger.warning(f"ÐœÐ¾Ð´ÐµÐ»ÑŒ {model_name} Ð½Ðµ ÑÑ€Ð°Ð±Ð¾Ñ‚Ð°Ð»Ð°: {model_error}")
+                    logger.warning(f"Model {model_name} failed: {model_error}")
 
             raise RuntimeError(f"Gemini fallback exhausted: {last_error}")
 
         except Exception as e:
-            logger.error(f"âŒ ÐžÑˆÐ¸Ð±ÐºÐ° Gemini API: {e}", exc_info=True)
+            logger.error(f"Gemini API error: {e}", exc_info=True)
             return {
                 'found_name': MISSING_POSITION_TEXT,
                 'price': None,
@@ -543,16 +590,26 @@ class ReMoMatcher:
             conn.commit()
             conn.close()
         except Exception as e:
-            logger.warning(f"âš ï¸ ÐžÑˆÐ¸Ð±ÐºÐ° ÑÐ¾Ñ…Ñ€Ð°Ð½ÐµÐ½Ð¸Ñ Ð² Ð¸ÑÑ‚Ð¾Ñ€Ð¸ÑŽ: {e}")
+            logger.warning(f"History write error: {e}")
     
     def process_excel(self, excel_path: str, output_path: str = None) -> Tuple[pd.DataFrame, Dict]:
-        """Обработать весь Excel файл КП"""
-        logger.info(f"📊 Начало обработки: {excel_path}")
-
+        """
+        Обработать весь Excel файл КП
+        
+        Args:
+            excel_path: Путь к исходному Excel файлу
+            output_path: Путь для сохранения результата (если не указан, использует исходный путь с _matched суффиксом)
+        
+        Returns:
+            (обработанный DataFrame, статистика)
+        """
+        logger.info(f"Start processing Excel: {excel_path}")
+        
+        # Загрузить Excel
         try:
             df = pd.read_excel(excel_path)
         except Exception as e:
-            logger.error(f"❌ Ошибка загрузки Excel: {e}")
+            logger.error(f"Failed to read Excel: {e}")
             raise
 
         # Найти целевой столбец с номенклатурой.
@@ -567,12 +624,14 @@ class ReMoMatcher:
             col_b = df.columns[1]
 
         if col_b is None:
-            raise ValueError("Не найден столбец 'Наименование оборудования, материалов и кабелей'")
-
-        logger.info(f"✓ Найден столбец: {col_b}")
-
-        if "Цена" not in df.columns:
-            df["Цена"] = pd.Series([None] * len(df), dtype="float64")
+            raise ValueError("Required nomenclature column not found")
+        
+        logger.info(f"Detected source column: {col_b}")
+        
+        # Подготовить столбцы для результатов без дублирования имен.
+        # Это убирает ошибку вида: "cannot insert Артикул, already exists".
+        if 'Цена' not in df.columns:
+            df['Цена'] = pd.Series([None] * len(df), dtype='float64')
         else:
             df["Цена"] = pd.to_numeric(df["Цена"], errors="coerce").astype("float64")
 
@@ -625,34 +684,38 @@ class ReMoMatcher:
                 stats["errors"] += 1
                 logger.warning(f"⚠️ [{idx + 1}] Ошибка: {result.get('error')}")
 
+            if not result.get('success', True):
+                stats['errors'] += 1
+                logger.warning(f"[{idx+1}] Matching error: {result.get('error')}")
+            
+            # Логирование прогресса
             if (idx + 1) % 10 == 0:
-                logger.info(f"⏳ Обработано {idx + 1}/{len(df)} строк")
-
+                logger.info(f"Processed {idx+1}/{len(df)} rows")
+        
+        # Сохранить результат
         if output_path is None:
             src = Path(excel_path)
             output_path = str(src.with_name(f"{src.stem}_matched{src.suffix}"))
 
         try:
             df.to_excel(output_path, index=False)
-            logger.info(f"✓ Результат сохранен: {output_path}")
+            logger.info(f"Result saved: {output_path}")
         except Exception as e:
-            logger.error(f"❌ Ошибка сохранения Excel: {e}")
+            logger.error(f"Failed to save Excel: {e}")
             raise
-
-        logger.info("\n" + "=" * 60)
-        logger.info("📊 СТАТИСТИКА ОБРАБОТКИ")
-        logger.info("=" * 60)
-        logger.info(f"Всего строк:        {stats['total']}")
-        logger.info(f"Найдено товаров:    {stats['found']}")
-        logger.info(f"Не найдено:         {stats['not_found']}")
-        logger.info(f"Из кэша:            {stats['from_cache']}")
-        logger.info(f"Ошибок:             {stats['errors']}")
-        if stats["total"] > 0:
-            logger.info(f"Успешность:         {stats['found'] / stats['total'] * 100:.1f}%")
-        else:
-            logger.info("Успешность:         N/A")
-        logger.info("=" * 60 + "\n")
-
+        
+        # Вывести статистику
+        logger.info("\n" + "="*60)
+        logger.info("PROCESSING STATS")
+        logger.info("="*60)
+        logger.info(f"Total rows:         {stats['total']}")
+        logger.info(f"Matched:            {stats['found']}")
+        logger.info(f"Not found:          {stats['not_found']}")
+        logger.info(f"From cache:         {stats['from_cache']}")
+        logger.info(f"Errors:             {stats['errors']}")
+        logger.info(f"Success rate:       {stats['found']/stats['total']*100:.1f}%" if stats['total'] > 0 else "N/A")
+        logger.info("="*60 + "\n")
+        
         return df, stats
 
 
@@ -660,9 +723,9 @@ if __name__ == "__main__":
     # ÐŸÑ€Ð¸Ð¼ÐµÑ€ Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ð½Ð¸Ñ
     API_KEY = os.getenv('GEMINI_API_KEY')
     if not API_KEY:
-        print("âš ï¸ Ð£ÑÑ‚Ð°Ð½Ð¾Ð²Ð¸Ñ‚Ðµ Ð¿ÐµÑ€ÐµÐ¼ÐµÐ½Ð½ÑƒÑŽ Ð¾ÐºÑ€ÑƒÐ¶ÐµÐ½Ð¸Ñ GEMINI_API_KEY")
-        print("ÐÐ° Windows: set GEMINI_API_KEY=Ð²Ð°Ñˆ_ÐºÐ»ÑŽÑ‡")
-        print("ÐÐ° Linux/Mac: export GEMINI_API_KEY=Ð²Ð°Ñˆ_ÐºÐ»ÑŽÑ‡")
+        print("Set GEMINI_API_KEY environment variable")
+        print("Windows: set GEMINI_API_KEY=your_key")
+        print("Linux/Mac: export GEMINI_API_KEY=your_key")
         exit(1)
     
     matcher = ReMoMatcher(
@@ -678,14 +741,14 @@ if __name__ == "__main__":
     ]
     
     print("\n" + "="*60)
-    print("ðŸ§ª Ð¢Ð•Ð¡Ð¢ÐžÐ’ÐžÐ• Ð¡ÐžÐŸÐžÐ¡Ð¢ÐÐ’Ð›Ð•ÐÐ˜Ð•")
+    print("TEST MATCHING")
     print("="*60 + "\n")
     
     for query in test_queries:
         result = matcher.match(query)
-        print(f"Ð—Ð°Ð¿Ñ€Ð¾Ñ:     {query}")
-        print(f"ÐÐ°Ð¹Ð´ÐµÐ½Ð¾:    {result['found_name']}")
-        print(f"ÐÑ€Ñ‚Ð¸ÐºÑƒÐ»:    {result['article']}")
-        print(f"Ð¦ÐµÐ½Ð°:       {result['price']}")
-        print(f"Ð£Ð²ÐµÑ€ÐµÐ½Ð½Ð¾ÑÑ‚ÑŒ: {result['similarity_score']}")
+        print(f"Query:      {query}")
+        print(f"Found:      {result['found_name']}")
+        print(f"Article:    {result['article']}")
+        print(f"Price:      {result['price']}")
+        print(f"Confidence: {result['similarity_score']}")
         print("-" * 60)

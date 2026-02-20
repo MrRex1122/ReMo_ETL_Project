@@ -18,7 +18,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.13"
 
       - name: Install dependencies
         run: |
@@ -27,6 +27,9 @@ jobs:
 
       - name: Run pytest
         run: pytest -q
+
+      - name: Run targeted unittest command
+        run: python -m unittest tests.test_batch_process tests.test_main_convert tests.test_process_excel -v
 
   deploy:
     name: Deploy to server
