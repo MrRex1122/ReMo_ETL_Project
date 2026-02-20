@@ -88,6 +88,12 @@ python batch_process.py --input-dir "D:\\Data\\Downloads\\upload" --output-dir "
 - ENV:
   - `REMO_DB_CSV` — путь к `price_clean.csv`
   - `REMO_UPLOAD_DIR` — базовая папка данных
+  - `REMO_MATCHER_CACHE_DB` — путь к `matcher_cache.db`
+  - `REMO_MATCH_PROMPT_TEMPLATE_PATH` — путь к кастомному шаблону prompt для Gemini (`{query}` и `{catalog_context}` обязательны)
+  - `REMO_MATCHER_MODELS` — список Gemini-моделей через запятую (порядок fallback)
+  - `REMO_MATCHER_CANDIDATE_LIMIT` — число кандидатов retrieval перед Gemini
+  - `REMO_MATCHER_CONTEXT_LINES` — сколько строк кандидатов передавать в prompt
+  - `REMO_MATCHER_CATALOG_SAMPLE_ITEMS` — размер sample для fallback-контекста каталога
   - `REMO_PRICE_RAW_CSV`, `REMO_PRICE_CONVERTED_CSV`, `REMO_SAMPLE_XLSX` — точечные override
 
 ### 7. CI/CD и автодеплой после тестов

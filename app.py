@@ -409,8 +409,8 @@ def main():
         st.divider()
         
         if st.button("🗑️ Очистить кэш"):
-            cache_file = "matcher_cache.db"
-            if Path(cache_file).exists():
+            cache_file = get_matcher_cache_db_path()
+            if cache_file.exists():
                 os.unlink(cache_file)
                 st.session_state.matcher = None
                 st.success("✓ Кэш очищен")
@@ -593,7 +593,7 @@ def main():
         st.header("📊 История обработок")
         
         try:
-            conn = sqlite3.connect("matcher_cache.db")
+            conn = sqlite3.connect(str(get_matcher_cache_db_path()))
             
             # История результатов
             df_history = pd.read_sql_query(

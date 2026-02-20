@@ -28,6 +28,45 @@ logger = logging.getLogger(__name__)
 
 MISSING_POSITION_TEXT = "Позиция отсутствует"
 
+DEFAULT_MATCH_PROMPT_TEMPLATE = dedent(
+    """
+    Ты эксперт по технической номенклатуре оборудования, кабеля и материалов.
+
+    Задача: Найти в каталоге товар, который ТОЧНО соответствует запросу пользователя.
+
+    КАТАЛОГ ДОСТУПНЫХ ТОВАРОВ:
+    {catalog_context}
+
+    ЗАПРОС ПОЛЬЗОВАТЕЛЯ: "{query}"
+
+    ИНСТРУКЦИИ:
+    1. Внимательно проанализируй запрос пользователя
+    2. Найди в каталоге товар с МАКСИМАЛЬНЫМ семантическим совпадением
+    3. Учитывай:
+       - Технические характеристики (сечение, вольтаж, материал, размеры)
+       - Назначение товара (кабель, кондиционер, сварочный аппарат и т.д.)
+       - Альтернативные названия и аббревиатуры
+    4. Если релевантного аналога нет, верни found_name=null
+    5. Вывод ТОЛЬКО в формате JSON (без лишнего текста)
+
+    ФОРМАТ ОТВЕТА:
+    {{
+        "found_name": "Точное название из каталога",
+        "article": "Артикул товара",
+        "confidence": 0.95,
+        "reasoning": "Краткое объяснение почему это совпадение"
+    }}
+
+    Если товар не найден:
+    {{
+        "found_name": null,
+        "article": null,
+        "confidence": 0,
+        "reasoning": "товар не найден в каталоге"
+    }}
+    """
+).strip()
+
 try:
     from google import genai as genai_sdk
     GENAI_SDK_AVAILABLE = True
@@ -46,7 +85,7 @@ class ReMoMatcher:
     3. Ð’ÐµÑ€Ð½ÑƒÑ‚ÑŒ: (Ð½Ð°Ð¹Ð´ÐµÐ½Ð½Ð¾Ðµ Ð¸Ð¼Ñ, Ñ†ÐµÐ½Ð°, Ð°Ñ€Ñ‚Ð¸ÐºÑƒÐ»)
     """
     
-    def __init__(self, gemini_api_key: str, db_csv_path: str, cache_db: str = "matcher_cache.db"):
+    def __init__(self, gemini_api_key: str, db_csv_path: str, cache_db: str | None = None):
         """
         Args:
             gemini_api_key: API ÐºÐ»ÑŽÑ‡ Google Gemini
@@ -55,7 +94,7 @@ class ReMoMatcher:
         """
         self.api_key = gemini_api_key
         self.db_csv_path = db_csv_path
-        self.cache_db = cache_db
+        self.cache_db = str(get_matcher_cache_db_path(cache_db))
         self.catalog = None
         self.catalog_dict = None
         self.catalog_normalized_dict = None
@@ -65,6 +104,7 @@ class ReMoMatcher:
         self.legacy_genai = None
         self.model = None
         self.model_name = None
+        self.prompt_template = self._load_prompt_template()
         
         # Ð˜Ð½Ð¸Ñ†Ð¸Ð°Ð»Ð¸Ð·Ð°Ñ†Ð¸Ñ Gemini
         if GENAI_SDK_AVAILABLE:
@@ -186,9 +226,10 @@ class ReMoMatcher:
             if name:
                 item = {
                     'name': name,
+                    'name_lc': name.lower(),
                     'article': article,
                     'price': price,
-                    'row_idx': idx
+                    'row_idx': idx,
                 }
 
         # Подготовить текстовый формат каталога для Gemini
@@ -196,6 +237,8 @@ class ReMoMatcher:
 
     def _prepare_catalog_text(self, max_items: int = 500):
         """Подготовить каталог в текстовом формате для контекста Gemini"""
+        if max_items is None:
+            max_items = get_matcher_catalog_sample_items()
         sample = self.catalog.sample(n=min(max_items, len(self.catalog)))
 
         catalog_lines = []
@@ -355,17 +398,7 @@ class ReMoMatcher:
             }
 
     def _candidate_models(self) -> List[str]:
-        preferred = [
-            self.model_name,
-            'gemini-2.5-flash',
-            'gemini-2.5-flash-lite',
-            'gemini-2.0-flash',
-            'gemini-2.0-flash-lite',
-            'gemini-1.5-flash',
-            'gemini-1.5-flash-8b',
-            'gemini-1.5-pro',
-            'gemini-pro',
-        ]
+        preferred = [self.model_name, *get_matcher_models()]
         result = []
         seen = set()
         for name in preferred:
