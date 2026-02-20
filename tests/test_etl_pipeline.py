@@ -22,6 +22,33 @@ class PriceETLTests(unittest.TestCase):
 
             self.assertTrue(output_csv.exists())
 
+    def test_transform_maps_alias_columns_to_canonical_schema(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            input_csv = tmp / "input_alias.csv"
+            output_csv = tmp / "clean.csv"
+
+            source_df = pd.DataFrame(
+                {
+                    "Номенклатура": ["Кабель ВВГ", "Щиток", "Розетка"],
+                    "Код товара": ["ART-1", None, ""],
+                    "Цена": ["1 200,50", "2300", "150"],
+                }
+            )
+            source_df.to_csv(input_csv, sep=";", encoding="utf-8", index=False)
+
+            etl = PriceETL(str(input_csv), str(output_csv))
+            clean_df = etl.run()
+
+            self.assertIn("Наименование", clean_df.columns)
+            self.assertIn("Артикул", clean_df.columns)
+            self.assertIn("Цена розничная", clean_df.columns)
+
+            self.assertEqual(clean_df.loc[0, "Наименование"], "Кабель ВВГ")
+            self.assertEqual(clean_df.loc[0, "Артикул"], "ART-1")
+            self.assertAlmostEqual(float(clean_df.loc[0, "Цена розничная"]), 1200.50, places=2)
+            self.assertEqual(clean_df.loc[1, "Артикул"], "UNKNOWN")
+
 
 if __name__ == "__main__":
     unittest.main()
