@@ -1,6 +1,6 @@
-"""
+﻿"""
 ReMo Matcher v1.0
-Семантическое сопоставление номенклатуры с использованием Gemini API
+Ð¡ÐµÐ¼Ð°Ð½Ñ‚Ð¸Ñ‡ÐµÑÐºÐ¾Ðµ ÑÐ¾Ð¿Ð¾ÑÑ‚Ð°Ð²Ð»ÐµÐ½Ð¸Ðµ Ð½Ð¾Ð¼ÐµÐ½ÐºÐ»Ð°Ñ‚ÑƒÑ€Ñ‹ Ñ Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ð½Ð¸ÐµÐ¼ Gemini API
 """
 
 import pandas as pd
@@ -68,6 +68,40 @@ If not found:
 }}
 """.strip()
 
+DEFAULT_MATCH_PROMPT_TEMPLATE = """
+You are an expert in technical nomenclature for equipment, cables and materials.
+
+Task: find a catalog item that BEST matches the user query.
+
+AVAILABLE CATALOG ITEMS:
+{catalog_context}
+
+USER QUERY: "{query}"
+
+RULES:
+1. Analyze the query carefully.
+2. Pick the most semantically relevant item from catalog.
+3. Consider technical specs, product purpose, synonyms and abbreviations.
+4. If nothing relevant exists, return found_name=null.
+5. Output JSON only.
+
+RESPONSE FORMAT:
+{{
+    "found_name": "Exact catalog name",
+    "article": "Catalog article",
+    "confidence": 0.95,
+    "reasoning": "Short explanation"
+}}
+
+If not found:
+{{
+    "found_name": null,
+    "article": null,
+    "confidence": 0,
+    "reasoning": "item not found in catalog"
+}}
+""".strip()
+
 try:
     from google import genai as genai_sdk
     GENAI_SDK_AVAILABLE = True
@@ -78,20 +112,20 @@ except ImportError:
 
 class ReMoMatcher:
     """
-    Основной класс для семантического сопоставления номенклатуры
+    ÐžÑÐ½Ð¾Ð²Ð½Ð¾Ð¹ ÐºÐ»Ð°ÑÑ Ð´Ð»Ñ ÑÐµÐ¼Ð°Ð½Ñ‚Ð¸Ñ‡ÐµÑÐºÐ¾Ð³Ð¾ ÑÐ¾Ð¿Ð¾ÑÑ‚Ð°Ð²Ð»ÐµÐ½Ð¸Ñ Ð½Ð¾Ð¼ÐµÐ½ÐºÐ»Ð°Ñ‚ÑƒÑ€Ñ‹
     
     Workflow:
-    1. Загрузить товарную БД (price_clean.csv)
-    2. Для каждого товара из КП найти соответствие в БД
-    3. Вернуть: (найденное имя, цена, артикул)
+    1. Ð—Ð°Ð³Ñ€ÑƒÐ·Ð¸Ñ‚ÑŒ Ñ‚Ð¾Ð²Ð°Ñ€Ð½ÑƒÑŽ Ð‘Ð” (price_clean.csv)
+    2. Ð”Ð»Ñ ÐºÐ°Ð¶Ð´Ð¾Ð³Ð¾ Ñ‚Ð¾Ð²Ð°Ñ€Ð° Ð¸Ð· ÐšÐŸ Ð½Ð°Ð¹Ñ‚Ð¸ ÑÐ¾Ð¾Ñ‚Ð²ÐµÑ‚ÑÑ‚Ð²Ð¸Ðµ Ð² Ð‘Ð”
+    3. Ð’ÐµÑ€Ð½ÑƒÑ‚ÑŒ: (Ð½Ð°Ð¹Ð´ÐµÐ½Ð½Ð¾Ðµ Ð¸Ð¼Ñ, Ñ†ÐµÐ½Ð°, Ð°Ñ€Ñ‚Ð¸ÐºÑƒÐ»)
     """
     
     def __init__(self, gemini_api_key: str, db_csv_path: str, cache_db: str | None = None):
         """
         Args:
-            gemini_api_key: API ключ Google Gemini
-            db_csv_path: Путь к price_clean.csv с товарной базой
-            cache_db: БД для кэширования результатов сопоставления
+            gemini_api_key: API ÐºÐ»ÑŽÑ‡ Google Gemini
+            db_csv_path: ÐŸÑƒÑ‚ÑŒ Ðº price_clean.csv Ñ Ñ‚Ð¾Ð²Ð°Ñ€Ð½Ð¾Ð¹ Ð±Ð°Ð·Ð¾Ð¹
+            cache_db: Ð‘Ð” Ð´Ð»Ñ ÐºÑÑˆÐ¸Ñ€Ð¾Ð²Ð°Ð½Ð¸Ñ Ñ€ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚Ð¾Ð² ÑÐ¾Ð¿Ð¾ÑÑ‚Ð°Ð²Ð»ÐµÐ½Ð¸Ñ
         """
         self.api_key = gemini_api_key
         self.db_csv_path = db_csv_path
@@ -109,7 +143,7 @@ class ReMoMatcher:
         self.model_name = None
         self.prompt_template = self._load_prompt_template()
         
-        # Инициализация Gemini
+        # Ð˜Ð½Ð¸Ñ†Ð¸Ð°Ð»Ð¸Ð·Ð°Ñ†Ð¸Ñ Gemini
         if GENAI_SDK_AVAILABLE:
             try:
                 self.client = genai_sdk.Client(api_key=self.api_key)
@@ -132,14 +166,14 @@ class ReMoMatcher:
             self.backend = "google-generativeai"
             logger.info("Gemini backend: google-generativeai (fallback)")
         
-        # Инициализация кэша
+        # Ð˜Ð½Ð¸Ñ†Ð¸Ð°Ð»Ð¸Ð·Ð°Ñ†Ð¸Ñ ÐºÑÑˆÐ°
         self._init_cache_db()
         self._load_catalog()
         
         logger.info("ReMoMatcher initialized")
     
     def _init_cache_db(self):
-        """Инициализировать БД кэша"""
+        """Ð˜Ð½Ð¸Ñ†Ð¸Ð°Ð»Ð¸Ð·Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ Ð‘Ð” ÐºÑÑˆÐ°"""
         conn = sqlite3.connect(self.cache_db)
         cursor = conn.cursor()
         
@@ -173,6 +207,37 @@ class ReMoMatcher:
         conn.close()
         logger.info("Cache DB initialized")
     
+    @staticmethod
+    def _clean_text_value(value: object) -> str:
+        if pd.isna(value):
+            return ""
+        text = str(value).strip()
+        if text.lower() in {"nan", "none", "<na>"}:
+            return ""
+        return text
+
+    @staticmethod
+    def _parse_price_value(value: object) -> Optional[float]:
+        if pd.isna(value):
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+
+        cleaned = (
+            str(value)
+            .replace("\xa0", "")
+            .replace(" ", "")
+            .replace(",", ".")
+        )
+        cleaned = "".join(ch for ch in cleaned if ch.isdigit() or ch in {".", "-"})
+        if not cleaned:
+            return None
+
+        try:
+            return float(cleaned)
+        except ValueError:
+            return None
+
     def _load_catalog(self):
         """Загрузить товарный каталог"""
         logger.info(f"Loading catalog from {self.db_csv_path}")
@@ -220,7 +285,7 @@ class ReMoMatcher:
         if max_items is None:
             max_items = get_matcher_catalog_sample_items()
         sample = self.catalog.sample(n=min(max_items, len(self.catalog)))
-        
+
         catalog_lines = []
         for idx, row in sample.iterrows():
             line = (
@@ -318,7 +383,7 @@ class ReMoMatcher:
         return "\n".join(lines)
     
     def _get_from_cache(self, query: str) -> Optional[Dict]:
-        """Получить результат из кэша"""
+        """ÐŸÐ¾Ð»ÑƒÑ‡Ð¸Ñ‚ÑŒ Ñ€ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚ Ð¸Ð· ÐºÑÑˆÐ°"""
         query_hash = self._hash_query(query)
         
         try:
@@ -333,7 +398,7 @@ class ReMoMatcher:
             conn.close()
             
             if result:
-                logger.debug(f"💾 Результат найден в кэше: {query}")
+                logger.debug(f"ðŸ’¾ Ð ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚ Ð½Ð°Ð¹Ð´ÐµÐ½ Ð² ÐºÑÑˆÐµ: {query}")
                 found_name = result[0] or MISSING_POSITION_TEXT
                 return {
                     'found_name': found_name,
@@ -351,7 +416,7 @@ class ReMoMatcher:
     
     def _save_to_cache(self, query: str, found_name: str, price: Optional[float], 
                        article: str, similarity_score: float, raw_response: str):
-        """Сохранить результат в кэш"""
+        """Ð¡Ð¾Ñ…Ñ€Ð°Ð½Ð¸Ñ‚ÑŒ Ñ€ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚ Ð² ÐºÑÑˆ"""
         query_hash = self._hash_query(query)
         
         try:
@@ -371,15 +436,15 @@ class ReMoMatcher:
     
     def match(self, query: str, use_cache: bool = True) -> Dict:
         """
-        Сопоставить номенклатуру из КП с товарной БД
+        Ð¡Ð¾Ð¿Ð¾ÑÑ‚Ð°Ð²Ð¸Ñ‚ÑŒ Ð½Ð¾Ð¼ÐµÐ½ÐºÐ»Ð°Ñ‚ÑƒÑ€Ñƒ Ð¸Ð· ÐšÐŸ Ñ Ñ‚Ð¾Ð²Ð°Ñ€Ð½Ð¾Ð¹ Ð‘Ð”
         
         Args:
-            query: Наименование из столбца B КП
-            use_cache: Использовать кэш?
+            query: ÐÐ°Ð¸Ð¼ÐµÐ½Ð¾Ð²Ð°Ð½Ð¸Ðµ Ð¸Ð· ÑÑ‚Ð¾Ð»Ð±Ñ†Ð° B ÐšÐŸ
+            use_cache: Ð˜ÑÐ¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÑŒ ÐºÑÑˆ?
         
         Returns:
             {
-                'found_name': 'Найденное имя из БД',
+                'found_name': 'ÐÐ°Ð¹Ð´ÐµÐ½Ð½Ð¾Ðµ Ð¸Ð¼Ñ Ð¸Ð· Ð‘Ð”',
                 'price': 1234.56,
                 'article': 'ART-001',
                 'similarity_score': 0.95,
@@ -389,14 +454,14 @@ class ReMoMatcher:
             }
         """
         
-        # Проверить кэш
+        # ÐŸÑ€Ð¾Ð²ÐµÑ€Ð¸Ñ‚ÑŒ ÐºÑÑˆ
         if use_cache:
             cached = self._get_from_cache(query)
             if cached:
                 return cached
         
         try:
-            # Точное совпадение в словаре
+            # Ð¢Ð¾Ñ‡Ð½Ð¾Ðµ ÑÐ¾Ð²Ð¿Ð°Ð´ÐµÐ½Ð¸Ðµ Ð² ÑÐ»Ð¾Ð²Ð°Ñ€Ðµ
             exact_match = self.catalog_dict.get(query.lower())
             if exact_match:
                 logger.info(f"Exact match found: {query}")
@@ -553,7 +618,7 @@ class ReMoMatcher:
     
     def save_to_history(self, query: str, found_name: str, price: Optional[float], 
                         article: str, user_approved: bool, correction_note: str = ""):
-        """Сохранить результат в историю"""
+        """Ð¡Ð¾Ñ…Ñ€Ð°Ð½Ð¸Ñ‚ÑŒ Ñ€ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚ Ð² Ð¸ÑÑ‚Ð¾Ñ€Ð¸ÑŽ"""
         try:
             conn = sqlite3.connect(self.cache_db)
             cursor = conn.cursor()
@@ -588,17 +653,18 @@ class ReMoMatcher:
         except Exception as e:
             logger.error(f"Failed to read Excel: {e}")
             raise
-        
-        # Найти столбец B (по названию или номеру)
+
+        # Найти целевой столбец с номенклатурой.
         col_b = None
         for col in df.columns:
-            if 'наименование' in str(col).lower() and 'оборудование' in str(col).lower():
+            normalized_col = str(col).strip().lower()
+            if "наименование" in normalized_col and "оборудован" in normalized_col:
                 col_b = col
                 break
-        
+
         if col_b is None and len(df.columns) > 1:
-            col_b = df.columns[1]  # Столбец B (индекс 1)
-        
+            col_b = df.columns[1]
+
         if col_b is None:
             raise ValueError("Required nomenclature column not found")
         
@@ -609,55 +675,56 @@ class ReMoMatcher:
         if 'Цена' not in df.columns:
             df['Цена'] = pd.Series([None] * len(df), dtype='float64')
         else:
-            df['Цена'] = pd.to_numeric(df['Цена'], errors='coerce').astype('float64')
+            df["Цена"] = pd.to_numeric(df["Цена"], errors="coerce").astype("float64")
 
-        for text_col in ('Найденная номенклатура', 'Артикул', 'Ошибка сопоставления'):
+        for text_col in ("Найденная номенклатура", "Артикул", "Ошибка сопоставления"):
             if text_col not in df.columns:
                 df[text_col] = None
             else:
                 df[text_col] = df[text_col].astype(object)
-        
-        # Обработать каждую строку
+
         stats = {
-            'total': 0,
-            'found': 0,
-            'not_found': 0,
-            'from_cache': 0,
-            'errors': 0
+            "total": 0,
+            "found": 0,
+            "not_found": 0,
+            "from_cache": 0,
+            "errors": 0,
         }
-        
+
+        skip_queries = {
+            "наименование",
+            "наименование оборудования, материалов и кабелей",
+            "nomenclature",
+        }
+
         for idx, row in df.iterrows():
             query = str(row[col_b]).strip()
-            
-            if not query or query.lower() == 'nan':
+            if not query or query.lower() == "nan":
                 continue
 
-            if query.strip().lower() in {
-                'наименование',
-                'наименование оборудования, материалов и кабелей',
-                'nomenclature',
-            }:
+            if query.lower() in skip_queries:
                 continue
-            
-            stats['total'] += 1
-            
-            # Сопоставить
+
+            stats["total"] += 1
             result = self.match(query, use_cache=True)
-            
-            # Заполнить результаты
-            found_name = result.get('found_name') or MISSING_POSITION_TEXT
-            df.at[idx, 'Цена'] = result.get('price')
-            df.at[idx, 'Найденная номенклатура'] = found_name
-            df.at[idx, 'Артикул'] = result.get('article')
-            df.at[idx, 'Ошибка сопоставления'] = result.get('error')
 
-            if result.get('from_cache'):
-                stats['from_cache'] += 1
+            found_name = result.get("found_name") or MISSING_POSITION_TEXT
+            df.at[idx, "Цена"] = result.get("price")
+            df.at[idx, "Найденная номенклатура"] = found_name
+            df.at[idx, "Артикул"] = result.get("article")
+            df.at[idx, "Ошибка сопоставления"] = result.get("error")
+
+            if result.get("from_cache"):
+                stats["from_cache"] += 1
 
             if found_name == MISSING_POSITION_TEXT:
-                stats['not_found'] += 1
+                stats["not_found"] += 1
             else:
-                stats['found'] += 1
+                stats["found"] += 1
+
+            if not result.get("success", True):
+                stats["errors"] += 1
+                logger.warning(f"⚠️ [{idx + 1}] Ошибка: {result.get('error')}")
 
             if not result.get('success', True):
                 stats['errors'] += 1
@@ -671,7 +738,7 @@ class ReMoMatcher:
         if output_path is None:
             src = Path(excel_path)
             output_path = str(src.with_name(f"{src.stem}_matched{src.suffix}"))
-        
+
         try:
             df.to_excel(output_path, index=False)
             logger.info(f"Result saved: {output_path}")
@@ -695,7 +762,7 @@ class ReMoMatcher:
 
 
 if __name__ == "__main__":
-    # Пример использования
+    # ÐŸÑ€Ð¸Ð¼ÐµÑ€ Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ð½Ð¸Ñ
     API_KEY = os.getenv('GEMINI_API_KEY')
     if not API_KEY:
         print("Set GEMINI_API_KEY environment variable")
@@ -708,11 +775,11 @@ if __name__ == "__main__":
         db_csv_path=str(get_catalog_csv_path())
     )
     
-    # Тестовое сопоставление
+    # Ð¢ÐµÑÑ‚Ð¾Ð²Ð¾Ðµ ÑÐ¾Ð¿Ð¾ÑÑ‚Ð°Ð²Ð»ÐµÐ½Ð¸Ðµ
     test_queries = [
-        "Кабель медный 4кв.мм",
-        "Провод Cu 4x2.5",
-        "Сварочный аппарат инвертор",
+        "ÐšÐ°Ð±ÐµÐ»ÑŒ Ð¼ÐµÐ´Ð½Ñ‹Ð¹ 4ÐºÐ².Ð¼Ð¼",
+        "ÐŸÑ€Ð¾Ð²Ð¾Ð´ Cu 4x2.5",
+        "Ð¡Ð²Ð°Ñ€Ð¾Ñ‡Ð½Ñ‹Ð¹ Ð°Ð¿Ð¿Ð°Ñ€Ð°Ñ‚ Ð¸Ð½Ð²ÐµÑ€Ñ‚Ð¾Ñ€",
     ]
     
     print("\n" + "="*60)
