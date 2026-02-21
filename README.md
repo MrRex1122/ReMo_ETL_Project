@@ -80,13 +80,29 @@ python batch_process.py --input-dir "D:\\Data\\Downloads\\upload" --output-dir "
 
 ### 6. Настройка путей к данным (без хардкода)
 
-По умолчанию проект использует каталог `D:\Data\Downloads\upload`, но путь можно переопределить:
+По умолчанию проект использует каталог `./data` (рядом с проектом), но путь можно переопределить:
 - UI: поле "Путь к price_clean.csv" в боковой панели
 - CLI: флаг `--db-csv` (batch/e2e), `--input`/`--output` (etl/main)
 - ENV:
   - `REMO_DB_CSV` — путь к `price_clean.csv`
   - `REMO_UPLOAD_DIR` — базовая папка данных
   - `REMO_PRICE_RAW_CSV`, `REMO_PRICE_CONVERTED_CSV`, `REMO_SAMPLE_XLSX` — точечные override
+
+
+
+### Railway: как не прогонять ETL после каждого деплоя
+
+Чтобы `price_clean.csv` не пропадал после релиза, храните данные на **Railway Volume**:
+
+1. Создайте Volume в Railway и примонтируйте его к сервису.
+2. Задайте `REMO_UPLOAD_DIR` в переменных окружения, например:
+   - `REMO_UPLOAD_DIR=/data/remo`
+3. Один раз загрузите/сгенерируйте в этом каталоге:
+   - `/data/remo/price_converted.csv`
+   - `/data/remo/price_clean.csv`
+4. Дальше при деплоях файлы сохраняются в volume, ETL не нужно гонять заново.
+
+Примечание: если `REMO_UPLOAD_DIR` не задан, приложение автоматически использует `RAILWAY_VOLUME_MOUNT_PATH/remo_data` (если переменная доступна в Railway).
 
 ---
 
