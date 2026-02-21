@@ -80,13 +80,37 @@ python batch_process.py --input-dir "D:\\Data\\Downloads\\upload" --output-dir "
 
 ### 6. Настройка путей к данным (без хардкода)
 
-По умолчанию проект использует каталог `D:\Data\Downloads\upload`, но путь можно переопределить:
+По умолчанию проект использует каталог `./data` (рядом с проектом), но путь можно переопределить:
 - UI: поле "Путь к price_clean.csv" в боковой панели
 - CLI: флаг `--db-csv` (batch/e2e), `--input`/`--output` (etl/main)
 - ENV:
   - `REMO_DB_CSV` — путь к `price_clean.csv`
   - `REMO_UPLOAD_DIR` — базовая папка данных
   - `REMO_PRICE_RAW_CSV`, `REMO_PRICE_CONVERTED_CSV`, `REMO_SAMPLE_XLSX` — точечные override
+  - `REMO_MATCHER_PARALLEL_REQUESTS` — количество параллельных LLM-запросов (1..10, по умолчанию 1)
+  - `REMO_MATCHER_MODELS` — список Gemini-моделей через запятую (по умолчанию `gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.0-flash,gemini-2.0-flash-lite`)
+
+- В UI (боковая панель) доступны параметры тонкой настройки matcher:
+  - **Параллельные запросы к Gemini** (1..10)
+  - **Размер сэмпла каталога для контекста** (100..1500)
+  - Контекст подбирается детерминированно: из релевантных токен-групп запроса (без случайного `sample`)
+  Изменения применяются кнопкой **"Применить параметры matcher"**.
+
+
+
+### Railway: как не прогонять ETL после каждого деплоя
+
+Чтобы `price_clean.csv` не пропадал после релиза, храните данные на **Railway Volume**:
+
+1. Создайте Volume в Railway и примонтируйте его к сервису.
+2. Задайте `REMO_UPLOAD_DIR` в переменных окружения, например:
+   - `REMO_UPLOAD_DIR=/data/remo`
+3. Один раз загрузите/сгенерируйте в этом каталоге:
+   - `/data/remo/price_converted.csv`
+   - `/data/remo/price_clean.csv`
+4. Дальше при деплоях файлы сохраняются в volume, ETL не нужно гонять заново.
+
+Примечание: если `REMO_UPLOAD_DIR` не задан, приложение автоматически использует `RAILWAY_VOLUME_MOUNT_PATH/remo_data` (если переменная доступна в Railway).
 
 ---
 
@@ -162,6 +186,10 @@ python batch_process.py --input-dir "D:\\Data\\Downloads\\upload" --output-dir "
 
 ### Компоненты
 
+> В текущем UI используется **один активный каталог** — это файл из поля `Путь к price_clean.csv`.
+> Если хотите «сложить всё в кучу», объедините CSV заранее (ETL/скриптом) в единый `price_clean.csv` и укажите путь к нему.
+
+
 | Файл | Назначение |
 |------|-----------|
 | `matcher.py` | Основной класс ReMoMatcher, работа с Gemini |
@@ -188,7 +216,7 @@ python batch_process.py --input-dir "D:\\Data\\Downloads\\upload" --output-dir "
 
 ## 🛠️ API Gemini
 
-Система использует модель `gemini-1.5-flash`:
+Система использует пул актуальных моделей Gemini (по умолчанию начинается с `gemini-2.5-flash`):
 
 **Особенности:**
 - ✅ Многоязычная поддержка (РФ, EN, DE, IT и т.д.)
@@ -251,6 +279,17 @@ __pycache__/
 ---
 
 ## 🐛 Troubleshooting
+
+### 404 NOT_FOUND по моделям Gemini
+```
+Модель ... не сработала: 404 NOT_FOUND
+```
+Это значит, что выбранная модель недоступна в вашем проекте/регионе или для `v1beta` метода `generateContent`.
+
+Что делать:
+1. Задайте `REMO_MATCHER_MODELS` только из поддерживаемых моделей вашего API-ключа.
+2. Оставьте порядок от более сильной к более дешевой модели.
+3. Перезапустите приложение.
 
 ### API ключ не работает
 ```
