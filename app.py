@@ -4,6 +4,7 @@ Streamlit интерфейс для семантического сопоста�
 """
 
 import streamlit as st
+from streamlit.errors import StreamlitSecretNotFoundError
 import pandas as pd
 import os
 from matcher import ReMoMatcher, MISSING_POSITION_TEXT
@@ -83,11 +84,25 @@ if 'processing' not in st.session_state:
 
 
 
+
+
+def _get_gemini_api_key() -> str | None:
+    """Безопасно получить API-ключ из secrets/env без падения при отсутствии secrets.toml."""
+    try:
+        secret_value = st.secrets.get("GEMINI_API_KEY")
+    except StreamlitSecretNotFoundError:
+        secret_value = None
+    except Exception as e:
+        logger.warning(f"⚠️ Не удалось прочитать Streamlit secrets: {e}")
+        secret_value = None
+
+    return secret_value or os.getenv("GEMINI_API_KEY")
+
 def _validate_runtime_readiness(db_csv: str) -> list[str]:
     """Проверить готовность приложения к обработке перед запуском matcher."""
     issues = []
 
-    api_key = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
+    api_key = _get_gemini_api_key()
     if not api_key:
         issues.append("Не задан GEMINI_API_KEY")
 
@@ -106,15 +121,7 @@ def get_matcher() -> ReMoMatcher:
 
     if needs_reinit:
         logger.info("🔄 Инициализация ReMoMatcher...")
-        api_key = None
-        try:
-            api_key = st.secrets.get("GEMINI_API_KEY")
-        except Exception:
-            # Например, в Railway может не быть .streamlit/secrets.toml.
-            # В таком случае используем переменные окружения.
-            api_key = None
-
-        api_key = api_key or os.getenv("GEMINI_API_KEY")
+        api_key = _get_gemini_api_key()
         
         if not api_key:
             logger.error("❌ GEMINI_API_KEY не установлен")
