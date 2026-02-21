@@ -15,7 +15,7 @@ import re
 from pathlib import Path
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from config import get_catalog_csv_path, get_matcher_parallel_requests
+from config import get_catalog_csv_path, get_matcher_parallel_requests, get_matcher_cache_db_path
 
 logging.basicConfig(
     level=logging.INFO,
