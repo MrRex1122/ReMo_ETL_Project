@@ -40,6 +40,11 @@ class GroupContextTests(unittest.TestCase):
             "row_idx": 10,
         }
 
+        self.matcher.retrieval_candidates_limit = 1200
+        self.matcher.context_chunk_size = 300
+        self.matcher.max_context_chunks = 4
+        self.matcher.token_idf = {"патч": 2.0, "корд": 1.8, "cat6": 2.5, "оптический": 2.2}
+
         self.matcher.group_index = {
             "патч": [item1, item2],
             "корд": [item1, item2],
@@ -74,6 +79,26 @@ class GroupContextTests(unittest.TestCase):
         self.assertIn("Кабель UTP cat6", self.matcher.catalog_text)
         self.assertIn("UTP-6", self.matcher.catalog_text)
 
+    def test_rank_group_candidates_respects_limit(self):
+        many_items = []
+        for idx in range(200):
+            many_items.append(
+                {
+                    "name": f"Кабель cat6 позиция {idx}",
+                    "name_lc": f"кабель cat6 позиция {idx}",
+                    "article": f"A-{idx}",
+                    "price": idx,
+                    "row_idx": idx,
+                    "tokens": ["кабель", "cat6", str(idx)],
+                }
+            )
+        self.matcher.retrieval_candidates_limit = 25
+        self.matcher.group_index = {"кабель": many_items, "cat6": many_items}
+
+        ranked = self.matcher._rank_group_candidates("кабель cat6")
+
+        self.assertEqual(len(ranked), 25)
+
     def test_build_context_chunks_splits_large_groups(self):
         many_items = []
         for idx in range(650):
@@ -84,6 +109,7 @@ class GroupContextTests(unittest.TestCase):
                     "article": f"A-{idx}",
                     "price": idx,
                     "row_idx": idx,
+                    "tokens": ["кабель", "cat6", str(idx)],
                 }
             )
         self.matcher.group_index = {"кабель": many_items, "cat6": many_items}

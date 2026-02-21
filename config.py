@@ -23,6 +23,7 @@ DEFAULT_MATCHER_LOCAL_CONFIDENCE_THRESHOLD = 0.92
 DEFAULT_MATCHER_LOCAL_MARGIN_THRESHOLD = 0.08
 DEFAULT_MATCHER_CONTEXT_CHUNK_SIZE = 300
 DEFAULT_MATCHER_MAX_CONTEXT_CHUNKS = 4
+DEFAULT_MATCHER_RETRIEVAL_CANDIDATES = 1200
 
 
 def _normalize_path(raw: str | Path) -> Path:
@@ -139,3 +140,12 @@ def get_matcher_max_context_chunks() -> int:
         return min(10, max(1, value))
     except ValueError:
         return DEFAULT_MATCHER_MAX_CONTEXT_CHUNKS
+
+
+def get_matcher_retrieval_candidates() -> int:
+    raw = os.getenv("REMO_MATCHER_RETRIEVAL_CANDIDATES", str(DEFAULT_MATCHER_RETRIEVAL_CANDIDATES))
+    try:
+        value = int(raw)
+        return min(10000, max(100, value))
+    except ValueError:
+        return DEFAULT_MATCHER_RETRIEVAL_CANDIDATES

@@ -370,8 +370,9 @@ def main():
                 st.session_state.db_csv_path = selected_catalog
 
         st.text_input(
-            "Путь к price_clean.csv",
-            key="db_csv_path"
+            "Путь к price_clean.csv (или к папке с *_clean.csv)",
+            key="db_csv_path",
+            help="Если указана папка, matcher автоматически соберет единый price_clean_merged.csv из всех *_clean.csv.",
         )
         
         if st.button("🔄 Перезагрузить БД"):

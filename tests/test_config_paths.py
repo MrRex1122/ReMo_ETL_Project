@@ -21,6 +21,7 @@ class ConfigPathTests(unittest.TestCase):
             "REMO_MATCHER_LOCAL_MARGIN_THRESHOLD",
             "REMO_MATCHER_CONTEXT_CHUNK_SIZE",
             "REMO_MATCHER_MAX_CONTEXT_CHUNKS",
+            "REMO_MATCHER_RETRIEVAL_CANDIDATES",
         )}
 
     def tearDown(self):
@@ -107,6 +108,17 @@ class ConfigPathTests(unittest.TestCase):
         self.assertEqual(
             config.get_matcher_max_context_chunks(),
             config.DEFAULT_MATCHER_MAX_CONTEXT_CHUNKS,
+        )
+
+    def test_matcher_retrieval_candidates_clamped(self):
+        os.environ["REMO_MATCHER_RETRIEVAL_CANDIDATES"] = "99999"
+        self.assertEqual(config.get_matcher_retrieval_candidates(), 10000)
+
+    def test_matcher_retrieval_candidates_fallback_on_invalid(self):
+        os.environ["REMO_MATCHER_RETRIEVAL_CANDIDATES"] = "oops"
+        self.assertEqual(
+            config.get_matcher_retrieval_candidates(),
+            config.DEFAULT_MATCHER_RETRIEVAL_CANDIDATES,
         )
 
     def test_matcher_models_parsed_from_env(self):

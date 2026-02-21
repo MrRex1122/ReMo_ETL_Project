@@ -12,9 +12,12 @@ import logging
 import hashlib
 import os
 import re
+import math
 from pathlib import Path
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from catalog_merge import build_merged_catalog
 from config import (
     get_catalog_csv_path,
     get_matcher_parallel_requests,
@@ -22,6 +25,9 @@ from config import (
     get_matcher_local_confidence_threshold,
     get_matcher_local_margin_threshold,
     get_matcher_models,
+    get_matcher_context_chunk_size,
+    get_matcher_max_context_chunks,
+    get_matcher_retrieval_candidates,
 )
 
 logging.basicConfig(
@@ -62,13 +68,14 @@ class ReMoMatcher:
             cache_db: Ð‘Ð” Ð´Ð»Ñ ÐºÑÑˆÐ¸Ñ€Ð¾Ð²Ð°Ð½Ð¸Ñ Ñ€ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚Ð¾Ð² ÑÐ¾Ð¿Ð¾ÑÑ‚Ð°Ð²Ð»ÐµÐ½Ð¸Ñ
         """
         self.api_key = gemini_api_key
-        self.db_csv_path = db_csv_path
+        self.db_csv_path = self._resolve_catalog_csv_path(db_csv_path)
         self.cache_db = str(get_matcher_cache_db_path(cache_db))
         self.catalog = None
         self.catalog_dict = None
         self.catalog_normalized_dict = {}
         self.catalog_items = []
         self.group_index = {}
+        self.token_idf = {}
         self.catalog_text = None
         self.local_confidence_threshold = get_matcher_local_confidence_threshold()
         self.local_margin_threshold = get_matcher_local_margin_threshold()
@@ -79,6 +86,9 @@ class ReMoMatcher:
         self.model_name = None
         self.parallel_requests = min(10, max(1, int(parallel_requests or get_matcher_parallel_requests())))
         self.catalog_sample_items = max(50, int(catalog_sample_items))
+        self.context_chunk_size = get_matcher_context_chunk_size()
+        self.max_context_chunks = get_matcher_max_context_chunks()
+        self.retrieval_candidates_limit = get_matcher_retrieval_candidates()
         self.local_confidence_threshold = get_matcher_local_confidence_threshold()
         self.local_margin_threshold = get_matcher_local_margin_threshold()
         
@@ -111,6 +121,16 @@ class ReMoMatcher:
         
         logger.info("ReMoMatcher initialized")
     
+
+    def _resolve_catalog_csv_path(self, db_csv_path: str) -> str:
+        source_path = Path(str(db_csv_path))
+        if source_path.is_dir():
+            merged_path = source_path / "price_clean_merged.csv"
+            resolved = build_merged_catalog(source_path, merged_path)
+            logger.info(f"🧩 Объединенный каталог подготовлен: {resolved}")
+            return str(resolved)
+        return str(source_path)
+
     def _init_cache_db(self):
         """Ð˜Ð½Ð¸Ñ†Ð¸Ð°Ð»Ð¸Ð·Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ Ð‘Ð” ÐºÑÑˆÐ°"""
         conn = sqlite3.connect(self.cache_db)
@@ -194,31 +214,41 @@ class ReMoMatcher:
         self.catalog_normalized_dict = {}
         self.catalog_items = []
         token_to_items: Dict[str, List[Dict]] = defaultdict(list)
+        token_doc_frequency: Dict[str, int] = defaultdict(int)
+        total_items = 0
         for idx, row in self.catalog.iterrows():
             name = str(row.get(CANONICAL_NAME_COLUMN, '')).strip()
             article = str(row.get(CANONICAL_ARTICLE_COLUMN, '')).strip()
             price = float(row.get(CANONICAL_PRICE_COLUMN, 0)) if CANONICAL_PRICE_COLUMN in row else None
 
             if name:
+                tokens = sorted(set(self._tokenize(name)))
                 item = {
                     'name': name,
                     'name_lc': name.lower(),
                     'article': article,
                     'price': price,
                     'row_idx': idx,
+                    'tokens': tokens,
                 }
                 self.catalog_dict[name.lower()] = item
                 normalized_name = self._normalize_text(name)
                 if normalized_name and normalized_name not in self.catalog_normalized_dict:
                     self.catalog_normalized_dict[normalized_name] = item
                 self.catalog_items.append(item)
-                for token in self._tokenize(name):
+                total_items += 1
+                for token in tokens:
                     token_to_items[token].append(item)
+                    token_doc_frequency[token] += 1
 
         self.group_index = {
             token: items
             for token, items in token_to_items.items()
             if len(items) >= 3
+        }
+        self.token_idf = {
+            token: math.log((1 + total_items) / (1 + freq)) + 1.0
+            for token, freq in token_doc_frequency.items()
         }
 
         # Подготовить текстовый формат каталога для Gemini
@@ -251,21 +281,40 @@ class ReMoMatcher:
         if not query_tokens or not self.group_index:
             return []
 
-        candidate_map: Dict[str, Dict] = {}
         query_token_set = set(query_tokens)
-        for token in query_token_set:
-            for item in self.group_index.get(token, []):
-                candidate_map[item['name_lc']] = item
+        retrieval_limit = max(1, int(getattr(self, "retrieval_candidates_limit", 1200)))
+        per_token_cap = retrieval_limit
+        candidate_stats: Dict[str, Dict] = {}
 
-        if not candidate_map:
+        for token in query_token_set:
+            token_weight = getattr(self, "token_idf", {}).get(token, 1.0)
+            for item in self.group_index.get(token, [])[:per_token_cap]:
+                key = item['name_lc']
+                entry = candidate_stats.get(key)
+                if entry is None:
+                    entry = {
+                        'item': item,
+                        'overlap_count': 0,
+                        'idf_score': 0.0,
+                    }
+                    candidate_stats[key] = entry
+                entry['overlap_count'] += 1
+                entry['idf_score'] += token_weight
+
+        if not candidate_stats:
             return []
 
-        def score(item: Dict) -> Tuple[int, int]:
-            item_tokens = set(self._tokenize(item['name']))
-            overlap = len(item_tokens.intersection(query_token_set))
-            return (overlap, -item['row_idx'])
+        ranked = sorted(
+            candidate_stats.values(),
+            key=lambda entry: (
+                entry['idf_score'],
+                entry['overlap_count'],
+                -entry['item']['row_idx'],
+            ),
+            reverse=True,
+        )
 
-        return sorted(candidate_map.values(), key=score, reverse=True)
+        return [entry['item'] for entry in ranked[:retrieval_limit]]
 
     def _build_context_for_query(self, query: str, max_lines: int = 300) -> str:
         """Собрать контекст по релевантным группам, а не случайным позициям."""
@@ -279,11 +328,14 @@ class ReMoMatcher:
         ]
         return "\n".join(lines) if lines else self.catalog_text
 
-    def _build_context_chunks(self, query: str, chunk_size: int = 300, max_chunks: int = 4) -> List[str]:
+    def _build_context_chunks(self, query: str, chunk_size: int | None = None, max_chunks: int | None = None) -> List[str]:
         """Сформировать несколько чанков контекста для повторных попыток Gemini."""
         ranked_items = self._rank_group_candidates(query)
         if not ranked_items:
             return [self.catalog_text]
+
+        chunk_size = max(50, int(chunk_size or getattr(self, "context_chunk_size", 300)))
+        max_chunks = max(1, int(max_chunks or getattr(self, "max_context_chunks", 4)))
 
         chunks = []
         for offset in range(0, len(ranked_items), chunk_size):

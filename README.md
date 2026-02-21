@@ -82,12 +82,10 @@ python batch_process.py --input-dir "D:\\Data\\Downloads\\upload" --output-dir "
 ### 6. Настройка путей к данным (без хардкода)
 
 По умолчанию проект использует каталог `./data` (рядом с проектом), но путь можно переопределить:
-- UI: поле "Путь к price_clean.csv" в боковой панели
-- UI: загрузчик CSV-каталогов поставщиков в боковой панели (поддержка нескольких файлов)
-- UI: опция "Прогнать ETL перед сохранением каталога" для автоматической подготовки сырого прайса
+- UI: поле "Путь к price_clean.csv" в боковой панели (можно указать и папку с `*_clean.csv`)
 - CLI: флаг `--db-csv` (batch/e2e), `--input`/`--output` (etl/main)
 - ENV:
-  - `REMO_DB_CSV` — путь к `price_clean.csv`
+  - `REMO_DB_CSV` — путь к `price_clean.csv` **или** к папке с `*_clean.csv`
   - `REMO_UPLOAD_DIR` — базовая папка данных
   - `REMO_MATCHER_CACHE_DB` — путь к `matcher_cache.db`
   - `REMO_MATCH_PROMPT_TEMPLATE_PATH` — путь к кастомному шаблону prompt для Gemini (`{query}` и `{catalog_context}` обязательны)
@@ -98,6 +96,8 @@ python batch_process.py --input-dir "D:\\Data\\Downloads\\upload" --output-dir "
   - `REMO_PRICE_RAW_CSV`, `REMO_PRICE_CONVERTED_CSV`, `REMO_SAMPLE_XLSX` — точечные override
   - `REMO_MATCHER_PARALLEL_REQUESTS` — количество параллельных LLM-запросов (1..10, по умолчанию 1)
   - `REMO_MATCHER_MODELS` — список Gemini-моделей через запятую (по умолчанию `gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.0-flash,gemini-2.0-flash-lite`)
+  - `REMO_MATCHER_CONTEXT_CHUNK_SIZE` и `REMO_MATCHER_MAX_CONTEXT_CHUNKS` — размер/кол-во чанков контекста для retry
+  - `REMO_MATCHER_RETRIEVAL_CANDIDATES` — лимит кандидатов retrieval перед отправкой в LLM (100..10000, по умолчанию 1200)
 
 - В UI (боковая панель) доступны параметры тонкой настройки matcher:
   - **Параллельные запросы к Gemini** (1..10)
@@ -195,8 +195,9 @@ python batch_process.py --input-dir "D:\\Data\\Downloads\\upload" --output-dir "
 
 ### Компоненты
 
-> В текущем UI используется **один активный каталог** — это файл из поля `Путь к price_clean.csv`.
-> Если хотите «сложить всё в кучу», объедините CSV заранее (ETL/скриптом) в единый `price_clean.csv` и укажите путь к нему.
+> В текущем UI используется **один активный каталог** — это путь из поля `Путь к price_clean.csv`.
+> Если указать **папку** с файлами `*_clean.csv`, приложение автоматически соберёт единый `price_clean_merged.csv`
+> (с дедупликацией по артикулу, а при пустом артикуле — по нормализованному наименованию) и будет работать уже с ним.
 
 
 | Файл | Назначение |
