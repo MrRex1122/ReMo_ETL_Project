@@ -65,6 +65,7 @@ class ReMoMatcher:
         self.cache_db = str(get_matcher_cache_db_path(cache_db))
         self.catalog = None
         self.catalog_dict = None
+        self.catalog_normalized_dict = {}
         self.catalog_items = []
         self.group_index = {}
         self.catalog_text = None
@@ -189,6 +190,7 @@ class ReMoMatcher:
         
         # Подготовить словарь для быстрого поиска
         self.catalog_dict = {}
+        self.catalog_normalized_dict = {}
         self.catalog_items = []
         token_to_items: Dict[str, List[Dict]] = defaultdict(list)
         for idx, row in self.catalog.iterrows():
@@ -205,6 +207,9 @@ class ReMoMatcher:
                     'row_idx': idx,
                 }
                 self.catalog_dict[name.lower()] = item
+                normalized_name = self._normalize_text(name)
+                if normalized_name and normalized_name not in self.catalog_normalized_dict:
+                    self.catalog_normalized_dict[normalized_name] = item
                 self.catalog_items.append(item)
                 for token in self._tokenize(name):
                     token_to_items[token].append(item)
@@ -230,6 +235,10 @@ class ReMoMatcher:
 
         self.catalog_text = "\n".join(catalog_lines[:300])  # Ограничить для контекста
         logger.info(f"✓ Каталог подготовлен ({len(catalog_lines)} товаров в контексте)")
+
+    def _normalize_text(self, text: str) -> str:
+        cleaned = re.sub(r"[^\w\dа-яА-ЯёЁ]+", " ", str(text).lower(), flags=re.UNICODE)
+        return " ".join(cleaned.split())
 
     def _tokenize(self, text: str) -> List[str]:
         tokens = re.findall(r"[a-zA-Zа-яА-Я0-9]+", str(text).lower())
@@ -506,9 +515,27 @@ class ReMoMatcher:
                     'error': None
                 }
             
-            local_semantic_match = self._try_local_semantic_match(query)
-            if local_semantic_match:
-                return local_semantic_match
+            normalized_query = self._normalize_text(query)
+            normalized_match = getattr(self, "catalog_normalized_dict", {}).get(normalized_query)
+            if normalized_match:
+                logger.info(f"✓ Нормализованное совпадение найдено: {query}")
+                self._save_to_cache(
+                    query,
+                    normalized_match['name'],
+                    normalized_match['price'],
+                    normalized_match['article'],
+                    0.98,
+                    "normalized_match",
+                )
+                return {
+                    'found_name': normalized_match['name'],
+                    'price': normalized_match['price'],
+                    'article': normalized_match['article'],
+                    'similarity_score': 0.98,
+                    'from_cache': False,
+                    'success': True,
+                    'error': None
+                }
 
             # Использовать Gemini для семантического поиска
             logger.info(f"Gemini search: {query}")
