@@ -15,7 +15,13 @@ import re
 from pathlib import Path
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from config import get_catalog_csv_path, get_matcher_parallel_requests, get_matcher_cache_db_path
+from config import (
+    get_catalog_csv_path,
+    get_matcher_parallel_requests,
+    get_matcher_cache_db_path,
+    get_matcher_local_confidence_threshold,
+    get_matcher_local_margin_threshold,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -68,6 +74,8 @@ class ReMoMatcher:
         self.model_name = None
         self.parallel_requests = min(10, max(1, int(parallel_requests or get_matcher_parallel_requests())))
         self.catalog_sample_items = max(50, int(catalog_sample_items))
+        self.local_confidence_threshold = get_matcher_local_confidence_threshold()
+        self.local_margin_threshold = get_matcher_local_margin_threshold()
         
         # Ð˜Ð½Ð¸Ñ†Ð¸Ð°Ð»Ð¸Ð·Ð°Ñ†Ð¸Ñ Gemini
         if GENAI_SDK_AVAILABLE:

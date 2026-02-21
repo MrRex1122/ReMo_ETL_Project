@@ -18,6 +18,8 @@ DEFAULT_PRICE_CONVERTED_CSV_NAME = "price_converted.csv"
 DEFAULT_SAMPLE_XLSX_NAME = "РеМо_Шаблон_коммерческого_предложения_020625.xlsx"
 DEFAULT_MATCHER_CACHE_DB_NAME = "matcher_cache.db"
 DEFAULT_MATCHER_PARALLEL_REQUESTS = 1
+DEFAULT_MATCHER_LOCAL_CONFIDENCE_THRESHOLD = 0.92
+DEFAULT_MATCHER_LOCAL_MARGIN_THRESHOLD = 0.08
 
 
 def _normalize_path(raw: str | Path) -> Path:
@@ -90,3 +92,21 @@ def get_matcher_parallel_requests() -> int:
         return min(10, max(1, value))
     except ValueError:
         return DEFAULT_MATCHER_PARALLEL_REQUESTS
+
+
+def get_matcher_local_confidence_threshold() -> float:
+    raw = os.getenv("REMO_MATCHER_LOCAL_CONFIDENCE_THRESHOLD", str(DEFAULT_MATCHER_LOCAL_CONFIDENCE_THRESHOLD))
+    try:
+        value = float(raw)
+        return min(1.0, max(0.0, value))
+    except ValueError:
+        return DEFAULT_MATCHER_LOCAL_CONFIDENCE_THRESHOLD
+
+
+def get_matcher_local_margin_threshold() -> float:
+    raw = os.getenv("REMO_MATCHER_LOCAL_MARGIN_THRESHOLD", str(DEFAULT_MATCHER_LOCAL_MARGIN_THRESHOLD))
+    try:
+        value = float(raw)
+        return min(1.0, max(0.0, value))
+    except ValueError:
+        return DEFAULT_MATCHER_LOCAL_MARGIN_THRESHOLD
