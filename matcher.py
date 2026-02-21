@@ -31,6 +31,9 @@ logger = logging.getLogger(__name__)
 
 MISSING_POSITION_TEXT = "Позиция отсутствует"
 GROUP_TOKEN_STOPWORDS = {"и", "в", "на", "для", "с", "по", "из", "шт", "мм", "м", "к", "u", "duplex"}
+CANONICAL_NAME_COLUMN = "Наименование"
+CANONICAL_ARTICLE_COLUMN = "Артикул"
+CANONICAL_PRICE_COLUMN = "Цена розничная"
 
 try:
     from google import genai as genai_sdk
@@ -189,9 +192,9 @@ class ReMoMatcher:
         self.catalog_items = []
         token_to_items: Dict[str, List[Dict]] = defaultdict(list)
         for idx, row in self.catalog.iterrows():
-            name = str(row.get('Наименование', '')).strip()
-            article = str(row.get('Артикул', '')).strip()
-            price = float(row.get('Цена розничная', 0)) if 'Цена розничная' in row else None
+            name = str(row.get(CANONICAL_NAME_COLUMN, '')).strip()
+            article = str(row.get(CANONICAL_ARTICLE_COLUMN, '')).strip()
+            price = float(row.get(CANONICAL_PRICE_COLUMN, 0)) if CANONICAL_PRICE_COLUMN in row else None
 
             if name:
                 item = {
@@ -222,11 +225,7 @@ class ReMoMatcher:
 
         catalog_lines = []
         for idx, row in sample.iterrows():
-            line = (
-                f"• {row.get(CANONICAL_NAME_COLUMN, 'N/A')} "
-                f"| Артикул: {row.get(CANONICAL_ARTICLE_COLUMN, 'N/A')} "
-                f"| Цена: {row.get(CANONICAL_PRICE_COLUMN, 'N/A')}"
-            )
+            line = f"• {row.get(CANONICAL_NAME_COLUMN, 'N/A')} | Артикул: {row.get(CANONICAL_ARTICLE_COLUMN, 'N/A')} | Цена: {row.get(CANONICAL_PRICE_COLUMN, 'N/A')}"
             catalog_lines.append(line)
 
         self.catalog_text = "\n".join(catalog_lines[:300])  # Ограничить для контекста
