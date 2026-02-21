@@ -30,6 +30,43 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 MISSING_POSITION_TEXT = "Позиция отсутствует"
+CANONICAL_NAME_COLUMN = "Наименование"
+CANONICAL_ARTICLE_COLUMN = "Артикул"
+CANONICAL_PRICE_COLUMN = "Цена розничная"
+
+DEFAULT_MATCH_PROMPT_TEMPLATE = """
+You are an expert in technical nomenclature for equipment, cables and materials.
+
+Task: find a catalog item that BEST matches the user query.
+
+AVAILABLE CATALOG ITEMS:
+{catalog_context}
+
+USER QUERY: "{query}"
+
+RULES:
+1. Analyze the query carefully.
+2. Pick the most semantically relevant item from catalog.
+3. Consider technical specs, product purpose, synonyms and abbreviations.
+4. If nothing relevant exists, return found_name=null.
+5. Output JSON only.
+
+RESPONSE FORMAT:
+{{
+    "found_name": "Exact catalog name",
+    "article": "Catalog article",
+    "confidence": 0.95,
+    "reasoning": "Short explanation"
+}}
+
+If not found:
+{{
+    "found_name": null,
+    "article": null,
+    "confidence": 0,
+    "reasoning": "item not found in catalog"
+}}
+""".strip()
 
 DEFAULT_MATCH_PROMPT_TEMPLATE = """
 You are an expert in technical nomenclature for equipment, cables and materials.
@@ -205,7 +242,12 @@ class ReMoMatcher:
         """Загрузить товарный каталог"""
         logger.info(f"Loading catalog from {self.db_csv_path}")
         
-        self.catalog = pd.read_csv(self.db_csv_path, sep=';', encoding='utf-8')
+        self.catalog = pd.read_csv(
+            self.db_csv_path,
+            sep=';',
+            encoding='utf-8',
+            low_memory=False,
+        )
         logger.info(f"Loaded catalog items: {len(self.catalog)}")
         
         # Подготовить словарь для быстрого поиска
@@ -214,10 +256,10 @@ class ReMoMatcher:
         self.catalog_items = []
         self.token_index = {}
         for idx, row in self.catalog.iterrows():
-            name = self._clean_text_value(row.get(CANONICAL_NAME_COLUMN, ""))
-            article = self._clean_text_value(row.get(CANONICAL_ARTICLE_COLUMN, ""))
-            price = self._parse_price_value(row.get(CANONICAL_PRICE_COLUMN))
-
+            name = str(row.get(CANONICAL_NAME_COLUMN, '')).strip()
+            article = str(row.get(CANONICAL_ARTICLE_COLUMN, '')).strip()
+            price = float(row.get(CANONICAL_PRICE_COLUMN, 0)) if CANONICAL_PRICE_COLUMN in row else None
+            
             if name:
                 item = {
                     'name': name,
@@ -245,11 +287,11 @@ class ReMoMatcher:
         sample = self.catalog.sample(n=min(max_items, len(self.catalog)))
 
         catalog_lines = []
-        for _, row in sample.iterrows():
+        for idx, row in sample.iterrows():
             line = (
-                f"• {row.get(CANONICAL_NAME_COLUMN, 'N/A')} | "
-                f"Артикул: {row.get(CANONICAL_ARTICLE_COLUMN, 'N/A')} | "
-                f"Цена: {row.get(CANONICAL_PRICE_COLUMN, 'N/A')}"
+                f"• {row.get(CANONICAL_NAME_COLUMN, 'N/A')} "
+                f"| Артикул: {row.get(CANONICAL_ARTICLE_COLUMN, 'N/A')} "
+                f"| Цена: {row.get(CANONICAL_PRICE_COLUMN, 'N/A')}"
             )
             catalog_lines.append(line)
         
@@ -505,7 +547,7 @@ class ReMoMatcher:
         raise RuntimeError("Gemini backend is not initialized")
     
     def _match_with_gemini(self, query: str) -> Dict:
-        """Ð˜ÑÐ¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÑŒ Gemini Ð´Ð»Ñ ÑÐ¾Ð¿Ð¾ÑÑ‚Ð°Ð²Ð»ÐµÐ½Ð¸Ñ"""
+        """Использовать Gemini для сопоставления"""
 
         candidates = self._select_candidates(query, limit=get_matcher_candidate_limit())
         catalog_context = self._build_catalog_context(candidates, max_lines=get_matcher_context_lines())
