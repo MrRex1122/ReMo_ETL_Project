@@ -590,10 +590,11 @@ class ReMoMatcher:
         result = []
         seen = set()
         for name in preferred:
-            if not name or name in seen:
+            model_name = str(name or '').strip()
+            if not model_name or model_name in seen:
                 continue
-            seen.add(name)
-            result.append(name)
+            seen.add(model_name)
+            result.append(model_name)
         return result
 
     def _generate_gemini_text(self, prompt: str, model_name: str) -> str:

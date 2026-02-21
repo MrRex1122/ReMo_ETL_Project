@@ -97,6 +97,7 @@ python batch_process.py --input-dir "D:\\Data\\Downloads\\upload" --output-dir "
   - `REMO_MATCHER_CATALOG_SAMPLE_ITEMS` — размер sample для fallback-контекста каталога
   - `REMO_PRICE_RAW_CSV`, `REMO_PRICE_CONVERTED_CSV`, `REMO_SAMPLE_XLSX` — точечные override
   - `REMO_MATCHER_PARALLEL_REQUESTS` — количество параллельных LLM-запросов (1..10, по умолчанию 1)
+  - `REMO_MATCHER_MODELS` — список Gemini-моделей через запятую (по умолчанию `gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.0-flash,gemini-2.0-flash-lite`)
 
 - В UI (боковая панель) доступны параметры тонкой настройки matcher:
   - **Параллельные запросы к Gemini** (1..10)
@@ -194,6 +195,10 @@ python batch_process.py --input-dir "D:\\Data\\Downloads\\upload" --output-dir "
 
 ### Компоненты
 
+> В текущем UI используется **один активный каталог** — это файл из поля `Путь к price_clean.csv`.
+> Если хотите «сложить всё в кучу», объедините CSV заранее (ETL/скриптом) в единый `price_clean.csv` и укажите путь к нему.
+
+
 | Файл | Назначение |
 |------|-----------|
 | `matcher.py` | Основной класс ReMoMatcher, работа с Gemini |
@@ -220,7 +225,7 @@ python batch_process.py --input-dir "D:\\Data\\Downloads\\upload" --output-dir "
 
 ## 🛠️ API Gemini
 
-Система использует модель `gemini-1.5-flash`:
+Система использует пул актуальных моделей Gemini (по умолчанию начинается с `gemini-2.5-flash`):
 
 **Особенности:**
 - ✅ Многоязычная поддержка (РФ, EN, DE, IT и т.д.)
@@ -283,6 +288,17 @@ __pycache__/
 ---
 
 ## 🐛 Troubleshooting
+
+### 404 NOT_FOUND по моделям Gemini
+```
+Модель ... не сработала: 404 NOT_FOUND
+```
+Это значит, что выбранная модель недоступна в вашем проекте/регионе или для `v1beta` метода `generateContent`.
+
+Что делать:
+1. Задайте `REMO_MATCHER_MODELS` только из поддерживаемых моделей вашего API-ключа.
+2. Оставьте порядок от более сильной к более дешевой модели.
+3. Перезапустите приложение.
 
 ### API ключ не работает
 ```
