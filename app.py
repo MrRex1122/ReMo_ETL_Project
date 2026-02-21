@@ -77,6 +77,21 @@ if 'matcher_db_csv' not in st.session_state:
     st.session_state.matcher_db_csv = None
 
 
+
+
+def _validate_runtime_readiness(db_csv: str) -> list[str]:
+    """Проверить готовность приложения к обработке перед запуском matcher."""
+    issues = []
+
+    api_key = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        issues.append("Не задан GEMINI_API_KEY")
+
+    if not Path(db_csv).exists():
+        issues.append(f"Не найден каталог price_clean.csv: {db_csv}")
+
+    return issues
+
 def get_matcher() -> ReMoMatcher:
     """Получить или инициализировать экземпляр matcher"""
     db_csv = str(get_catalog_csv_path(st.session_state.get('db_csv_path')))
@@ -271,39 +286,46 @@ def main():
         if uploaded_file:
             logger.info(f"📤 Файл загружен пользователем: {uploaded_file.name} ({uploaded_file.size} байт)")
             st.info(f"📄 Файл выбран: {uploaded_file.name}")
-            
-            col1, col2 = st.columns([1, 1])
-            with col1:
-                process_button = st.button("🚀 Начать обработку", key="process_btn")
-            
-            with col2:
-                st.markdown("")  # Выравнивание
-            
+
+            db_csv = str(get_catalog_csv_path(st.session_state.get('db_csv_path')))
+            issues = _validate_runtime_readiness(db_csv)
+            if issues:
+                st.warning("⚠️ Перед обработкой исправьте настройки:")
+                for issue in issues:
+                    st.write(f"- {issue}")
+
+            with st.form("process_form", clear_on_submit=False):
+                process_button = st.form_submit_button(
+                    "🚀 Начать обработку",
+                    disabled=bool(issues),
+                    use_container_width=True,
+                )
+
             if process_button:
                 logger.info("🔘 Пользователь нажал кнопку 'Начать обработку'")
                 try:
                     df_result, stats = process_uploaded_file(uploaded_file)
-                    
+
                     # Успешно
-                    st.markdown('<div class="success-box">✅ Обработка завершена успешно!</div>', 
+                    st.markdown('<div class="success-box">✅ Обработка завершена успешно!</div>',
                                unsafe_allow_html=True)
                     logger.info("✅ Обработка успешно завершена")
-                    
+
                     show_statistics(stats)
-                    
+
                     # Опции после обработки
                     col1, col2, col3 = st.columns(3)
-                    
+
                     with col1:
                         if st.button("📋 Просмотреть результаты"):
                             logger.info("📋 Пользователь открыл результаты")
                             st.session_state.show_results = True
-                    
+
                     with col2:
                         if st.button("✏️ Коррекция"):
                             logger.info("✏️ Пользователь открыл коррекцию")
                             st.session_state.show_corrections = True
-                    
+
                     with col3:
                         output_filename = f"{uploaded_file.name.split('.')[0]}_matched_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
                         csv_data = df_result.to_csv(index=False, sep=';', encoding='utf-8')
@@ -315,10 +337,10 @@ def main():
                             key="download_csv"
                         )
                         logger.info(f"💾 Кнопка скачивания готова: {output_filename}")
-                
+
                 except Exception as e:
                     logger.error(f"❌ Ошибка при обработке: {e}", exc_info=True)
-                    st.markdown(f'<div class="error-box">❌ Ошибка: {str(e)}</div>', 
+                    st.markdown(f'<div class="error-box">❌ Ошибка: {str(e)}</div>',
                                unsafe_allow_html=True)
                     st.error(str(e))
     
