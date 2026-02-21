@@ -84,6 +84,10 @@ if 'matcher_catalog_sample_items' not in st.session_state:
     st.session_state.matcher_catalog_sample_items = 500
 if 'matcher_settings_signature' not in st.session_state:
     st.session_state.matcher_settings_signature = None
+if 'show_results' not in st.session_state:
+    st.session_state.show_results = False
+if 'show_corrections' not in st.session_state:
+    st.session_state.show_corrections = False
 
 
 
@@ -274,6 +278,15 @@ def show_statistics(stats):
         st.metric("⚠️ Ошибок", stats['errors'])
 
 
+def _prepare_df_for_display(df: pd.DataFrame) -> pd.DataFrame:
+    """Сделать DataFrame безопасным для отображения в Streamlit/Arrow."""
+    display_df = df.copy()
+    for col in display_df.columns:
+        if display_df[col].dtype == object:
+            display_df[col] = display_df[col].astype(str)
+    return display_df
+
+
 def show_corrections_table(df):
     """Таблица для ручной коррекции результатов"""
     st.subheader("✏️ Коррекция результатов")
@@ -297,7 +310,7 @@ def show_corrections_table(df):
     
     edited_df = st.data_editor(
         df_view,
-        use_container_width=True,
+        width="stretch",
         disabled=['Наименование оборудования, материалов и кабелей'],  # Закрыть от редактирования
         num_rows="fixed"
     )
@@ -447,7 +460,7 @@ def main():
                 process_button = st.form_submit_button(
                     "🚀 Начать обработку",
                     disabled=bool(issues),
-                    use_container_width=True,
+                    width="stretch",
                 )
 
             if process_button:
@@ -470,11 +483,15 @@ def main():
                         if st.button("📋 Просмотреть результаты"):
                             logger.info("📋 Пользователь открыл результаты")
                             st.session_state.show_results = True
+                            st.session_state.show_corrections = False
+                            st.rerun()
 
                     with col2:
                         if st.button("✏️ Коррекция"):
                             logger.info("✏️ Пользователь открыл коррекцию")
+                            st.session_state.show_results = True
                             st.session_state.show_corrections = True
+                            st.rerun()
 
                     with col3:
                         output_filename = f"{uploaded_file.name.split('.')[0]}_matched_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
@@ -502,11 +519,22 @@ def main():
         if st.session_state.df_processed is not None:
             df = st.session_state.df_processed
             stats = st.session_state.stats
-            
+
             show_statistics(stats)
-            
+
             st.divider()
-            
+
+            default_mode = "Коррекция" if st.session_state.get('show_corrections') else "Просмотр"
+            mode = st.radio("Режим", ["Просмотр", "Коррекция"], index=1 if default_mode == "Коррекция" else 0, horizontal=True)
+
+            if mode == "Коррекция":
+                edited_df = show_corrections_table(df)
+                if st.button("💾 Сохранить правки", key="save_corrections"):
+                    st.session_state.df_processed = edited_df.copy()
+                    st.session_state.show_corrections = False
+                    st.success("✓ Правки сохранены")
+                    st.rerun()
+
             # Фильтры
             col1, col2, col3 = st.columns(3)
             
@@ -556,7 +584,7 @@ def main():
             start_idx = (page - 1) * page_size
             end_idx = start_idx + page_size
             
-            st.dataframe(df_view.iloc[start_idx:end_idx], use_container_width=True)
+            st.dataframe(_prepare_df_for_display(df_view.iloc[start_idx:end_idx]), width="stretch")
             
             st.markdown(f"Страница {page} из {max(1, total_pages)}")
             
@@ -628,7 +656,7 @@ def main():
                 st.divider()
                 
                 # Таблица истории
-                st.dataframe(df_history, use_container_width=True)
+                st.dataframe(_prepare_df_for_display(df_history), width="stretch")
             else:
                 st.info("📭 История пуста")
             

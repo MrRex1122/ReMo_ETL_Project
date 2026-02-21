@@ -245,11 +245,11 @@ class ReMoMatcher:
         tokens = re.findall(r"[a-zA-Zа-яА-Я0-9]+", str(text).lower())
         return [token for token in tokens if len(token) >= 2 and token not in GROUP_TOKEN_STOPWORDS]
 
-    def _build_context_for_query(self, query: str, max_lines: int = 300) -> str:
-        """Собрать контекст по релевантным группам, а не случайным позициям."""
+    def _rank_group_candidates(self, query: str) -> List[Dict]:
+        """Вернуть ранжированные кандидаты по токен-группам запроса."""
         query_tokens = self._tokenize(query)
         if not query_tokens or not self.group_index:
-            return self.catalog_text
+            return []
 
         candidate_map: Dict[str, Dict] = {}
         query_token_set = set(query_tokens)
@@ -258,19 +258,48 @@ class ReMoMatcher:
                 candidate_map[item['name_lc']] = item
 
         if not candidate_map:
-            return self.catalog_text
+            return []
 
         def score(item: Dict) -> Tuple[int, int]:
             item_tokens = set(self._tokenize(item['name']))
             overlap = len(item_tokens.intersection(query_token_set))
             return (overlap, -item['row_idx'])
 
-        ranked_items = sorted(candidate_map.values(), key=score, reverse=True)
+        return sorted(candidate_map.values(), key=score, reverse=True)
+
+    def _build_context_for_query(self, query: str, max_lines: int = 300) -> str:
+        """Собрать контекст по релевантным группам, а не случайным позициям."""
+        ranked_items = self._rank_group_candidates(query)
+        if not ranked_items:
+            return self.catalog_text
+
         lines = [
             f"• {item['name']} | Артикул: {item.get('article', 'N/A')} | Цена: {item.get('price', 'N/A')}"
             for item in ranked_items[:max_lines]
         ]
         return "\n".join(lines) if lines else self.catalog_text
+
+    def _build_context_chunks(self, query: str, chunk_size: int = 300, max_chunks: int = 4) -> List[str]:
+        """Сформировать несколько чанков контекста для повторных попыток Gemini."""
+        ranked_items = self._rank_group_candidates(query)
+        if not ranked_items:
+            return [self.catalog_text]
+
+        chunks = []
+        for offset in range(0, len(ranked_items), chunk_size):
+            if len(chunks) >= max_chunks:
+                break
+            chunk_items = ranked_items[offset: offset + chunk_size]
+            if not chunk_items:
+                continue
+            chunk_text = "\n".join(
+                f"• {item['name']} | Артикул: {item.get('article', 'N/A')} | Цена: {item.get('price', 'N/A')}"
+                for item in chunk_items
+            )
+            if chunk_text.strip():
+                chunks.append(chunk_text)
+
+        return chunks or [self.catalog_text]
 
     def _hash_query(self, query: str) -> str:
         """Хэш запроса для кэша"""
@@ -586,8 +615,10 @@ class ReMoMatcher:
     def _match_with_gemini(self, query: str) -> Dict:
         """Использовать Gemini для сопоставления"""
 
-        context_text = self._build_context_for_query(query)
-        prompt = f"""Ты эксперт по технической номенклатуре оборудования, кабеля и материалов.
+        context_chunks = self._build_context_chunks(query)
+
+        def build_prompt(context_text: str) -> str:
+            return f"""Ты эксперт по технической номенклатуре оборудования, кабеля и материалов.
 
 Задача: Найти в каталоге товар, который ТОЧНО соответствует запросу пользователя.
 
@@ -643,7 +674,7 @@ class ReMoMatcher:
             else:
                 found_name = MISSING_POSITION_TEXT
 
-            result = {
+            return {
                 'found_name': found_name,
                 'price': price,
                 'article': article,
@@ -652,25 +683,54 @@ class ReMoMatcher:
                 'success': True,
                 'error': None
             }
-            self._save_to_cache(query, found_name, price, article or '', confidence, raw_text)
-            return result
 
         try:
             candidate_names = self._candidate_models()
             last_error = None
-            for model_name in candidate_names:
-                try:
-                    raw_text = self._generate_gemini_text(prompt, model_name)
-                    parsed = parse_result(raw_text)
-                    self.model_name = model_name
-                    if parsed['found_name'] == MISSING_POSITION_TEXT:
-                        logger.warning(f"Item not found for query: {query}")
-                    else:
-                        logger.info(f"Found: {parsed['found_name']} (confidence: {parsed['similarity_score']})")
-                    return parsed
-                except Exception as model_error:
-                    last_error = model_error
-                    logger.warning(f"Model {model_name} failed: {model_error}")
+            last_missing_result = None
+            last_raw_text = ""
+
+            for chunk_idx, context_text in enumerate(context_chunks, start=1):
+                prompt = build_prompt(context_text)
+                if len(context_chunks) > 1:
+                    logger.info(f"🔁 Попытка контекста {chunk_idx}/{len(context_chunks)} для: {query}")
+
+                for model_name in candidate_names:
+                    try:
+                        raw_text = self._generate_gemini_text(prompt, model_name)
+                        parsed = parse_result(raw_text)
+                        self.model_name = model_name
+
+                        if parsed['found_name'] == MISSING_POSITION_TEXT:
+                            last_missing_result = parsed
+                            last_raw_text = raw_text
+                            logger.warning(f"⚠️ Товар не найден для: {query} (контекст {chunk_idx})")
+                            continue
+
+                        self._save_to_cache(
+                            query,
+                            parsed['found_name'],
+                            parsed['price'],
+                            parsed['article'] or '',
+                            parsed['similarity_score'],
+                            raw_text,
+                        )
+                        logger.info(f"✓ Найдено: {parsed['found_name']} (confidence: {parsed['similarity_score']})")
+                        return parsed
+                    except Exception as model_error:
+                        last_error = model_error
+                        logger.warning(f"Модель {model_name} не сработала: {model_error}")
+
+            if last_missing_result is not None:
+                self._save_to_cache(
+                    query,
+                    last_missing_result['found_name'],
+                    last_missing_result['price'],
+                    last_missing_result['article'] or '',
+                    last_missing_result['similarity_score'],
+                    last_raw_text,
+                )
+                return last_missing_result
 
             raise RuntimeError(f"Gemini fallback exhausted: {last_error}")
 
@@ -685,7 +745,7 @@ class ReMoMatcher:
                 'success': False,
                 'error': str(e)
             }
-    
+
     def save_to_history(self, query: str, found_name: str, price: Optional[float], 
                         article: str, user_approved: bool, correction_note: str = ""):
         """Ð¡Ð¾Ñ…Ñ€Ð°Ð½Ð¸Ñ‚ÑŒ Ñ€ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚ Ð² Ð¸ÑÑ‚Ð¾Ñ€Ð¸ÑŽ"""

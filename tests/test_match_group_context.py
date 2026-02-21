@@ -14,7 +14,9 @@ class GroupContextTests(unittest.TestCase):
     def setUp(self):
         self.matcher = ReMoMatcher.__new__(ReMoMatcher)
         self.matcher._tokenize = ReMoMatcher._tokenize.__get__(self.matcher, ReMoMatcher)
+        self.matcher._rank_group_candidates = ReMoMatcher._rank_group_candidates.__get__(self.matcher, ReMoMatcher)
         self.matcher._build_context_for_query = ReMoMatcher._build_context_for_query.__get__(self.matcher, ReMoMatcher)
+        self.matcher._build_context_chunks = ReMoMatcher._build_context_chunks.__get__(self.matcher, ReMoMatcher)
 
         item1 = {
             "name": "Медный патч-корд категории 6 3м",
@@ -71,6 +73,26 @@ class GroupContextTests(unittest.TestCase):
 
         self.assertIn("Кабель UTP cat6", self.matcher.catalog_text)
         self.assertIn("UTP-6", self.matcher.catalog_text)
+
+    def test_build_context_chunks_splits_large_groups(self):
+        many_items = []
+        for idx in range(650):
+            many_items.append(
+                {
+                    "name": f"Кабель cat6 позиция {idx}",
+                    "name_lc": f"кабель cat6 позиция {idx}",
+                    "article": f"A-{idx}",
+                    "price": idx,
+                    "row_idx": idx,
+                }
+            )
+        self.matcher.group_index = {"кабель": many_items, "cat6": many_items}
+
+        chunks = self.matcher._build_context_chunks("кабель cat6", chunk_size=300, max_chunks=4)
+
+        self.assertEqual(len(chunks), 3)
+        self.assertIn("позиция 0", chunks[0])
+        self.assertIn("позиция 600", chunks[2])
 
 
 if __name__ == "__main__":

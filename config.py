@@ -21,6 +21,8 @@ DEFAULT_MATCHER_MODELS = "gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.0-flas
 DEFAULT_MATCHER_PARALLEL_REQUESTS = 1
 DEFAULT_MATCHER_LOCAL_CONFIDENCE_THRESHOLD = 0.92
 DEFAULT_MATCHER_LOCAL_MARGIN_THRESHOLD = 0.08
+DEFAULT_MATCHER_CONTEXT_CHUNK_SIZE = 300
+DEFAULT_MATCHER_MAX_CONTEXT_CHUNKS = 4
 
 
 def _normalize_path(raw: str | Path) -> Path:
@@ -119,3 +121,21 @@ def get_matcher_local_margin_threshold() -> float:
         return min(1.0, max(0.0, value))
     except ValueError:
         return DEFAULT_MATCHER_LOCAL_MARGIN_THRESHOLD
+
+
+def get_matcher_context_chunk_size() -> int:
+    raw = os.getenv("REMO_MATCHER_CONTEXT_CHUNK_SIZE", str(DEFAULT_MATCHER_CONTEXT_CHUNK_SIZE))
+    try:
+        value = int(raw)
+        return min(1000, max(50, value))
+    except ValueError:
+        return DEFAULT_MATCHER_CONTEXT_CHUNK_SIZE
+
+
+def get_matcher_max_context_chunks() -> int:
+    raw = os.getenv("REMO_MATCHER_MAX_CONTEXT_CHUNKS", str(DEFAULT_MATCHER_MAX_CONTEXT_CHUNKS))
+    try:
+        value = int(raw)
+        return min(10, max(1, value))
+    except ValueError:
+        return DEFAULT_MATCHER_MAX_CONTEXT_CHUNKS
