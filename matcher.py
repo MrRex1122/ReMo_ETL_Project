@@ -11,8 +11,18 @@ from typing import List, Dict, Optional, Tuple
 import logging
 import hashlib
 import os
+import re
 from pathlib import Path
-from config import get_catalog_csv_path
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from config import (
+    get_catalog_csv_path,
+    get_matcher_parallel_requests,
+    get_matcher_cache_db_path,
+    get_matcher_local_confidence_threshold,
+    get_matcher_local_margin_threshold,
+    get_matcher_models,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -21,6 +31,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 MISSING_POSITION_TEXT = "Позиция отсутствует"
+GROUP_TOKEN_STOPWORDS = {"и", "в", "на", "для", "с", "по", "из", "шт", "мм", "м", "к", "u", "duplex"}
+CANONICAL_NAME_COLUMN = "Наименование"
+CANONICAL_ARTICLE_COLUMN = "Артикул"
+CANONICAL_PRICE_COLUMN = "Цена розничная"
 
 try:
     from google import genai as genai_sdk
@@ -40,7 +54,7 @@ class ReMoMatcher:
     3. Вернуть: (найденное имя, цена, артикул)
     """
     
-    def __init__(self, gemini_api_key: str, db_csv_path: str, cache_db: str = "matcher_cache.db"):
+    def __init__(self, gemini_api_key: str, db_csv_path: str, cache_db: str = "matcher_cache.db", parallel_requests: int | None = None, catalog_sample_items: int = 500):
         """
         Args:
             gemini_api_key: API ключ Google Gemini
@@ -49,15 +63,22 @@ class ReMoMatcher:
         """
         self.api_key = gemini_api_key
         self.db_csv_path = db_csv_path
-        self.cache_db = cache_db
+        self.cache_db = str(get_matcher_cache_db_path(cache_db))
         self.catalog = None
         self.catalog_dict = None
+        self.catalog_normalized_dict = {}
+        self.catalog_items = []
+        self.group_index = {}
         self.catalog_text = None
         self.backend = None
         self.client = None
         self.legacy_genai = None
         self.model = None
         self.model_name = None
+        self.parallel_requests = min(10, max(1, int(parallel_requests or get_matcher_parallel_requests())))
+        self.catalog_sample_items = max(50, int(catalog_sample_items))
+        self.local_confidence_threshold = get_matcher_local_confidence_threshold()
+        self.local_margin_threshold = get_matcher_local_margin_threshold()
         
         # Инициализация Gemini
         if GENAI_SDK_AVAILABLE:
@@ -132,34 +153,116 @@ class ReMoMatcher:
         
         # Подготовить словарь для быстрого поиска
         self.catalog_dict = {}
+        self.catalog_normalized_dict = {}
+        self.catalog_items = []
+        token_to_items: Dict[str, List[Dict]] = defaultdict(list)
         for idx, row in self.catalog.iterrows():
-            name = str(row.get('Наименование', '')).strip()
-            article = str(row.get('Артикул', '')).strip()
-            price = float(row.get('Цена розничная', 0)) if 'Цена розничная' in row else None
-            
+            name = str(row.get(CANONICAL_NAME_COLUMN, '')).strip()
+            article = str(row.get(CANONICAL_ARTICLE_COLUMN, '')).strip()
+            price = float(row.get(CANONICAL_PRICE_COLUMN, 0)) if CANONICAL_PRICE_COLUMN in row else None
+
             if name:
-                self.catalog_dict[name.lower()] = {
+                item = {
                     'name': name,
+                    'name_lc': name.lower(),
                     'article': article,
                     'price': price,
-                    'row_idx': idx
+                    'row_idx': idx,
                 }
-        
+                self.catalog_dict[name.lower()] = item
+                normalized_name = self._normalize_text(name)
+                if normalized_name and normalized_name not in self.catalog_normalized_dict:
+                    self.catalog_normalized_dict[normalized_name] = item
+                self.catalog_items.append(item)
+                for token in self._tokenize(name):
+                    token_to_items[token].append(item)
+
+        self.group_index = {
+            token: items
+            for token, items in token_to_items.items()
+            if len(items) >= 3
+        }
+
         # Подготовить текстовый формат каталога для Gemini
-        self._prepare_catalog_text()
+        self._prepare_catalog_text(max_items=self.catalog_sample_items)
     
     def _prepare_catalog_text(self, max_items: int = 500):
-        """Подготовить каталог в текстовом формате для контекста Gemini"""
-        sample = self.catalog.sample(n=min(max_items, len(self.catalog)))
-        
+        """Подготовить каталог в текстовом формате для контекста Gemini."""
+        limit = min(max_items, len(self.catalog))
+        sample = self.catalog.head(limit)
+
         catalog_lines = []
         for idx, row in sample.iterrows():
-            line = f"• {row.get('Наименование', 'N/A')} | Артикул: {row.get('Артикул', 'N/A')} | Цена: {row.get('Цена розничная', 'N/A')}"
+            line = f"• {row.get(CANONICAL_NAME_COLUMN, 'N/A')} | Артикул: {row.get(CANONICAL_ARTICLE_COLUMN, 'N/A')} | Цена: {row.get(CANONICAL_PRICE_COLUMN, 'N/A')}"
             catalog_lines.append(line)
-        
+
         self.catalog_text = "\n".join(catalog_lines[:300])  # Ограничить для контекста
         logger.info(f"✓ Каталог подготовлен ({len(catalog_lines)} товаров в контексте)")
-    
+
+    def _normalize_text(self, text: str) -> str:
+        cleaned = re.sub(r"[^\w\dа-яА-ЯёЁ]+", " ", str(text).lower(), flags=re.UNICODE)
+        return " ".join(cleaned.split())
+
+    def _tokenize(self, text: str) -> List[str]:
+        tokens = re.findall(r"[a-zA-Zа-яА-Я0-9]+", str(text).lower())
+        return [token for token in tokens if len(token) >= 2 and token not in GROUP_TOKEN_STOPWORDS]
+
+    def _rank_group_candidates(self, query: str) -> List[Dict]:
+        """Вернуть ранжированные кандидаты по токен-группам запроса."""
+        query_tokens = self._tokenize(query)
+        if not query_tokens or not self.group_index:
+            return []
+
+        candidate_map: Dict[str, Dict] = {}
+        query_token_set = set(query_tokens)
+        for token in query_token_set:
+            for item in self.group_index.get(token, []):
+                candidate_map[item['name_lc']] = item
+
+        if not candidate_map:
+            return []
+
+        def score(item: Dict) -> Tuple[int, int]:
+            item_tokens = set(self._tokenize(item['name']))
+            overlap = len(item_tokens.intersection(query_token_set))
+            return (overlap, -item['row_idx'])
+
+        return sorted(candidate_map.values(), key=score, reverse=True)
+
+    def _build_context_for_query(self, query: str, max_lines: int = 300) -> str:
+        """Собрать контекст по релевантным группам, а не случайным позициям."""
+        ranked_items = self._rank_group_candidates(query)
+        if not ranked_items:
+            return self.catalog_text
+
+        lines = [
+            f"• {item['name']} | Артикул: {item.get('article', 'N/A')} | Цена: {item.get('price', 'N/A')}"
+            for item in ranked_items[:max_lines]
+        ]
+        return "\n".join(lines) if lines else self.catalog_text
+
+    def _build_context_chunks(self, query: str, chunk_size: int = 300, max_chunks: int = 4) -> List[str]:
+        """Сформировать несколько чанков контекста для повторных попыток Gemini."""
+        ranked_items = self._rank_group_candidates(query)
+        if not ranked_items:
+            return [self.catalog_text]
+
+        chunks = []
+        for offset in range(0, len(ranked_items), chunk_size):
+            if len(chunks) >= max_chunks:
+                break
+            chunk_items = ranked_items[offset: offset + chunk_size]
+            if not chunk_items:
+                continue
+            chunk_text = "\n".join(
+                f"• {item['name']} | Артикул: {item.get('article', 'N/A')} | Цена: {item.get('price', 'N/A')}"
+                for item in chunk_items
+            )
+            if chunk_text.strip():
+                chunks.append(chunk_text)
+
+        return chunks or [self.catalog_text]
+
     def _hash_query(self, query: str) -> str:
         """Хэш запроса для кэша"""
         return hashlib.md5(query.lower().encode()).hexdigest()
@@ -259,6 +362,28 @@ class ReMoMatcher:
                     'error': None
                 }
             
+            normalized_query = self._normalize_text(query)
+            normalized_match = getattr(self, "catalog_normalized_dict", {}).get(normalized_query)
+            if normalized_match:
+                logger.info(f"✓ Нормализованное совпадение найдено: {query}")
+                self._save_to_cache(
+                    query,
+                    normalized_match['name'],
+                    normalized_match['price'],
+                    normalized_match['article'],
+                    0.98,
+                    "normalized_match",
+                )
+                return {
+                    'found_name': normalized_match['name'],
+                    'price': normalized_match['price'],
+                    'article': normalized_match['article'],
+                    'similarity_score': 0.98,
+                    'from_cache': False,
+                    'success': True,
+                    'error': None
+                }
+
             # Использовать Gemini для семантического поиска
             logger.info(f"🔍 Поиск в Gemini: {query}")
             result = self._match_with_gemini(query)
@@ -307,10 +432,9 @@ class ReMoMatcher:
             return (getattr(response, 'text', None) or '').strip()
 
         if self.backend == "google-generativeai":
-            if self.model is None or self.model_name != model_name:
-                self.model = self.legacy_genai.GenerativeModel(model_name)
-                self.model_name = model_name
-            response = self.model.generate_content(prompt, stream=False)
+            # Локальный инстанс безопаснее для многопоточной обработки.
+            model = self.legacy_genai.GenerativeModel(model_name)
+            response = model.generate_content(prompt, stream=False)
             return (response.text or '').strip()
 
         raise RuntimeError("Gemini backend не инициализирован")
@@ -318,12 +442,15 @@ class ReMoMatcher:
     def _match_with_gemini(self, query: str) -> Dict:
         """Использовать Gemini для сопоставления"""
 
-        prompt = f"""Ты эксперт по технической номенклатуре оборудования, кабеля и материалов.
+        context_chunks = self._build_context_chunks(query)
+
+        def build_prompt(context_text: str) -> str:
+            return f"""Ты эксперт по технической номенклатуре оборудования, кабеля и материалов.
 
 Задача: Найти в каталоге товар, который ТОЧНО соответствует запросу пользователя.
 
 КАТАЛОГ ДОСТУПНЫХ ТОВАРОВ:
-{self.catalog_text}
+{context_text}
 
 ЗАПРОС ПОЛЬЗОВАТЕЛЯ: "{query}"
 
@@ -374,7 +501,7 @@ class ReMoMatcher:
             else:
                 found_name = MISSING_POSITION_TEXT
 
-            result = {
+            return {
                 'found_name': found_name,
                 'price': price,
                 'article': article,
@@ -383,25 +510,54 @@ class ReMoMatcher:
                 'success': True,
                 'error': None
             }
-            self._save_to_cache(query, found_name, price, article or '', confidence, raw_text)
-            return result
 
         try:
             candidate_names = self._candidate_models()
             last_error = None
-            for model_name in candidate_names:
-                try:
-                    raw_text = self._generate_gemini_text(prompt, model_name)
-                    parsed = parse_result(raw_text)
-                    self.model_name = model_name
-                    if parsed['found_name'] == MISSING_POSITION_TEXT:
-                        logger.warning(f"⚠️ Товар не найден для: {query}")
-                    else:
+            last_missing_result = None
+            last_raw_text = ""
+
+            for chunk_idx, context_text in enumerate(context_chunks, start=1):
+                prompt = build_prompt(context_text)
+                if len(context_chunks) > 1:
+                    logger.info(f"🔁 Попытка контекста {chunk_idx}/{len(context_chunks)} для: {query}")
+
+                for model_name in candidate_names:
+                    try:
+                        raw_text = self._generate_gemini_text(prompt, model_name)
+                        parsed = parse_result(raw_text)
+                        self.model_name = model_name
+
+                        if parsed['found_name'] == MISSING_POSITION_TEXT:
+                            last_missing_result = parsed
+                            last_raw_text = raw_text
+                            logger.warning(f"⚠️ Товар не найден для: {query} (контекст {chunk_idx})")
+                            continue
+
+                        self._save_to_cache(
+                            query,
+                            parsed['found_name'],
+                            parsed['price'],
+                            parsed['article'] or '',
+                            parsed['similarity_score'],
+                            raw_text,
+                        )
                         logger.info(f"✓ Найдено: {parsed['found_name']} (confidence: {parsed['similarity_score']})")
-                    return parsed
-                except Exception as model_error:
-                    last_error = model_error
-                    logger.warning(f"Модель {model_name} не сработала: {model_error}")
+                        return parsed
+                    except Exception as model_error:
+                        last_error = model_error
+                        logger.warning(f"Модель {model_name} не сработала: {model_error}")
+
+            if last_missing_result is not None:
+                self._save_to_cache(
+                    query,
+                    last_missing_result['found_name'],
+                    last_missing_result['price'],
+                    last_missing_result['article'] or '',
+                    last_missing_result['similarity_score'],
+                    last_raw_text,
+                )
+                return last_missing_result
 
             raise RuntimeError(f"Gemini fallback exhausted: {last_error}")
 
@@ -416,7 +572,7 @@ class ReMoMatcher:
                 'success': False,
                 'error': str(e)
             }
-    
+
     def save_to_history(self, query: str, found_name: str, price: Optional[float], 
                         article: str, user_approved: bool, correction_note: str = ""):
         """Сохранить результат в историю"""
@@ -435,6 +591,46 @@ class ReMoMatcher:
         except Exception as e:
             logger.warning(f"⚠️ Ошибка сохранения в историю: {e}")
     
+
+    def _run_matches_parallel(self, tasks: List[Tuple[int, str]]) -> List[Tuple[int, Dict]]:
+        """Выполнить сопоставление запросов с ограниченным параллелизмом."""
+        if not tasks:
+            return []
+
+        workers = getattr(self, "parallel_requests", 1)
+        if workers <= 1:
+            return [(idx, self.match(query, use_cache=True)) for idx, query in tasks]
+
+        logger.info(f"⚡ Параллельная обработка включена: {workers} запросов одновременно")
+        results: List[Tuple[int, Dict]] = []
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            future_map = {
+                pool.submit(self.match, query, True): idx
+                for idx, query in tasks
+            }
+            completed = 0
+            total = len(tasks)
+            for future in as_completed(future_map):
+                idx = future_map[future]
+                try:
+                    result = future.result()
+                except Exception as e:
+                    result = {
+                        'found_name': MISSING_POSITION_TEXT,
+                        'price': None,
+                        'article': None,
+                        'similarity_score': 0,
+                        'from_cache': False,
+                        'success': False,
+                        'error': str(e),
+                    }
+                results.append((idx, result))
+                completed += 1
+                if completed % 10 == 0 or completed == total:
+                    logger.info(f"⏳ Обработано {completed}/{total} строк")
+
+        return results
+
     def process_excel(self, excel_path: str, output_path: str = None) -> Tuple[pd.DataFrame, Dict]:
         """
         Обработать весь Excel файл КП
@@ -491,25 +687,22 @@ class ReMoMatcher:
             'from_cache': 0,
             'errors': 0
         }
-        
+
+        tasks: List[Tuple[int, str]] = []
         for idx, row in df.iterrows():
             query = str(row[col_b]).strip()
-            
             if not query or query.lower() == 'nan':
                 continue
-
             if query.strip().lower() in {
                 'наименование',
                 'наименование оборудования, материалов и кабелей',
                 'nomenclature',
             }:
                 continue
-            
-            stats['total'] += 1
-            
-            # Сопоставить
-            result = self.match(query, use_cache=True)
-            
+            tasks.append((idx, query))
+
+        stats['total'] = len(tasks)
+        for idx, result in self._run_matches_parallel(tasks):
             # Заполнить результаты
             found_name = result.get('found_name') or MISSING_POSITION_TEXT
             df.at[idx, 'Цена'] = result.get('price')
@@ -528,10 +721,6 @@ class ReMoMatcher:
             if not result.get('success', True):
                 stats['errors'] += 1
                 logger.warning(f"⚠️ [{idx+1}] Ошибка: {result.get('error')}")
-            
-            # Логирование прогресса
-            if (idx + 1) % 10 == 0:
-                logger.info(f"⏳ Обработано {idx+1}/{len(df)} строк")
         
         # Сохранить результат
         if output_path is None:
