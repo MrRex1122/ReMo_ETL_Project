@@ -10,7 +10,8 @@ import re
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 
-DEFAULT_UPLOAD_DIR = PROJECT_ROOT
+# Локальный дефолт для dev-среды. В Railway лучше использовать volume.
+DEFAULT_UPLOAD_DIR = PROJECT_ROOT / "data"
 DEFAULT_CATALOG_CSV_NAME = "price_clean.csv"
 DEFAULT_PRICE_RAW_CSV_NAME = "price.csv"
 DEFAULT_PRICE_CONVERTED_CSV_NAME = "price_converted.csv"
@@ -27,7 +28,6 @@ DEFAULT_MATCHER_LOCAL_MARGIN_THRESHOLD = 0.08
 def _normalize_path(raw: str | Path) -> Path:
     text = str(raw).strip()
     # На Linux/macOS pathlib не считает путь вида D:\... абсолютным.
-    # Не префиксуем такие пути PROJECT_ROOT, чтобы не получать /app/D:\...
     if re.match(r"^[A-Za-z]:[\\/]", text) or text.startswith("\\\\"):
         return Path(text)
 
@@ -48,10 +48,22 @@ def _pick_path(explicit: str | None, env_var: str, fallback: Path) -> Path:
     return fallback
 
 
+def _railway_volume_dir() -> Path | None:
+    raw = os.getenv("RAILWAY_VOLUME_MOUNT_PATH")
+    if not raw or not raw.strip():
+        return None
+    return _normalize_path(raw) / "remo_data"
+
+
 def get_upload_dir() -> Path:
     env = os.getenv("REMO_UPLOAD_DIR")
     if env and env.strip():
         return _normalize_path(env)
+
+    railway_dir = _railway_volume_dir()
+    if railway_dir is not None:
+        return railway_dir
+
     return DEFAULT_UPLOAD_DIR
 
 

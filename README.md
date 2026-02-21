@@ -81,7 +81,7 @@ python batch_process.py --input-dir "D:\\Data\\Downloads\\upload" --output-dir "
 
 ### 6. Настройка путей к данным (без хардкода)
 
-По умолчанию проект использует каталог проекта (например, `/app` в контейнере), но путь можно переопределить:
+По умолчанию проект использует каталог `./data` (рядом с проектом), но путь можно переопределить:
 - UI: поле "Путь к price_clean.csv" в боковой панели
 - UI: загрузчик CSV-каталогов поставщиков в боковой панели (поддержка нескольких файлов)
 - UI: опция "Прогнать ETL перед сохранением каталога" для автоматической подготовки сырого прайса
@@ -97,16 +97,21 @@ python batch_process.py --input-dir "D:\\Data\\Downloads\\upload" --output-dir "
   - `REMO_MATCHER_CATALOG_SAMPLE_ITEMS` — размер sample для fallback-контекста каталога
   - `REMO_PRICE_RAW_CSV`, `REMO_PRICE_CONVERTED_CSV`, `REMO_SAMPLE_XLSX` — точечные override
 
-### 7. CI/CD и автодеплой после тестов
 
-В репозитории настроен GitHub Actions pipeline: `pytest` -> deploy (по `push` в `main`).
-Пошаговая инструкция: `DEPLOYMENT.md`.
 
-### 8. Деплой на Railway
+### Railway: как не прогонять ETL после каждого деплоя
 
-Если хотите развернуть без собственного сервера, используйте Railway.
-Пошаговая инструкция: `RAILWAY_DEPLOY.md`.
+Чтобы `price_clean.csv` не пропадал после релиза, храните данные на **Railway Volume**:
 
+1. Создайте Volume в Railway и примонтируйте его к сервису.
+2. Задайте `REMO_UPLOAD_DIR` в переменных окружения, например:
+   - `REMO_UPLOAD_DIR=/data/remo`
+3. Один раз загрузите/сгенерируйте в этом каталоге:
+   - `/data/remo/price_converted.csv`
+   - `/data/remo/price_clean.csv`
+4. Дальше при деплоях файлы сохраняются в volume, ETL не нужно гонять заново.
+
+Примечание: если `REMO_UPLOAD_DIR` не задан, приложение автоматически использует `RAILWAY_VOLUME_MOUNT_PATH/remo_data` (если переменная доступна в Railway).
 
 ---
 
