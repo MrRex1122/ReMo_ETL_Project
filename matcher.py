@@ -21,6 +21,8 @@ from config import (
     get_matcher_candidate_limit,
     get_matcher_context_lines,
     get_matcher_catalog_sample_items,
+    get_matcher_local_confidence_threshold,
+    get_matcher_local_margin_threshold,
 )
 
 logging.basicConfig(
@@ -33,40 +35,6 @@ MISSING_POSITION_TEXT = "Позиция отсутствует"
 CANONICAL_NAME_COLUMN = "Наименование"
 CANONICAL_ARTICLE_COLUMN = "Артикул"
 CANONICAL_PRICE_COLUMN = "Цена розничная"
-
-DEFAULT_MATCH_PROMPT_TEMPLATE = """
-You are an expert in technical nomenclature for equipment, cables and materials.
-
-Task: find a catalog item that BEST matches the user query.
-
-AVAILABLE CATALOG ITEMS:
-{catalog_context}
-
-USER QUERY: "{query}"
-
-RULES:
-1. Analyze the query carefully.
-2. Pick the most semantically relevant item from catalog.
-3. Consider technical specs, product purpose, synonyms and abbreviations.
-4. If nothing relevant exists, return found_name=null.
-5. Output JSON only.
-
-RESPONSE FORMAT:
-{{
-    "found_name": "Exact catalog name",
-    "article": "Catalog article",
-    "confidence": 0.95,
-    "reasoning": "Short explanation"
-}}
-
-If not found:
-{{
-    "found_name": null,
-    "article": null,
-    "confidence": 0,
-    "reasoning": "item not found in catalog"
-}}
-""".strip()
 
 DEFAULT_MATCH_PROMPT_TEMPLATE = """
 You are an expert in technical nomenclature for equipment, cables and materials.
@@ -136,6 +104,8 @@ class ReMoMatcher:
         self.catalog_items = None
         self.token_index = None
         self.catalog_text = None
+        self.local_confidence_threshold = get_matcher_local_confidence_threshold()
+        self.local_margin_threshold = get_matcher_local_margin_threshold()
         self.backend = None
         self.client = None
         self.legacy_genai = None
@@ -338,12 +308,12 @@ class ReMoMatcher:
     def _build_match_prompt(self, query: str, catalog_context: str) -> str:
         return self.prompt_template.format(query=query, catalog_context=catalog_context)
 
-    def _select_candidates(self, query: str, limit: int = 40) -> List[Dict]:
-        """Выбрать топ-кандидатов из каталога для передачи в Gemini."""
+    def _rank_candidates(self, query: str, limit: int = 40) -> List[Tuple[float, Dict]]:
+        """Вернуть кандидатов с оценками релевантности."""
         normalized_query = self._normalize_text(query)
         query_tokens = self._tokenize(normalized_query)
         if not query_tokens:
-            return self.catalog_items[:limit]
+            return [(1.0, item) for item in self.catalog_items[:limit]]
 
         candidate_map = {}
         for token in query_tokens:
@@ -355,7 +325,7 @@ class ReMoMatcher:
         if not candidate_map:
             candidate_map = {item['name_lc']: item for item in self.catalog_items[: min(800, len(self.catalog_items))]}
 
-        scored = []
+        scored: List[Tuple[float, Dict]] = []
         query_set = set(query_tokens)
         for item in candidate_map.values():
             candidate_tokens = set(self._tokenize(item.get('normalized_name', '')))
@@ -369,7 +339,49 @@ class ReMoMatcher:
             scored.append((score, item))
 
         scored.sort(key=lambda pair: pair[0], reverse=True)
-        return [item for score, item in scored[:limit] if score > 0]
+        return [(score, item) for score, item in scored[:limit] if score > 0]
+
+    def _select_candidates(self, query: str, limit: int = 40) -> List[Dict]:
+        """Выбрать топ-кандидатов из каталога для передачи в Gemini."""
+        ranked = self._rank_candidates(query, limit)
+        return [item for score, item in ranked]
+
+    def _try_local_semantic_match(self, query: str) -> Optional[Dict]:
+        """Попытаться вернуть уверенный локальный матч без Gemini."""
+        ranked = self._rank_candidates(query, limit=2)
+        if not ranked:
+            return None
+
+        best_score, best_item = ranked[0]
+        second_score = ranked[1][0] if len(ranked) > 1 else 0.0
+        margin = best_score - second_score
+
+        if best_score < self.local_confidence_threshold or margin < self.local_margin_threshold:
+            return None
+
+        logger.info(
+            "High-confidence local match: %s (score=%.3f margin=%.3f)",
+            query,
+            best_score,
+            margin,
+        )
+        self._save_to_cache(
+            query,
+            best_item['name'],
+            best_item['price'],
+            best_item['article'],
+            float(best_score),
+            "local_semantic_match",
+        )
+        return {
+            'found_name': best_item['name'],
+            'price': best_item['price'],
+            'article': best_item['article'],
+            'similarity_score': float(best_score),
+            'from_cache': False,
+            'success': True,
+            'error': None
+        }
 
     def _build_catalog_context(self, candidates: List[Dict], max_lines: int = 60) -> str:
         if not candidates:
@@ -500,6 +512,10 @@ class ReMoMatcher:
                     'error': None
                 }
             
+            local_semantic_match = self._try_local_semantic_match(query)
+            if local_semantic_match:
+                return local_semantic_match
+
             # Использовать Gemini для семантического поиска
             logger.info(f"Gemini search: {query}")
             result = self._match_with_gemini(query)

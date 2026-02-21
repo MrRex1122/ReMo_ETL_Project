@@ -20,6 +20,8 @@ DEFAULT_MATCHER_MODELS = "gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.0-flas
 DEFAULT_MATCHER_CANDIDATE_LIMIT = 40
 DEFAULT_MATCHER_CONTEXT_LINES = 60
 DEFAULT_MATCHER_CATALOG_SAMPLE_ITEMS = 500
+DEFAULT_MATCHER_LOCAL_CONFIDENCE_THRESHOLD = 0.92
+DEFAULT_MATCHER_LOCAL_MARGIN_THRESHOLD = 0.08
 
 
 def _normalize_path(raw: str | Path) -> Path:
@@ -104,3 +106,27 @@ def get_matcher_catalog_sample_items() -> int:
         return max(1, value)
     except ValueError:
         return DEFAULT_MATCHER_CATALOG_SAMPLE_ITEMS
+
+
+def get_matcher_local_confidence_threshold() -> float:
+    raw = os.getenv(
+        "REMO_MATCHER_LOCAL_CONFIDENCE_THRESHOLD",
+        str(DEFAULT_MATCHER_LOCAL_CONFIDENCE_THRESHOLD),
+    )
+    try:
+        value = float(raw)
+        return min(1.0, max(0.0, value))
+    except ValueError:
+        return DEFAULT_MATCHER_LOCAL_CONFIDENCE_THRESHOLD
+
+
+def get_matcher_local_margin_threshold() -> float:
+    raw = os.getenv(
+        "REMO_MATCHER_LOCAL_MARGIN_THRESHOLD",
+        str(DEFAULT_MATCHER_LOCAL_MARGIN_THRESHOLD),
+    )
+    try:
+        value = float(raw)
+        return min(1.0, max(0.0, value))
+    except ValueError:
+        return DEFAULT_MATCHER_LOCAL_MARGIN_THRESHOLD

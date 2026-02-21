@@ -13,6 +13,8 @@ class ConfigPathTests(unittest.TestCase):
             "REMO_PRICE_RAW_CSV",
             "REMO_PRICE_CONVERTED_CSV",
             "REMO_SAMPLE_XLSX",
+            "REMO_MATCHER_LOCAL_CONFIDENCE_THRESHOLD",
+            "REMO_MATCHER_LOCAL_MARGIN_THRESHOLD",
         )}
 
     def tearDown(self):
@@ -44,6 +46,26 @@ class ConfigPathTests(unittest.TestCase):
 
     def test_default_upload_dir_is_project_root(self):
         self.assertEqual(config.DEFAULT_UPLOAD_DIR, config.PROJECT_ROOT)
+
+    def test_local_thresholds_are_clamped_and_parseable(self):
+        os.environ["REMO_MATCHER_LOCAL_CONFIDENCE_THRESHOLD"] = "1.7"
+        os.environ["REMO_MATCHER_LOCAL_MARGIN_THRESHOLD"] = "-0.2"
+
+        self.assertEqual(config.get_matcher_local_confidence_threshold(), 1.0)
+        self.assertEqual(config.get_matcher_local_margin_threshold(), 0.0)
+
+    def test_local_thresholds_fallback_on_invalid_values(self):
+        os.environ["REMO_MATCHER_LOCAL_CONFIDENCE_THRESHOLD"] = "oops"
+        os.environ["REMO_MATCHER_LOCAL_MARGIN_THRESHOLD"] = "oops"
+
+        self.assertEqual(
+            config.get_matcher_local_confidence_threshold(),
+            config.DEFAULT_MATCHER_LOCAL_CONFIDENCE_THRESHOLD,
+        )
+        self.assertEqual(
+            config.get_matcher_local_margin_threshold(),
+            config.DEFAULT_MATCHER_LOCAL_MARGIN_THRESHOLD,
+        )
 
 
 if __name__ == "__main__":
