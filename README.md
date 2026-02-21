@@ -96,6 +96,29 @@ python batch_process.py --input-dir "D:\\Data\\Downloads\\upload" --output-dir "
   - `REMO_MATCHER_CONTEXT_LINES` — сколько строк кандидатов передавать в prompt
   - `REMO_MATCHER_CATALOG_SAMPLE_ITEMS` — размер sample для fallback-контекста каталога
   - `REMO_PRICE_RAW_CSV`, `REMO_PRICE_CONVERTED_CSV`, `REMO_SAMPLE_XLSX` — точечные override
+  - `REMO_MATCHER_PARALLEL_REQUESTS` — количество параллельных LLM-запросов (1..10, по умолчанию 1)
+
+- В UI (боковая панель) доступны параметры тонкой настройки matcher:
+  - **Параллельные запросы к Gemini** (1..10)
+  - **Размер сэмпла каталога для контекста** (100..1500)
+  - Контекст подбирается детерминированно: из релевантных токен-групп запроса (без случайного `sample`)
+  Изменения применяются кнопкой **"Применить параметры matcher"**.
+
+
+
+### Railway: как не прогонять ETL после каждого деплоя
+
+Чтобы `price_clean.csv` не пропадал после релиза, храните данные на **Railway Volume**:
+
+1. Создайте Volume в Railway и примонтируйте его к сервису.
+2. Задайте `REMO_UPLOAD_DIR` в переменных окружения, например:
+   - `REMO_UPLOAD_DIR=/data/remo`
+3. Один раз загрузите/сгенерируйте в этом каталоге:
+   - `/data/remo/price_converted.csv`
+   - `/data/remo/price_clean.csv`
+4. Дальше при деплоях файлы сохраняются в volume, ETL не нужно гонять заново.
+
+Примечание: если `REMO_UPLOAD_DIR` не задан, приложение автоматически использует `RAILWAY_VOLUME_MOUNT_PATH/remo_data` (если переменная доступна в Railway).
 
 
 

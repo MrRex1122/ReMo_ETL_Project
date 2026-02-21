@@ -14,6 +14,7 @@ class ConfigPathTests(unittest.TestCase):
             "REMO_PRICE_CONVERTED_CSV",
             "REMO_SAMPLE_XLSX",
             "RAILWAY_VOLUME_MOUNT_PATH",
+            "REMO_MATCHER_PARALLEL_REQUESTS",
         )}
 
     def tearDown(self):
@@ -48,6 +49,17 @@ class ConfigPathTests(unittest.TestCase):
         os.environ["REMO_DB_CSV"] = r"D:\Data\Downloads\upload\price_clean.csv"
         actual = config.get_catalog_csv_path()
         self.assertEqual(str(actual), r"D:\Data\Downloads\upload\price_clean.csv")
+
+    def test_matcher_parallel_requests_clamped(self):
+        os.environ["REMO_MATCHER_PARALLEL_REQUESTS"] = "99"
+        self.assertEqual(config.get_matcher_parallel_requests(), 10)
+
+    def test_matcher_parallel_requests_fallback_on_invalid(self):
+        os.environ["REMO_MATCHER_PARALLEL_REQUESTS"] = "oops"
+        self.assertEqual(
+            config.get_matcher_parallel_requests(),
+            config.DEFAULT_MATCHER_PARALLEL_REQUESTS,
+        )
 
 
 if __name__ == "__main__":

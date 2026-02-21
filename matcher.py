@@ -11,19 +11,11 @@ from typing import List, Dict, Optional, Tuple
 import logging
 import hashlib
 import os
-from pathlib import Path
 import re
-from difflib import SequenceMatcher
-from config import (
-    get_catalog_csv_path,
-    get_matcher_cache_db_path,
-    get_matcher_models,
-    get_matcher_candidate_limit,
-    get_matcher_context_lines,
-    get_matcher_catalog_sample_items,
-    get_matcher_local_confidence_threshold,
-    get_matcher_local_margin_threshold,
-)
+from pathlib import Path
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from config import get_catalog_csv_path, get_matcher_parallel_requests
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,43 +24,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 MISSING_POSITION_TEXT = "Позиция отсутствует"
-CANONICAL_NAME_COLUMN = "Наименование"
-CANONICAL_ARTICLE_COLUMN = "Артикул"
-CANONICAL_PRICE_COLUMN = "Цена розничная"
-
-DEFAULT_MATCH_PROMPT_TEMPLATE = """
-You are an expert in technical nomenclature for equipment, cables and materials.
-
-Task: find a catalog item that BEST matches the user query.
-
-AVAILABLE CATALOG ITEMS:
-{catalog_context}
-
-USER QUERY: "{query}"
-
-RULES:
-1. Analyze the query carefully.
-2. Pick the most semantically relevant item from catalog.
-3. Consider technical specs, product purpose, synonyms and abbreviations.
-4. If nothing relevant exists, return found_name=null.
-5. Output JSON only.
-
-RESPONSE FORMAT:
-{{
-    "found_name": "Exact catalog name",
-    "article": "Catalog article",
-    "confidence": 0.95,
-    "reasoning": "Short explanation"
-}}
-
-If not found:
-{{
-    "found_name": null,
-    "article": null,
-    "confidence": 0,
-    "reasoning": "item not found in catalog"
-}}
-""".strip()
+GROUP_TOKEN_STOPWORDS = {"и", "в", "на", "для", "с", "по", "из", "шт", "мм", "м", "к", "u", "duplex"}
 
 try:
     from google import genai as genai_sdk
@@ -88,7 +44,7 @@ class ReMoMatcher:
     3. Ð’ÐµÑ€Ð½ÑƒÑ‚ÑŒ: (Ð½Ð°Ð¹Ð´ÐµÐ½Ð½Ð¾Ðµ Ð¸Ð¼Ñ, Ñ†ÐµÐ½Ð°, Ð°Ñ€Ñ‚Ð¸ÐºÑƒÐ»)
     """
     
-    def __init__(self, gemini_api_key: str, db_csv_path: str, cache_db: str | None = None):
+    def __init__(self, gemini_api_key: str, db_csv_path: str, cache_db: str = "matcher_cache.db", parallel_requests: int | None = None, catalog_sample_items: int = 500):
         """
         Args:
             gemini_api_key: API ÐºÐ»ÑŽÑ‡ Google Gemini
@@ -100,9 +56,8 @@ class ReMoMatcher:
         self.cache_db = str(get_matcher_cache_db_path(cache_db))
         self.catalog = None
         self.catalog_dict = None
-        self.catalog_normalized_dict = None
-        self.catalog_items = None
-        self.token_index = None
+        self.catalog_items = []
+        self.group_index = {}
         self.catalog_text = None
         self.local_confidence_threshold = get_matcher_local_confidence_threshold()
         self.local_margin_threshold = get_matcher_local_margin_threshold()
@@ -111,7 +66,8 @@ class ReMoMatcher:
         self.legacy_genai = None
         self.model = None
         self.model_name = None
-        self.prompt_template = self._load_prompt_template()
+        self.parallel_requests = min(10, max(1, int(parallel_requests or get_matcher_parallel_requests())))
+        self.catalog_sample_items = max(50, int(catalog_sample_items))
         
         # Ð˜Ð½Ð¸Ñ†Ð¸Ð°Ð»Ð¸Ð·Ð°Ñ†Ð¸Ñ Gemini
         if GENAI_SDK_AVAILABLE:
@@ -222,14 +178,13 @@ class ReMoMatcher:
         
         # Подготовить словарь для быстрого поиска
         self.catalog_dict = {}
-        self.catalog_normalized_dict = {}
         self.catalog_items = []
-        self.token_index = {}
+        token_to_items: Dict[str, List[Dict]] = defaultdict(list)
         for idx, row in self.catalog.iterrows():
-            name = str(row.get(CANONICAL_NAME_COLUMN, '')).strip()
-            article = str(row.get(CANONICAL_ARTICLE_COLUMN, '')).strip()
-            price = float(row.get(CANONICAL_PRICE_COLUMN, 0)) if CANONICAL_PRICE_COLUMN in row else None
-            
+            name = str(row.get('Наименование', '')).strip()
+            article = str(row.get('Артикул', '')).strip()
+            price = float(row.get('Цена розничная', 0)) if 'Цена розничная' in row else None
+
             if name:
                 item = {
                     'name': name,
@@ -239,22 +194,23 @@ class ReMoMatcher:
                     'row_idx': idx,
                 }
                 self.catalog_dict[name.lower()] = item
-                normalized_name = self._normalize_text(name)
-                item['normalized_name'] = normalized_name
-                if normalized_name and normalized_name not in self.catalog_normalized_dict:
-                    self.catalog_normalized_dict[normalized_name] = item
                 self.catalog_items.append(item)
-                for token in self._tokenize(normalized_name):
-                    self.token_index.setdefault(token, []).append(item)
-        
+                for token in self._tokenize(name):
+                    token_to_items[token].append(item)
+
+        self.group_index = {
+            token: items
+            for token, items in token_to_items.items()
+            if len(items) >= 3
+        }
+
         # Подготовить текстовый формат каталога для Gemini
-        self._prepare_catalog_text()
+        self._prepare_catalog_text(max_items=self.catalog_sample_items)
     
-    def _prepare_catalog_text(self, max_items: int | None = None):
-        """Подготовить каталог в текстовом формате для контекста Gemini"""
-        if max_items is None:
-            max_items = get_matcher_catalog_sample_items()
-        sample = self.catalog.sample(n=min(max_items, len(self.catalog)))
+    def _prepare_catalog_text(self, max_items: int = 500):
+        """Подготовить каталог в текстовом формате для контекста Gemini."""
+        limit = min(max_items, len(self.catalog))
+        sample = self.catalog.head(limit)
 
         catalog_lines = []
         for idx, row in sample.iterrows():
@@ -264,10 +220,41 @@ class ReMoMatcher:
                 f"| Цена: {row.get(CANONICAL_PRICE_COLUMN, 'N/A')}"
             )
             catalog_lines.append(line)
-        
+
         self.catalog_text = "\n".join(catalog_lines[:300])  # Ограничить для контекста
-        logger.info(f"Catalog context prepared ({len(catalog_lines)} items sampled)")
-    
+        logger.info(f"✓ Каталог подготовлен ({len(catalog_lines)} товаров в контексте)")
+
+    def _tokenize(self, text: str) -> List[str]:
+        tokens = re.findall(r"[a-zA-Zа-яА-Я0-9]+", str(text).lower())
+        return [token for token in tokens if len(token) >= 2 and token not in GROUP_TOKEN_STOPWORDS]
+
+    def _build_context_for_query(self, query: str, max_lines: int = 300) -> str:
+        """Собрать контекст по релевантным группам, а не случайным позициям."""
+        query_tokens = self._tokenize(query)
+        if not query_tokens or not self.group_index:
+            return self.catalog_text
+
+        candidate_map: Dict[str, Dict] = {}
+        query_token_set = set(query_tokens)
+        for token in query_token_set:
+            for item in self.group_index.get(token, []):
+                candidate_map[item['name_lc']] = item
+
+        if not candidate_map:
+            return self.catalog_text
+
+        def score(item: Dict) -> Tuple[int, int]:
+            item_tokens = set(self._tokenize(item['name']))
+            overlap = len(item_tokens.intersection(query_token_set))
+            return (overlap, -item['row_idx'])
+
+        ranked_items = sorted(candidate_map.values(), key=score, reverse=True)
+        lines = [
+            f"• {item['name']} | Артикул: {item.get('article', 'N/A')} | Цена: {item.get('price', 'N/A')}"
+            for item in ranked_items[:max_lines]
+        ]
+        return "\n".join(lines) if lines else self.catalog_text
+
     def _hash_query(self, query: str) -> str:
         """Хэш запроса для кэша"""
         normalized = self._normalize_text(query)
@@ -554,10 +541,9 @@ class ReMoMatcher:
             return (getattr(response, 'text', None) or '').strip()
 
         if self.backend == "google-generativeai":
-            if self.model is None or self.model_name != model_name:
-                self.model = self.legacy_genai.GenerativeModel(model_name)
-                self.model_name = model_name
-            response = self.model.generate_content(prompt, stream=False)
+            # Локальный инстанс безопаснее для многопоточной обработки.
+            model = self.legacy_genai.GenerativeModel(model_name)
+            response = model.generate_content(prompt, stream=False)
             return (response.text or '').strip()
 
         raise RuntimeError("Gemini backend is not initialized")
@@ -565,9 +551,42 @@ class ReMoMatcher:
     def _match_with_gemini(self, query: str) -> Dict:
         """Использовать Gemini для сопоставления"""
 
-        candidates = self._select_candidates(query, limit=get_matcher_candidate_limit())
-        catalog_context = self._build_catalog_context(candidates, max_lines=get_matcher_context_lines())
-        prompt = self._build_match_prompt(query, catalog_context)
+        context_text = self._build_context_for_query(query)
+        prompt = f"""Ты эксперт по технической номенклатуре оборудования, кабеля и материалов.
+
+Задача: Найти в каталоге товар, который ТОЧНО соответствует запросу пользователя.
+
+КАТАЛОГ ДОСТУПНЫХ ТОВАРОВ:
+{context_text}
+
+ЗАПРОС ПОЛЬЗОВАТЕЛЯ: "{query}"
+
+ИНСТРУКЦИИ:
+1. Внимательно проанализируй запрос пользователя
+2. Найди в каталоге товар с МАКСИМАЛЬНЫМ семантическим совпадением
+3. Учитывай:
+   - Технические характеристики (сечение, вольтаж, материал, размеры)
+   - Назначение товара (кабель, кондиционер, сварочный аппарат и т.д.)
+   - Альтернативные названия и аббревиатуры
+4. Если релевантного аналога нет, верни found_name=null
+5. Вывод ТОЛЬКО в формате JSON (без лишнего текста)
+
+ФОРМАТ ОТВЕТА:
+{{
+    "found_name": "Точное название из каталога",
+    "article": "Артикул товара",
+    "confidence": 0.95,
+    "reasoning": "Краткое объяснение почему это совпадение"
+}}
+
+Если товар не найден:
+{{
+    "found_name": null,
+    "article": null,
+    "confidence": 0,
+    "reasoning": "товар не найден в каталоге"
+}}
+"""
 
         def parse_result(raw_text: str) -> Dict:
             start_idx = raw_text.find('{')
@@ -650,6 +669,46 @@ class ReMoMatcher:
         except Exception as e:
             logger.warning(f"History write error: {e}")
     
+
+    def _run_matches_parallel(self, tasks: List[Tuple[int, str]]) -> List[Tuple[int, Dict]]:
+        """Выполнить сопоставление запросов с ограниченным параллелизмом."""
+        if not tasks:
+            return []
+
+        workers = getattr(self, "parallel_requests", 1)
+        if workers <= 1:
+            return [(idx, self.match(query, use_cache=True)) for idx, query in tasks]
+
+        logger.info(f"⚡ Параллельная обработка включена: {workers} запросов одновременно")
+        results: List[Tuple[int, Dict]] = []
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            future_map = {
+                pool.submit(self.match, query, True): idx
+                for idx, query in tasks
+            }
+            completed = 0
+            total = len(tasks)
+            for future in as_completed(future_map):
+                idx = future_map[future]
+                try:
+                    result = future.result()
+                except Exception as e:
+                    result = {
+                        'found_name': MISSING_POSITION_TEXT,
+                        'price': None,
+                        'article': None,
+                        'similarity_score': 0,
+                        'from_cache': False,
+                        'success': False,
+                        'error': str(e),
+                    }
+                results.append((idx, result))
+                completed += 1
+                if completed % 10 == 0 or completed == total:
+                    logger.info(f"⏳ Обработано {completed}/{total} строк")
+
+        return results
+
     def process_excel(self, excel_path: str, output_path: str = None) -> Tuple[pd.DataFrame, Dict]:
         """
         Обработать весь Excel файл КП
@@ -707,22 +766,27 @@ class ReMoMatcher:
             "errors": 0,
         }
 
-        skip_queries = {
-            "наименование",
-            "наименование оборудования, материалов и кабелей",
-            "nomenclature",
-        }
-
+        tasks: List[Tuple[int, str]] = []
         for idx, row in df.iterrows():
             query = str(row[col_b]).strip()
-            if not query or query.lower() == "nan":
+            if not query or query.lower() == 'nan':
                 continue
-
-            if query.lower() in skip_queries:
+            if query.strip().lower() in {
+                'наименование',
+                'наименование оборудования, материалов и кабелей',
+                'nomenclature',
+            }:
                 continue
+            tasks.append((idx, query))
 
-            stats["total"] += 1
-            result = self.match(query, use_cache=True)
+        stats['total'] = len(tasks)
+        for idx, result in self._run_matches_parallel(tasks):
+            # Заполнить результаты
+            found_name = result.get('found_name') or MISSING_POSITION_TEXT
+            df.at[idx, 'Цена'] = result.get('price')
+            df.at[idx, 'Найденная номенклатура'] = found_name
+            df.at[idx, 'Артикул'] = result.get('article')
+            df.at[idx, 'Ошибка сопоставления'] = result.get('error')
 
             found_name = result.get("found_name") or MISSING_POSITION_TEXT
             df.at[idx, "Цена"] = result.get("price")
@@ -744,11 +808,7 @@ class ReMoMatcher:
 
             if not result.get('success', True):
                 stats['errors'] += 1
-                logger.warning(f"[{idx+1}] Matching error: {result.get('error')}")
-            
-            # Логирование прогресса
-            if (idx + 1) % 10 == 0:
-                logger.info(f"Processed {idx+1}/{len(df)} rows")
+                logger.warning(f"⚠️ [{idx+1}] Ошибка: {result.get('error')}")
         
         # Сохранить результат
         if output_path is None:

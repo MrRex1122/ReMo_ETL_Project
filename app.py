@@ -78,8 +78,12 @@ if 'db_csv_path' not in st.session_state:
     st.session_state.db_csv_path = str(get_catalog_csv_path())
 if 'matcher_db_csv' not in st.session_state:
     st.session_state.matcher_db_csv = None
-if 'processing' not in st.session_state:
-    st.session_state.processing = False
+if 'matcher_parallel_requests' not in st.session_state:
+    st.session_state.matcher_parallel_requests = 1
+if 'matcher_catalog_sample_items' not in st.session_state:
+    st.session_state.matcher_catalog_sample_items = 500
+if 'matcher_settings_signature' not in st.session_state:
+    st.session_state.matcher_settings_signature = None
 
 
 
@@ -114,9 +118,14 @@ def _validate_runtime_readiness(db_csv: str) -> list[str]:
 def get_matcher() -> ReMoMatcher:
     """Получить или инициализировать экземпляр matcher"""
     db_csv = str(get_catalog_csv_path(st.session_state.get('db_csv_path')))
+    settings_signature = (
+        int(st.session_state.get('matcher_parallel_requests', 1)),
+        int(st.session_state.get('matcher_catalog_sample_items', 500)),
+    )
     needs_reinit = (
         st.session_state.matcher is None
         or st.session_state.matcher_db_csv != db_csv
+        or st.session_state.matcher_settings_signature != settings_signature
     )
 
     if needs_reinit:
@@ -151,8 +160,14 @@ def get_matcher() -> ReMoMatcher:
         
         with st.spinner("⏳ Инициализация ReMo Matcher..."):
             try:
-                st.session_state.matcher = ReMoMatcher(api_key, db_csv)
+                st.session_state.matcher = ReMoMatcher(
+                    api_key,
+                    db_csv,
+                    parallel_requests=int(st.session_state.get('matcher_parallel_requests', 1)),
+                    catalog_sample_items=int(st.session_state.get('matcher_catalog_sample_items', 500)),
+                )
                 st.session_state.matcher_db_csv = db_csv
+                st.session_state.matcher_settings_signature = settings_signature
                 logger.info("✓ ReMoMatcher успешно инициализирован")
             except Exception as e:
                 logger.error(f"❌ Ошибка инициализации: {e}", exc_info=True)
@@ -349,7 +364,31 @@ def main():
         if st.button("🔄 Перезагрузить БД"):
             st.session_state.matcher = None
             st.session_state.matcher_db_csv = None
+            st.session_state.matcher_settings_signature = None
             st.success("✓ БД перезагружена")
+
+        st.subheader("2️⃣ Тонкая настройка matcher")
+        st.slider(
+            "Параллельные запросы к Gemini",
+            min_value=1,
+            max_value=10,
+            key="matcher_parallel_requests",
+            help="Чем больше значение, тем быстрее обработка, но выше риск rate-limit/нестабильности.",
+        )
+        st.slider(
+            "Размер сэмпла каталога для контекста",
+            min_value=100,
+            max_value=1500,
+            step=50,
+            key="matcher_catalog_sample_items",
+            help="Больше контекста может повысить качество, но замедляет и увеличивает токены.",
+        )
+
+        if st.button("✅ Применить параметры matcher"):
+            st.session_state.matcher = None
+            st.session_state.matcher_db_csv = None
+            st.session_state.matcher_settings_signature = None
+            st.success("✓ Параметры применены. Matcher будет переинициализирован при следующем запуске.")
         
         st.divider()
         
