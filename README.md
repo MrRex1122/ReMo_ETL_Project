@@ -120,22 +120,6 @@ python batch_process.py --input-dir "D:\\Data\\Downloads\\upload" --output-dir "
 
 Примечание: если `REMO_UPLOAD_DIR` не задан, приложение автоматически использует `RAILWAY_VOLUME_MOUNT_PATH/remo_data` (если переменная доступна в Railway).
 
-
-
-### Railway: как не прогонять ETL после каждого деплоя
-
-Чтобы `price_clean.csv` не пропадал после релиза, храните данные на **Railway Volume**:
-
-1. Создайте Volume в Railway и примонтируйте его к сервису.
-2. Задайте `REMO_UPLOAD_DIR` в переменных окружения, например:
-   - `REMO_UPLOAD_DIR=/data/remo`
-3. Один раз загрузите/сгенерируйте в этом каталоге:
-   - `/data/remo/price_converted.csv`
-   - `/data/remo/price_clean.csv`
-4. Дальше при деплоях файлы сохраняются в volume, ETL не нужно гонять заново.
-
-Примечание: если `REMO_UPLOAD_DIR` не задан, приложение автоматически использует `RAILWAY_VOLUME_MOUNT_PATH/remo_data` (если переменная доступна в Railway).
-
 ---
 
 ## 📖 Инструкция по использованию

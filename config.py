@@ -16,6 +16,7 @@ DEFAULT_CATALOG_CSV_NAME = "price_clean.csv"
 DEFAULT_PRICE_RAW_CSV_NAME = "price.csv"
 DEFAULT_PRICE_CONVERTED_CSV_NAME = "price_converted.csv"
 DEFAULT_SAMPLE_XLSX_NAME = "РеМо_Шаблон_коммерческого_предложения_020625.xlsx"
+DEFAULT_MATCHER_CACHE_DB_NAME = "matcher_cache.db"
 DEFAULT_MATCHER_PARALLEL_REQUESTS = 1
 
 
@@ -75,6 +76,10 @@ def get_price_converted_csv_path(explicit: str | None = None) -> Path:
 
 def get_sample_excel_path(explicit: str | None = None) -> Path:
     return _pick_path(explicit, "REMO_SAMPLE_XLSX", get_upload_dir() / DEFAULT_SAMPLE_XLSX_NAME)
+
+
+def get_matcher_cache_db_path(explicit: str | None = None) -> Path:
+    return _pick_path(explicit, "REMO_MATCHER_CACHE_DB", get_upload_dir() / DEFAULT_MATCHER_CACHE_DB_NAME)
 
 
 def get_matcher_parallel_requests() -> int:

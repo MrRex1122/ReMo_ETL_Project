@@ -15,6 +15,7 @@ class ConfigPathTests(unittest.TestCase):
             "REMO_SAMPLE_XLSX",
             "RAILWAY_VOLUME_MOUNT_PATH",
             "REMO_MATCHER_PARALLEL_REQUESTS",
+            "REMO_MATCHER_CACHE_DB",
         )}
 
     def tearDown(self):
@@ -60,6 +61,11 @@ class ConfigPathTests(unittest.TestCase):
             config.get_matcher_parallel_requests(),
             config.DEFAULT_MATCHER_PARALLEL_REQUESTS,
         )
+
+    def test_matcher_cache_db_path_uses_env_override(self):
+        os.environ["REMO_MATCHER_CACHE_DB"] = "cache/custom.db"
+        expected = config.PROJECT_ROOT / "cache" / "custom.db"
+        self.assertEqual(config.get_matcher_cache_db_path(), expected)
 
 
 if __name__ == "__main__":
