@@ -21,6 +21,7 @@ from config import (
     get_matcher_cache_db_path,
     get_matcher_local_confidence_threshold,
     get_matcher_local_margin_threshold,
+    get_matcher_models,
 )
 
 logging.basicConfig(

@@ -16,6 +16,7 @@ class ConfigPathTests(unittest.TestCase):
             "RAILWAY_VOLUME_MOUNT_PATH",
             "REMO_MATCHER_PARALLEL_REQUESTS",
             "REMO_MATCHER_CACHE_DB",
+            "REMO_MATCHER_MODELS",
             "REMO_MATCHER_LOCAL_CONFIDENCE_THRESHOLD",
             "REMO_MATCHER_LOCAL_MARGIN_THRESHOLD",
         )}
@@ -85,6 +86,17 @@ class ConfigPathTests(unittest.TestCase):
         self.assertEqual(
             config.get_matcher_local_margin_threshold(),
             config.DEFAULT_MATCHER_LOCAL_MARGIN_THRESHOLD,
+        )
+
+    def test_matcher_models_parsed_from_env(self):
+        os.environ["REMO_MATCHER_MODELS"] = " model-a, model-b ,,  model-c "
+        self.assertEqual(config.get_matcher_models(), ["model-a", "model-b", "model-c"])
+
+    def test_matcher_models_fallback_on_blank(self):
+        os.environ["REMO_MATCHER_MODELS"] = " , , "
+        self.assertEqual(
+            config.get_matcher_models(),
+            [value.strip() for value in config.DEFAULT_MATCHER_MODELS.split(",") if value.strip()],
         )
 
 
