@@ -16,6 +16,8 @@ import logging
 import io
 from config import get_catalog_csv_path, get_upload_dir, get_matcher_cache_db_path
 from catalog_snapshot import prepare_catalog_snapshot
+from etl_pipeline import PriceETL
+from main import convert_csv
 
 # ============ ЛОГИРОВАНИЕ ============
 logging.basicConfig(
