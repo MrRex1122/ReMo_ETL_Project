@@ -898,11 +898,12 @@ class ReMoMatcher:
         if not tasks:
             return []
 
-        workers = getattr(self, "parallel_requests", 1)
+        # По требованию: запускать максимум параллельных запросов — по числу позиций.
+        workers = max(1, len(tasks))
         if workers <= 1:
             return [(idx, self.match(query, use_cache=True)) for idx, query in tasks]
 
-        logger.info(f"⚡ Параллельная обработка включена: {workers} запросов одновременно")
+        logger.info(f"⚡ Параллельная обработка включена: {workers} запросов одновременно (по числу позиций)")
         results: List[Tuple[int, Dict]] = []
         with ThreadPoolExecutor(max_workers=workers) as pool:
             future_map = {
