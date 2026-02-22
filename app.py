@@ -83,6 +83,8 @@ if 'matcher_parallel_requests' not in st.session_state:
     st.session_state.matcher_parallel_requests = 1
 if 'matcher_catalog_sample_items' not in st.session_state:
     st.session_state.matcher_catalog_sample_items = 500
+if 'matcher_mode' not in st.session_state:
+    st.session_state.matcher_mode = 'exact'
 if 'matcher_settings_signature' not in st.session_state:
     st.session_state.matcher_settings_signature = None
 if 'show_results' not in st.session_state:
@@ -145,6 +147,7 @@ def get_matcher() -> ReMoMatcher:
     settings_signature = (
         int(st.session_state.get('matcher_parallel_requests', 1)),
         int(st.session_state.get('matcher_catalog_sample_items', 500)),
+        str(st.session_state.get('matcher_mode', 'exact')),
     )
     needs_reinit = (
         st.session_state.matcher is None
@@ -189,6 +192,7 @@ def get_matcher() -> ReMoMatcher:
                     db_csv,
                     parallel_requests=int(st.session_state.get('matcher_parallel_requests', 1)),
                     catalog_sample_items=int(st.session_state.get('matcher_catalog_sample_items', 500)),
+                    match_mode=str(st.session_state.get('matcher_mode', 'exact')),
                 )
                 st.session_state.matcher_db_csv = db_csv
                 st.session_state.matcher_settings_signature = settings_signature
@@ -469,6 +473,18 @@ def main():
             step=50,
             key="matcher_catalog_sample_items",
             help="Больше контекста может повысить качество, но замедляет и увеличивает токены.",
+        )
+
+        st.selectbox(
+            "Режим сопоставления",
+            options=["exact", "analog"],
+            key="matcher_mode",
+            format_func=lambda value: "Точный матч" if value == "exact" else "Аналог/замена",
+            help=(
+                "exact: только строгие совпадения по типу товара. "
+                "analog: допускает близкие аналоги, но не подменяет тип товара "
+                "(например, патч-корд не заменяется витой парой в бухте)."
+            ),
         )
 
         if st.button("✅ Применить параметры matcher"):
