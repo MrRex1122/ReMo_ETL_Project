@@ -122,6 +122,35 @@ def _validate_runtime_readiness(db_csv: str) -> list[str]:
 
     return issues
 
+
+
+
+
+def _get_gemini_api_key() -> str | None:
+    """Безопасно получить API-ключ из secrets/env без падения при отсутствии secrets.toml."""
+    try:
+        secret_value = st.secrets.get("GEMINI_API_KEY")
+    except StreamlitSecretNotFoundError:
+        secret_value = None
+    except Exception as e:
+        logger.warning(f"⚠️ Не удалось прочитать Streamlit secrets: {e}")
+        secret_value = None
+
+    return secret_value or os.getenv("GEMINI_API_KEY")
+
+def _validate_runtime_readiness(db_csv: str) -> list[str]:
+    """Проверить готовность приложения к обработке перед запуском matcher."""
+    issues = []
+
+    api_key = _get_gemini_api_key()
+    if not api_key:
+        issues.append("Не задан GEMINI_API_KEY")
+
+    if not Path(db_csv).exists():
+        issues.append(f"Не найден каталог price_clean.csv: {db_csv}")
+
+    return issues
+
 def get_matcher() -> ReMoMatcher:
     """Получить или инициализировать экземпляр matcher"""
     db_csv = str(get_catalog_csv_path(st.session_state.get('db_csv_path')))
@@ -158,6 +187,11 @@ def get_matcher() -> ReMoMatcher:
         if not Path(db_csv).exists():
             logger.error(f"❌ Файл не найден: {db_csv}")
             st.error(f"❌ Файл не найден: {db_csv}")
+            st.info(
+                "Для Railway задайте путь к каталогу через переменную окружения "
+                "`REMO_DB_CSV` (или `REMO_UPLOAD_DIR`) и убедитесь, что файл "
+                "`price_clean.csv` существует в контейнере."
+            )
             st.stop()
         
         with st.spinner("⏳ Инициализация ReMo Matcher..."):
@@ -207,6 +241,52 @@ def process_uploaded_file(uploaded_file) -> tuple:
     finally:
         os.unlink(tmp_path)
         logger.info(f"🗑️ Временный файл удален")
+
+
+def save_uploaded_catalog(uploaded_catalog, run_etl: bool = False) -> Path:
+    """Сохранить загруженный CSV каталога в рабочую папку данных."""
+    storage_dir = get_upload_dir()
+    storage_dir.mkdir(parents=True, exist_ok=True)
+
+    source_name = Path(uploaded_catalog.name).name
+    source_stem = Path(source_name).stem
+
+    raw_dir = storage_dir / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    raw_path = raw_dir / source_name
+
+    with open(raw_path, 'wb') as fh:
+        fh.write(uploaded_catalog.getbuffer())
+
+    if not run_etl:
+        target_path = storage_dir / source_name
+        raw_path.replace(target_path)
+        logger.info(f"📚 Каталог сохранен без ETL: {target_path}")
+        return target_path
+
+    converted_dir = storage_dir / "converted"
+    clean_dir = storage_dir / "clean"
+    converted_dir.mkdir(parents=True, exist_ok=True)
+    clean_dir.mkdir(parents=True, exist_ok=True)
+
+    converted_path = converted_dir / f"{source_stem}_converted.csv"
+    clean_path = clean_dir / f"{source_stem}_clean.csv"
+
+    convert_csv(raw_path, converted_path)
+    PriceETL(str(converted_path), str(clean_path)).run()
+
+    logger.info(f"📚 Каталог сохранен после ETL: {clean_path}")
+    return clean_path
+
+
+def list_available_catalogs() -> list[Path]:
+    """Вернуть список доступных CSV-каталогов в рабочей папке данных."""
+    storage_dir = get_upload_dir()
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    top_level = set(storage_dir.glob("*.csv"))
+    clean_dir = storage_dir / "clean"
+    clean_level = set(clean_dir.glob("*.csv")) if clean_dir.exists() else set()
+    return sorted(top_level | clean_level)
 
 
 def show_statistics(stats):
@@ -281,6 +361,46 @@ def main():
         st.header("⚙️ Настройки")
         
         st.subheader("1️⃣ Товарная база данных")
+
+        catalog_upload = st.file_uploader(
+            "Загрузить CSV каталог(и) поставщика",
+            type=['csv'],
+            accept_multiple_files=True,
+            help="Файлы будут сохранены в рабочую папку данных (например, /data в Railway Volume)."
+        )
+
+        run_etl_before_save = st.checkbox(
+            "Прогнать ETL перед сохранением каталога",
+            value=True,
+            help=(
+                "Рекомендуется для "
+                "сырого CSV из 1С/Excel: сначала конвертация кодировки/разделителя, "
+                "потом очистка и нормализация."
+            )
+        )
+
+        if catalog_upload and st.button("💾 Сохранить каталоги", key="save_catalogs_btn"):
+            for uploaded_catalog in catalog_upload:
+                try:
+                    saved_path = save_uploaded_catalog(uploaded_catalog, run_etl=run_etl_before_save)
+                    st.success(f"✓ Сохранен каталог: {saved_path.name}")
+                except Exception as e:
+                    logger.error(f"❌ Ошибка сохранения каталога: {e}", exc_info=True)
+                    st.error(f"❌ Не удалось сохранить {uploaded_catalog.name}: {e}")
+
+            st.session_state.matcher = None
+            st.session_state.matcher_db_csv = None
+
+        available_catalogs = list_available_catalogs()
+        if available_catalogs:
+            selected_catalog = st.selectbox(
+                "Выбрать активный каталог",
+                options=[str(path) for path in available_catalogs],
+                index=0,
+            )
+            if selected_catalog != st.session_state.get('db_csv_path'):
+                st.session_state.db_csv_path = selected_catalog
+
         st.text_input(
             "Путь к price_clean.csv (или к папке с *_clean.csv)",
             key="db_csv_path",
@@ -388,8 +508,8 @@ def main():
         st.divider()
         
         if st.button("🗑️ Очистить кэш"):
-            cache_file = "matcher_cache.db"
-            if Path(cache_file).exists():
+            cache_file = get_matcher_cache_db_path()
+            if cache_file.exists():
                 os.unlink(cache_file)
                 st.session_state.matcher = None
                 st.success("✓ Кэш очищен")
@@ -428,6 +548,7 @@ def main():
 
             if process_button:
                 logger.info("🔘 Пользователь нажал кнопку 'Начать обработку'")
+                st.session_state.processing = True
                 try:
                     df_result, stats = process_uploaded_file(uploaded_file)
 
@@ -472,6 +593,8 @@ def main():
                     st.markdown(f'<div class="error-box">❌ Ошибка: {str(e)}</div>',
                                unsafe_allow_html=True)
                     st.error(str(e))
+                finally:
+                    st.session_state.processing = False
     
     with tab2:
         st.header("📋 Результаты обработки")
@@ -587,7 +710,7 @@ def main():
         st.header("📊 История обработок")
         
         try:
-            conn = sqlite3.connect("matcher_cache.db")
+            conn = sqlite3.connect(str(get_matcher_cache_db_path()))
             
             # История результатов
             df_history = pd.read_sql_query(

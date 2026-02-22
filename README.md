@@ -21,6 +21,7 @@
 ✅ **Оптимизация**
 - Кэширование результатов (SQLite)
 - Поддержка batch-обработки
+- Быстрый fallback: нормализованное текстовое совпадение до обращения к LLM
 - Время обработки 100 позиций: 5-10 сек
 
 ✅ **Удобство использования**
@@ -86,6 +87,12 @@ python batch_process.py --input-dir "D:\\Data\\Downloads\\upload" --output-dir "
 - ENV:
   - `REMO_DB_CSV` — путь к `price_clean.csv` **или** к папке с `*_clean.csv`
   - `REMO_UPLOAD_DIR` — базовая папка данных
+  - `REMO_MATCHER_CACHE_DB` — путь к `matcher_cache.db`
+  - `REMO_MATCH_PROMPT_TEMPLATE_PATH` — путь к кастомному шаблону prompt для Gemini (`{query}` и `{catalog_context}` обязательны)
+  - `REMO_MATCHER_MODELS` — список Gemini-моделей через запятую (порядок fallback)
+  - `REMO_MATCHER_CANDIDATE_LIMIT` — число кандидатов retrieval перед Gemini
+  - `REMO_MATCHER_CONTEXT_LINES` — сколько строк кандидатов передавать в prompt
+  - `REMO_MATCHER_CATALOG_SAMPLE_ITEMS` — размер sample для fallback-контекста каталога
   - `REMO_PRICE_RAW_CSV`, `REMO_PRICE_CONVERTED_CSV`, `REMO_SAMPLE_XLSX` — точечные override
   - `REMO_MATCHER_PARALLEL_REQUESTS` — количество параллельных LLM-запросов (1..10, по умолчанию 1)
   - `REMO_MATCHER_MODELS` — список Gemini-моделей через запятую (по умолчанию `gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.0-flash,gemini-2.0-flash-lite`)
