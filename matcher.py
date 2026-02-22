@@ -56,9 +56,11 @@ TERM_NORMALIZATION_ALIASES = {
 
 try:
     from google import genai as genai_sdk
+    from google.genai import types as genai_types
     GENAI_SDK_AVAILABLE = True
 except ImportError:
     genai_sdk = None
+    genai_types = None
     GENAI_SDK_AVAILABLE = False
 
 
@@ -713,10 +715,21 @@ class ReMoMatcher:
 
     def _generate_gemini_text(self, prompt: str, model_name: str) -> str:
         if self.backend == "google-genai":
-            response = self.client.models.generate_content(
-                model=model_name,
-                contents=prompt,
-            )
+            request_kwargs = {
+                "model": model_name,
+                "contents": prompt,
+            }
+
+            # Отключаем AFC/Function Calling, т.к. инструменты в этом сценарии не используются.
+            if genai_types is not None:
+                request_kwargs["config"] = genai_types.GenerateContentConfig(
+                    automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(disable=True),
+                    tool_config=genai_types.ToolConfig(
+                        function_calling_config=genai_types.FunctionCallingConfig(mode="NONE")
+                    ),
+                )
+
+            response = self.client.models.generate_content(**request_kwargs)
             return (getattr(response, 'text', None) or '').strip()
 
         if self.backend == "google-generativeai":
