@@ -41,6 +41,18 @@ GROUP_TOKEN_STOPWORDS = {"и", "в", "на", "для", "с", "по", "из", "ш
 CANONICAL_NAME_COLUMN = "Наименование"
 CANONICAL_ARTICLE_COLUMN = "Артикул"
 CANONICAL_PRICE_COLUMN = "Цена розничная"
+MATCH_MODE_EXACT = "exact"
+MATCH_MODE_ANALOG = "analog"
+
+TERM_NORMALIZATION_ALIASES = {
+    "patch cord": "патч корд",
+    "patch-cord": "патч корд",
+    "patchcord": "патч корд",
+    "патч-корд": "патч корд",
+    "патчкорд": "патч корд",
+    "шнур коммутационный": "патч корд",
+    "коммутационный шнур": "патч корд",
+}
 
 try:
     from google import genai as genai_sdk
@@ -60,7 +72,7 @@ class ReMoMatcher:
     3. Ð’ÐµÑ€Ð½ÑƒÑ‚ÑŒ: (Ð½Ð°Ð¹Ð´ÐµÐ½Ð½Ð¾Ðµ Ð¸Ð¼Ñ, Ñ†ÐµÐ½Ð°, Ð°Ñ€Ñ‚Ð¸ÐºÑƒÐ»)
     """
     
-    def __init__(self, gemini_api_key: str, db_csv_path: str, cache_db: str = "matcher_cache.db", parallel_requests: int | None = None, catalog_sample_items: int = 500):
+    def __init__(self, gemini_api_key: str, db_csv_path: str, cache_db: str = "matcher_cache.db", parallel_requests: int | None = None, catalog_sample_items: int = 500, match_mode: str = MATCH_MODE_EXACT):
         """
         Args:
             gemini_api_key: API ÐºÐ»ÑŽÑ‡ Google Gemini
@@ -86,6 +98,7 @@ class ReMoMatcher:
         self.model_name = None
         self.parallel_requests = min(10, max(1, int(parallel_requests or get_matcher_parallel_requests())))
         self.catalog_sample_items = max(50, int(catalog_sample_items))
+        self.match_mode = self._sanitize_match_mode(match_mode)
         self.context_chunk_size = get_matcher_context_chunk_size()
         self.max_context_chunks = get_matcher_max_context_chunks()
         self.retrieval_candidates_limit = get_matcher_retrieval_candidates()
@@ -130,6 +143,46 @@ class ReMoMatcher:
             logger.info(f"🧩 Объединенный каталог подготовлен: {resolved}")
             return str(resolved)
         return str(source_path)
+
+    def _sanitize_match_mode(self, value: str | None) -> str:
+        mode = str(value or '').strip().lower()
+        if mode in {MATCH_MODE_EXACT, MATCH_MODE_ANALOG}:
+            return mode
+        return MATCH_MODE_EXACT
+
+    def _normalize_query_terms(self, text: str) -> str:
+        normalized = str(text or '').lower()
+        for source, target in TERM_NORMALIZATION_ALIASES.items():
+            normalized = normalized.replace(source, target)
+        return normalized
+
+    def _classify_item_type(self, text: str) -> str:
+        normalized = self._normalize_query_terms(text)
+
+        if 'патч корд' in normalized:
+            return 'patch_cord'
+
+        bulk_markers = ('витая пара', 'utp', 'ftp', 'f/utp', 'u/utp', 'бухта', '305м', '305 м', '500м', '500 м')
+        if any(marker in normalized for marker in bulk_markers):
+            return 'bulk_twisted_pair'
+
+        if 'коаксиаль' in normalized or 'rg-' in normalized or '75 ом' in normalized or '50 ом' in normalized:
+            return 'coax'
+
+        return 'other'
+
+    def _is_disallowed_category_substitution(self, query: str, candidate_name: str) -> bool:
+        query_type = self._classify_item_type(query)
+        candidate_type = self._classify_item_type(candidate_name)
+
+        if query_type == 'patch_cord' and candidate_type == 'bulk_twisted_pair':
+            return True
+
+        if self.match_mode == MATCH_MODE_EXACT:
+            if query_type != 'other' and candidate_type != 'other' and query_type != candidate_type:
+                return True
+
+        return False
 
     def _init_cache_db(self):
         """Ð˜Ð½Ð¸Ñ†Ð¸Ð°Ð»Ð¸Ð·Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ Ð‘Ð” ÐºÑÑˆÐ°"""
@@ -497,6 +550,13 @@ class ReMoMatcher:
             if result:
                 logger.debug(f"ðŸ’¾ Ð ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚ Ð½Ð°Ð¹Ð´ÐµÐ½ Ð² ÐºÑÑˆÐµ: {query}")
                 found_name = result[0] or MISSING_POSITION_TEXT
+
+                # Не используем кэш для "не найдено":
+                # такие позиции нужно прогонять повторно при новом запуске,
+                # чтобы поймать улучшения каталога/моделей.
+                if found_name == MISSING_POSITION_TEXT:
+                    return None
+
                 return {
                     'found_name': found_name,
                     'price': result[1],
@@ -547,7 +607,8 @@ class ReMoMatcher:
                 'similarity_score': 0.95,
                 'from_cache': False,
                 'success': True,
-                'error': None
+                'error': None,
+                'reason': reasoning,
             }
         """
         
@@ -634,7 +695,8 @@ class ReMoMatcher:
                 'similarity_score': 0,
                 'from_cache': False,
                 'success': False,
-                'error': str(e)
+                'error': str(e),
+                'reason': '',
             }
 
     def _candidate_models(self) -> List[str]:
@@ -688,7 +750,8 @@ class ReMoMatcher:
    - Назначение товара (кабель, кондиционер, сварочный аппарат и т.д.)
    - Альтернативные названия и аббревиатуры
 4. Если релевантного аналога нет, верни found_name=null
-5. Вывод ТОЛЬКО в формате JSON (без лишнего текста)
+5. Для режима analog можно предложить максимально близкий аналог, но не смешивай разные товарные типы (пример: патч-корд нельзя заменять на витую пару в бухте)
+6. Вывод ТОЛЬКО в формате JSON (без лишнего текста)
 
 ФОРМАТ ОТВЕТА:
 {{
@@ -717,15 +780,25 @@ class ReMoMatcher:
             found_name = gemini_result.get('found_name')
             article = gemini_result.get('article')
             confidence = float(gemini_result.get('confidence', 0) or 0)
+            reasoning = str(gemini_result.get('reasoning') or '').strip()
 
             price = None
             if found_name:
-                match = self.catalog_dict.get(str(found_name).lower())
-                if match:
-                    price = match['price']
-                    article = article or match['article']
+                if self._is_disallowed_category_substitution(query, str(found_name)):
+                    found_name = MISSING_POSITION_TEXT
+                    reasoning = reasoning or (
+                        'Найдена позиция другого типа: для патч-корда нельзя подставлять витую пару в бухте.'
+                    )
+                else:
+                    match = self.catalog_dict.get(str(found_name).lower())
+                    if match:
+                        price = match['price']
+                        article = article or match['article']
             else:
                 found_name = MISSING_POSITION_TEXT
+
+            if found_name == MISSING_POSITION_TEXT and not reasoning:
+                reasoning = 'Релевантный товар в текущем каталоге не найден.'
 
             return {
                 'found_name': found_name,
@@ -734,7 +807,8 @@ class ReMoMatcher:
                 'similarity_score': confidence,
                 'from_cache': False,
                 'success': True,
-                'error': None
+                'error': None,
+                'reason': reasoning,
             }
 
         try:
@@ -796,7 +870,8 @@ class ReMoMatcher:
                 'similarity_score': 0,
                 'from_cache': False,
                 'success': False,
-                'error': str(e)
+                'error': str(e),
+                'reason': '',
             }
 
     def save_to_history(self, query: str, found_name: str, price: Optional[float], 
@@ -823,11 +898,12 @@ class ReMoMatcher:
         if not tasks:
             return []
 
-        workers = getattr(self, "parallel_requests", 1)
+        # По требованию: запускать максимум параллельных запросов — по числу позиций.
+        workers = max(1, len(tasks))
         if workers <= 1:
             return [(idx, self.match(query, use_cache=True)) for idx, query in tasks]
 
-        logger.info(f"⚡ Параллельная обработка включена: {workers} запросов одновременно")
+        logger.info(f"⚡ Параллельная обработка включена: {workers} запросов одновременно (по числу позиций)")
         results: List[Tuple[int, Dict]] = []
         with ThreadPoolExecutor(max_workers=workers) as pool:
             future_map = {
@@ -856,6 +932,31 @@ class ReMoMatcher:
                     logger.info(f"⏳ Обработано {completed}/{total} строк")
 
         return results
+
+    def _compose_not_found_reason(self, query: str, result: Dict) -> str:
+        """Сформировать подробную причину отсутствия позиции для отчета."""
+        query_text = str(query or "").strip()
+        model_reason = str((result or {}).get("reason") or "").strip()
+        model_error = str((result or {}).get("error") or "").strip()
+
+        if model_error:
+            return (
+                f"Позиция '{query_text}' не сопоставлена из-за ошибки обращения к модели/сервису: {model_error}. "
+                "Рекомендуется повторить попытку позже и проверить доступность API/лимиты."
+            )
+
+        if model_reason:
+            return (
+                f"Позиция '{query_text}' не найдена в текущем каталоге. "
+                f"Причина: {model_reason}. "
+                "Проверьте формулировку, категорию, ключевые характеристики и наличие аналога в БД поставщика."
+            )
+
+        return (
+            f"Позиция '{query_text}' не найдена: релевантное совпадение в текущем каталоге отсутствует "
+            "или не достигнут порог уверенности. Проверьте, что позиция есть в БД, совпадают категория, "
+            "длина/сечение/материал, а также попробуйте режим 'analog' для поиска близкого аналога."
+        )
 
     def process_excel(self, excel_path: str, output_path: str = None) -> Tuple[pd.DataFrame, Dict]:
         """
@@ -900,7 +1001,7 @@ class ReMoMatcher:
         else:
             df["Цена"] = pd.to_numeric(df["Цена"], errors="coerce").astype("float64")
 
-        for text_col in ("Найденная номенклатура", "Артикул", "Ошибка сопоставления"):
+        for text_col in ("Найденная номенклатура", "Артикул", "Ошибка сопоставления", "Причина отсутствия"):
             if text_col not in df.columns:
                 df[text_col] = None
             else:
@@ -928,19 +1029,19 @@ class ReMoMatcher:
             tasks.append((idx, query))
 
         stats['total'] = len(tasks)
+        task_query_map = {idx: query for idx, query in tasks}
         for idx, result in self._run_matches_parallel(tasks):
             # Заполнить результаты
-            found_name = result.get('found_name') or MISSING_POSITION_TEXT
-            df.at[idx, 'Цена'] = result.get('price')
-            df.at[idx, 'Найденная номенклатура'] = found_name
-            df.at[idx, 'Артикул'] = result.get('article')
-            df.at[idx, 'Ошибка сопоставления'] = result.get('error')
-
             found_name = result.get("found_name") or MISSING_POSITION_TEXT
             df.at[idx, "Цена"] = result.get("price")
             df.at[idx, "Найденная номенклатура"] = found_name
             df.at[idx, "Артикул"] = result.get("article")
             df.at[idx, "Ошибка сопоставления"] = result.get("error")
+            if found_name == MISSING_POSITION_TEXT:
+                reason_text = self._compose_not_found_reason(task_query_map.get(idx, ""), result)
+                df.at[idx, "Причина отсутствия"] = reason_text
+            else:
+                df.at[idx, "Причина отсутствия"] = None
 
             if result.get("from_cache"):
                 stats["from_cache"] += 1
@@ -953,10 +1054,6 @@ class ReMoMatcher:
             if not result.get("success", True):
                 stats["errors"] += 1
                 logger.warning(f"⚠️ [{idx + 1}] Ошибка: {result.get('error')}")
-
-            if not result.get('success', True):
-                stats['errors'] += 1
-                logger.warning(f"⚠️ [{idx+1}] Ошибка: {result.get('error')}")
         
         # Сохранить результат
         if output_path is None:
