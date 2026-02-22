@@ -14,9 +14,8 @@ from datetime import datetime
 import sqlite3
 import logging
 import io
-from config import get_catalog_csv_path, get_upload_dir, get_matcher_cache_db_path
-from main import convert_csv
-from etl_pipeline import PriceETL
+from config import get_catalog_csv_path
+from catalog_snapshot import prepare_catalog_snapshot
 
 # ============ ЛОГИРОВАНИЕ ============
 logging.basicConfig(
@@ -89,6 +88,39 @@ if 'show_results' not in st.session_state:
 if 'show_corrections' not in st.session_state:
     st.session_state.show_corrections = False
 
+if 'catalog_snapshot_df' not in st.session_state:
+    st.session_state.catalog_snapshot_df = None
+if 'catalog_snapshot_path' not in st.session_state:
+    st.session_state.catalog_snapshot_path = None
+if 'catalog_snapshot_duplicates' not in st.session_state:
+    st.session_state.catalog_snapshot_duplicates = None
+
+
+
+def _get_gemini_api_key() -> str | None:
+    """Безопасно получить API-ключ из secrets/env без падения при отсутствии secrets.toml."""
+    try:
+        secret_value = st.secrets.get("GEMINI_API_KEY")
+    except StreamlitSecretNotFoundError:
+        secret_value = None
+    except Exception as e:
+        logger.warning(f"⚠️ Не удалось прочитать Streamlit secrets: {e}")
+        secret_value = None
+
+    return secret_value or os.getenv("GEMINI_API_KEY")
+
+def _validate_runtime_readiness(db_csv: str) -> list[str]:
+    """Проверить готовность приложения к обработке перед запуском matcher."""
+    issues = []
+
+    api_key = _get_gemini_api_key()
+    if not api_key:
+        issues.append("Не задан GEMINI_API_KEY")
+
+    if not Path(db_csv).exists():
+        issues.append(f"Не найден каталог price_clean.csv: {db_csv}")
+
+    return issues
 
 
 
@@ -380,6 +412,56 @@ def main():
             st.session_state.matcher_db_csv = None
             st.session_state.matcher_settings_signature = None
             st.success("✓ БД перезагружена")
+
+        st.caption("Проверка входной БД (после merge и до matcher)")
+        if st.button("📥 Подготовить выгрузку входной БД"):
+            try:
+                snapshot_df, duplicate_payload, resolved_path = prepare_catalog_snapshot(st.session_state.get('db_csv_path'))
+                st.session_state.catalog_snapshot_df = snapshot_df
+                st.session_state.catalog_snapshot_duplicates = duplicate_payload
+                st.session_state.catalog_snapshot_path = str(resolved_path)
+                st.success(f"✓ БД загружена: {resolved_path}")
+            except Exception as e:
+                logger.error(f"❌ Ошибка подготовки выгрузки БД: {e}", exc_info=True)
+                st.error(f"❌ Не удалось подготовить БД: {e}")
+
+        if st.session_state.catalog_snapshot_df is not None:
+            payload = st.session_state.catalog_snapshot_duplicates or {}
+            stats = payload.get('stats', {})
+            duplicate_df = payload.get('duplicate_df', pd.DataFrame())
+            st.write(f"Активный источник: `{st.session_state.catalog_snapshot_path}`")
+            st.write(f"Строк всего: **{stats.get('rows_total', 0)}**")
+            st.write(f"Дублей: **{stats.get('duplicates_total', 0)}** (артикул: {stats.get('duplicates_by_article', 0)}, наименование: {stats.get('duplicates_by_name', 0)})")
+
+            csv_bytes = st.session_state.catalog_snapshot_df.to_csv(index=False, sep=';', encoding='utf-8').encode('utf-8')
+            st.download_button(
+                "⬇️ Скачать входную БД (CSV)",
+                data=csv_bytes,
+                file_name=f"catalog_snapshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                key="download_catalog_snapshot_csv",
+            )
+
+            excel_buffer = io.BytesIO()
+            st.session_state.catalog_snapshot_df.to_excel(excel_buffer, index=False, engine='openpyxl')
+            excel_buffer.seek(0)
+            st.download_button(
+                "⬇️ Скачать входную БД (Excel)",
+                data=excel_buffer.getvalue(),
+                file_name=f"catalog_snapshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="download_catalog_snapshot_excel",
+            )
+
+            if not duplicate_df.empty:
+                duplicate_csv = duplicate_df.to_csv(index=False, sep=';', encoding='utf-8').encode('utf-8')
+                st.download_button(
+                    "⬇️ Скачать только дубли (CSV)",
+                    data=duplicate_csv,
+                    file_name=f"catalog_duplicates_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    key="download_catalog_duplicates_csv",
+                )
 
         st.subheader("2️⃣ Тонкая настройка matcher")
         st.slider(
