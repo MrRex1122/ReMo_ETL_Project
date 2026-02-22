@@ -14,8 +14,10 @@ from datetime import datetime
 import sqlite3
 import logging
 import io
-from config import get_catalog_csv_path, get_upload_dir
+from config import get_catalog_csv_path, get_upload_dir, get_matcher_cache_db_path
 from catalog_snapshot import prepare_catalog_snapshot
+from etl_pipeline import PriceETL
+from main import convert_csv
 
 # ============ ЛОГИРОВАНИЕ ============
 logging.basicConfig(
@@ -74,13 +76,15 @@ if 'stats' not in st.session_state:
 if 'corrections' not in st.session_state:
     st.session_state.corrections = {}
 if 'db_csv_path' not in st.session_state:
-    st.session_state.db_csv_path = str(get_catalog_csv_path())
+    st.session_state.db_csv_path = str(get_upload_dir() / 'clean')
 if 'matcher_db_csv' not in st.session_state:
     st.session_state.matcher_db_csv = None
 if 'matcher_parallel_requests' not in st.session_state:
     st.session_state.matcher_parallel_requests = 1
 if 'matcher_catalog_sample_items' not in st.session_state:
     st.session_state.matcher_catalog_sample_items = 500
+if 'matcher_mode' not in st.session_state:
+    st.session_state.matcher_mode = 'exact'
 if 'matcher_settings_signature' not in st.session_state:
     st.session_state.matcher_settings_signature = None
 if 'show_results' not in st.session_state:
@@ -94,8 +98,16 @@ if 'catalog_snapshot_path' not in st.session_state:
     st.session_state.catalog_snapshot_path = None
 if 'catalog_snapshot_duplicates' not in st.session_state:
     st.session_state.catalog_snapshot_duplicates = None
-if 'catalog_snapshot_merge_all' not in st.session_state:
-    st.session_state.catalog_snapshot_merge_all = True
+
+
+
+
+def _catalog_source_path() -> Path:
+    """Вернуть актуальный источник каталога для matcher и выгрузки."""
+    clean_dir = get_upload_dir() / "clean"
+    if clean_dir.exists():
+        return clean_dir
+    return get_catalog_csv_path(st.session_state.get('db_csv_path'))
 
 
 
@@ -119,17 +131,23 @@ def _validate_runtime_readiness(db_csv: str) -> list[str]:
     if not api_key:
         issues.append("Не задан GEMINI_API_KEY")
 
-    if not Path(db_csv).exists():
+    source_path = Path(db_csv)
+    if source_path.is_dir():
+        clean_files = list(source_path.glob('*_clean.csv'))
+        if not clean_files:
+            issues.append(f"В папке нет файлов *_clean.csv: {db_csv}")
+    elif not source_path.exists():
         issues.append(f"Не найден каталог price_clean.csv: {db_csv}")
 
     return issues
 
 def get_matcher() -> ReMoMatcher:
     """Получить или инициализировать экземпляр matcher"""
-    db_csv = str(get_catalog_csv_path(st.session_state.get('db_csv_path')))
+    db_csv = str(_catalog_source_path())
     settings_signature = (
         int(st.session_state.get('matcher_parallel_requests', 1)),
         int(st.session_state.get('matcher_catalog_sample_items', 500)),
+        str(st.session_state.get('matcher_mode', 'exact')),
     )
     needs_reinit = (
         st.session_state.matcher is None
@@ -174,6 +192,7 @@ def get_matcher() -> ReMoMatcher:
                     db_csv,
                     parallel_requests=int(st.session_state.get('matcher_parallel_requests', 1)),
                     catalog_sample_items=int(st.session_state.get('matcher_catalog_sample_items', 500)),
+                    match_mode=str(st.session_state.get('matcher_mode', 'exact')),
                 )
                 st.session_state.matcher_db_csv = db_csv
                 st.session_state.matcher_settings_signature = settings_signature
@@ -252,15 +271,6 @@ def save_uploaded_catalog(uploaded_catalog, run_etl: bool = False) -> Path:
     return clean_path
 
 
-def list_available_catalogs() -> list[Path]:
-    """Вернуть список доступных CSV-каталогов в рабочей папке данных."""
-    storage_dir = get_upload_dir()
-    storage_dir.mkdir(parents=True, exist_ok=True)
-    top_level = set(storage_dir.glob("*.csv"))
-    clean_dir = storage_dir / "clean"
-    clean_level = set(clean_dir.glob("*.csv")) if clean_dir.exists() else set()
-    return sorted(top_level | clean_level)
-
 
 def show_statistics(stats):
     """Отобразить статистику"""
@@ -282,6 +292,24 @@ def show_statistics(stats):
     with col5:
         st.metric("⚠️ Ошибок", stats['errors'])
 
+
+
+
+def _ensure_history_table_exists(conn: sqlite3.Connection) -> None:
+    """Создать таблицу истории, если БД открыта до инициализации matcher."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS match_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            original_query TEXT,
+            found_name TEXT,
+            price REAL,
+            article TEXT,
+            user_approved BOOLEAN,
+            correction_note TEXT,
+            created_at TIMESTAMP
+        )
+    """)
+    conn.commit()
 
 def _prepare_df_for_display(df: pd.DataFrame) -> pd.DataFrame:
     """Сделать DataFrame безопасным для отображения в Streamlit/Arrow."""
@@ -364,21 +392,12 @@ def main():
             st.session_state.matcher = None
             st.session_state.matcher_db_csv = None
 
-        available_catalogs = list_available_catalogs()
-        if available_catalogs:
-            selected_catalog = st.selectbox(
-                "Выбрать активный каталог",
-                options=[str(path) for path in available_catalogs],
-                index=0,
-            )
-            if selected_catalog != st.session_state.get('db_csv_path'):
-                st.session_state.db_csv_path = selected_catalog
-
-        st.text_input(
-            "Путь к price_clean.csv (или к папке с *_clean.csv)",
-            key="db_csv_path",
-            help="Если указана папка, matcher автоматически соберет единый price_clean_merged.csv из всех *_clean.csv.",
+        st.caption("Источник каталога выбирается автоматически")
+        st.info(
+            "Используется только объединенный каталог без дублей: "
+            "из всех *_clean.csv в папке `clean` формируется `price_clean_merged.csv`."
         )
+        st.code(str(_catalog_source_path()))
         
         if st.button("🔄 Перезагрузить БД"):
             st.session_state.matcher = None
@@ -387,16 +406,11 @@ def main():
             st.success("✓ БД перезагружена")
 
         st.caption("Проверка входной БД (после merge и до matcher)")
-        st.checkbox(
-            "Объединять все *_clean.csv из папки",
-            key="catalog_snapshot_merge_all",
-            help="Если путь указывает на один файл, включенная опция объединит все *_clean.csv из той же папки перед выгрузкой.",
-        )
         if st.button("📥 Подготовить выгрузку входной БД"):
             try:
                 snapshot_df, duplicate_payload, resolved_path = prepare_catalog_snapshot(
-                    st.session_state.get('db_csv_path'),
-                    merge_all_sources=bool(st.session_state.get('catalog_snapshot_merge_all', True)),
+                    str(_catalog_source_path()),
+                    merge_all_sources=True,
                 )
                 st.session_state.catalog_snapshot_df = snapshot_df
                 st.session_state.catalog_snapshot_duplicates = duplicate_payload
@@ -461,6 +475,18 @@ def main():
             help="Больше контекста может повысить качество, но замедляет и увеличивает токены.",
         )
 
+        st.selectbox(
+            "Режим сопоставления",
+            options=["exact", "analog"],
+            key="matcher_mode",
+            format_func=lambda value: "Точный матч" if value == "exact" else "Аналог/замена",
+            help=(
+                "exact: только строгие совпадения по типу товара. "
+                "analog: допускает близкие аналоги, но не подменяет тип товара "
+                "(например, патч-корд не заменяется витой парой в бухте)."
+            ),
+        )
+
         if st.button("✅ Применить параметры matcher"):
             st.session_state.matcher = None
             st.session_state.matcher_db_csv = None
@@ -513,7 +539,7 @@ def main():
             logger.info(f"📤 Файл загружен пользователем: {uploaded_file.name} ({uploaded_file.size} байт)")
             st.info(f"📄 Файл выбран: {uploaded_file.name}")
 
-            db_csv = str(get_catalog_csv_path(st.session_state.get('db_csv_path')))
+            db_csv = str(_catalog_source_path())
             issues = _validate_runtime_readiness(db_csv)
             if issues:
                 st.warning("⚠️ Перед обработкой исправьте настройки:")
@@ -692,6 +718,7 @@ def main():
         
         try:
             conn = sqlite3.connect(str(get_matcher_cache_db_path()))
+            _ensure_history_table_exists(conn)
             
             # История результатов
             df_history = pd.read_sql_query(
