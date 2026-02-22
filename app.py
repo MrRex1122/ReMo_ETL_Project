@@ -82,7 +82,7 @@ if 'matcher_db_csv' not in st.session_state:
 if 'matcher_parallel_requests' not in st.session_state:
     st.session_state.matcher_parallel_requests = 1
 if 'matcher_catalog_sample_items' not in st.session_state:
-    st.session_state.matcher_catalog_sample_items = 500
+    st.session_state.matcher_catalog_sample_items = 1500
 if 'matcher_mode' not in st.session_state:
     st.session_state.matcher_mode = 'exact'
 if 'matcher_settings_signature' not in st.session_state:
@@ -459,20 +459,29 @@ def main():
                 )
 
         st.subheader("2️⃣ Тонкая настройка matcher")
-        st.slider(
-            "Параллельные запросы к Gemini",
-            min_value=1,
-            max_value=10,
-            key="matcher_parallel_requests",
-            help="Чем больше значение, тем быстрее обработка, но выше риск rate-limit/нестабильности.",
+        st.info(
+            "Параллелизм установлен на максимум: одновременно отправляется число запросов, "
+            "равное числу позиций в файле."
         )
         st.slider(
             "Размер сэмпла каталога для контекста",
             min_value=100,
-            max_value=1500,
+            max_value=5000,
             step=50,
             key="matcher_catalog_sample_items",
-            help="Больше контекста может повысить качество, но замедляет и увеличивает токены.",
+            help="Больше контекста обычно повышает точность сопоставления, но замедляет обработку и увеличивает токены.",
+        )
+
+        st.selectbox(
+            "Режим сопоставления",
+            options=["exact", "analog"],
+            key="matcher_mode",
+            format_func=lambda value: "Точный матч" if value == "exact" else "Аналог/замена",
+            help=(
+                "exact: только строгие совпадения по типу товара. "
+                "analog: допускает близкие аналоги, но не подменяет тип товара "
+                "(например, патч-корд не заменяется витой парой в бухте)."
+            ),
         )
 
         st.selectbox(
@@ -670,13 +679,20 @@ def main():
             
             # Таблица с пагинацией
             total_pages = (len(df_view) + page_size - 1) // page_size
-            page = st.slider("Страница", 1, max(1, total_pages), 1)
+            max_pages = max(1, total_pages)
+            if max_pages > 1:
+                page = st.slider("Страница", 1, max_pages, 1)
+            else:
+                page = 1
+                st.caption("Страница 1 из 1")
+
             start_idx = (page - 1) * page_size
             end_idx = start_idx + page_size
-            
+
             st.dataframe(_prepare_df_for_display(df_view.iloc[start_idx:end_idx]), width="stretch")
-            
-            st.markdown(f"Страница {page} из {max(1, total_pages)}")
+
+            if max_pages > 1:
+                st.markdown(f"Страница {page} из {max_pages}")
             
             # Скачать
             st.divider()

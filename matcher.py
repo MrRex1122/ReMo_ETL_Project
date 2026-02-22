@@ -898,11 +898,12 @@ class ReMoMatcher:
         if not tasks:
             return []
 
-        workers = getattr(self, "parallel_requests", 1)
+        # По требованию: запускать максимум параллельных запросов — по числу позиций.
+        workers = max(1, len(tasks))
         if workers <= 1:
             return [(idx, self.match(query, use_cache=True)) for idx, query in tasks]
 
-        logger.info(f"⚡ Параллельная обработка включена: {workers} запросов одновременно")
+        logger.info(f"⚡ Параллельная обработка включена: {workers} запросов одновременно (по числу позиций)")
         results: List[Tuple[int, Dict]] = []
         with ThreadPoolExecutor(max_workers=workers) as pool:
             future_map = {
@@ -1005,13 +1006,6 @@ class ReMoMatcher:
         stats['total'] = len(tasks)
         for idx, result in self._run_matches_parallel(tasks):
             # Заполнить результаты
-            found_name = result.get('found_name') or MISSING_POSITION_TEXT
-            df.at[idx, 'Цена'] = result.get('price')
-            df.at[idx, 'Найденная номенклатура'] = found_name
-            df.at[idx, 'Артикул'] = result.get('article')
-            df.at[idx, 'Ошибка сопоставления'] = result.get('error')
-            df.at[idx, 'Причина отсутствия'] = result.get('reason') if found_name == MISSING_POSITION_TEXT else None
-
             found_name = result.get("found_name") or MISSING_POSITION_TEXT
             df.at[idx, "Цена"] = result.get("price")
             df.at[idx, "Найденная номенклатура"] = found_name
@@ -1030,10 +1024,6 @@ class ReMoMatcher:
             if not result.get("success", True):
                 stats["errors"] += 1
                 logger.warning(f"⚠️ [{idx + 1}] Ошибка: {result.get('error')}")
-
-            if not result.get('success', True):
-                stats['errors'] += 1
-                logger.warning(f"⚠️ [{idx+1}] Ошибка: {result.get('error')}")
         
         # Сохранить результат
         if output_path is None:
