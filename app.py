@@ -4,6 +4,7 @@ Streamlit интерфейс для семантического сопоста�
 """
 
 import streamlit as st
+from streamlit.errors import StreamlitSecretNotFoundError
 import pandas as pd
 import os
 from matcher import ReMoMatcher, MISSING_POSITION_TEXT
@@ -13,7 +14,8 @@ from datetime import datetime
 import sqlite3
 import logging
 import io
-from config import get_catalog_csv_path
+from config import get_catalog_csv_path, get_upload_dir
+from catalog_snapshot import prepare_catalog_snapshot
 
 # ============ ЛОГИРОВАНИЕ ============
 logging.basicConfig(
@@ -75,19 +77,69 @@ if 'db_csv_path' not in st.session_state:
     st.session_state.db_csv_path = str(get_catalog_csv_path())
 if 'matcher_db_csv' not in st.session_state:
     st.session_state.matcher_db_csv = None
+if 'matcher_parallel_requests' not in st.session_state:
+    st.session_state.matcher_parallel_requests = 1
+if 'matcher_catalog_sample_items' not in st.session_state:
+    st.session_state.matcher_catalog_sample_items = 500
+if 'matcher_settings_signature' not in st.session_state:
+    st.session_state.matcher_settings_signature = None
+if 'show_results' not in st.session_state:
+    st.session_state.show_results = False
+if 'show_corrections' not in st.session_state:
+    st.session_state.show_corrections = False
 
+if 'catalog_snapshot_df' not in st.session_state:
+    st.session_state.catalog_snapshot_df = None
+if 'catalog_snapshot_path' not in st.session_state:
+    st.session_state.catalog_snapshot_path = None
+if 'catalog_snapshot_duplicates' not in st.session_state:
+    st.session_state.catalog_snapshot_duplicates = None
+if 'catalog_snapshot_merge_all' not in st.session_state:
+    st.session_state.catalog_snapshot_merge_all = True
+
+
+
+def _get_gemini_api_key() -> str | None:
+    """Безопасно получить API-ключ из secrets/env без падения при отсутствии secrets.toml."""
+    try:
+        secret_value = st.secrets.get("GEMINI_API_KEY")
+    except StreamlitSecretNotFoundError:
+        secret_value = None
+    except Exception as e:
+        logger.warning(f"⚠️ Не удалось прочитать Streamlit secrets: {e}")
+        secret_value = None
+
+    return secret_value or os.getenv("GEMINI_API_KEY")
+
+def _validate_runtime_readiness(db_csv: str) -> list[str]:
+    """Проверить готовность приложения к обработке перед запуском matcher."""
+    issues = []
+
+    api_key = _get_gemini_api_key()
+    if not api_key:
+        issues.append("Не задан GEMINI_API_KEY")
+
+    if not Path(db_csv).exists():
+        issues.append(f"Не найден каталог price_clean.csv: {db_csv}")
+
+    return issues
 
 def get_matcher() -> ReMoMatcher:
     """Получить или инициализировать экземпляр matcher"""
     db_csv = str(get_catalog_csv_path(st.session_state.get('db_csv_path')))
+    settings_signature = (
+        int(st.session_state.get('matcher_parallel_requests', 1)),
+        int(st.session_state.get('matcher_catalog_sample_items', 500)),
+    )
     needs_reinit = (
         st.session_state.matcher is None
         or st.session_state.matcher_db_csv != db_csv
+        or st.session_state.matcher_settings_signature != settings_signature
     )
 
     if needs_reinit:
         logger.info("🔄 Инициализация ReMoMatcher...")
-        api_key = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
+        api_key = _get_gemini_api_key()
         
         if not api_key:
             logger.error("❌ GEMINI_API_KEY не установлен")
@@ -112,8 +164,14 @@ def get_matcher() -> ReMoMatcher:
         
         with st.spinner("⏳ Инициализация ReMo Matcher..."):
             try:
-                st.session_state.matcher = ReMoMatcher(api_key, db_csv)
+                st.session_state.matcher = ReMoMatcher(
+                    api_key,
+                    db_csv,
+                    parallel_requests=int(st.session_state.get('matcher_parallel_requests', 1)),
+                    catalog_sample_items=int(st.session_state.get('matcher_catalog_sample_items', 500)),
+                )
                 st.session_state.matcher_db_csv = db_csv
+                st.session_state.matcher_settings_signature = settings_signature
                 logger.info("✓ ReMoMatcher успешно инициализирован")
             except Exception as e:
                 logger.error(f"❌ Ошибка инициализации: {e}", exc_info=True)
@@ -174,6 +232,15 @@ def show_statistics(stats):
         st.metric("⚠️ Ошибок", stats['errors'])
 
 
+def _prepare_df_for_display(df: pd.DataFrame) -> pd.DataFrame:
+    """Сделать DataFrame безопасным для отображения в Streamlit/Arrow."""
+    display_df = df.copy()
+    for col in display_df.columns:
+        if display_df[col].dtype == object:
+            display_df[col] = display_df[col].astype(str)
+    return display_df
+
+
 def show_corrections_table(df):
     """Таблица для ручной коррекции результатов"""
     st.subheader("✏️ Коррекция результатов")
@@ -197,7 +264,7 @@ def show_corrections_table(df):
     
     edited_df = st.data_editor(
         df_view,
-        use_container_width=True,
+        width="stretch",
         disabled=['Наименование оборудования, материалов и кабелей'],  # Закрыть от редактирования
         num_rows="fixed"
     )
@@ -217,14 +284,97 @@ def main():
         
         st.subheader("1️⃣ Товарная база данных")
         st.text_input(
-            "Путь к price_clean.csv",
-            key="db_csv_path"
+            "Путь к price_clean.csv (или к папке с *_clean.csv)",
+            key="db_csv_path",
+            help="Если указана папка, matcher автоматически соберет единый price_clean_merged.csv из всех *_clean.csv.",
         )
         
         if st.button("🔄 Перезагрузить БД"):
             st.session_state.matcher = None
             st.session_state.matcher_db_csv = None
+            st.session_state.matcher_settings_signature = None
             st.success("✓ БД перезагружена")
+
+        st.caption("Проверка входной БД (после merge и до matcher)")
+        st.checkbox(
+            "Объединять все *_clean.csv из папки",
+            key="catalog_snapshot_merge_all",
+            help="Если путь указывает на один файл, включенная опция объединит все *_clean.csv из той же папки перед выгрузкой.",
+        )
+        if st.button("📥 Подготовить выгрузку входной БД"):
+            try:
+                snapshot_df, duplicate_payload, resolved_path = prepare_catalog_snapshot(
+                    st.session_state.get('db_csv_path'),
+                    merge_all_sources=bool(st.session_state.get('catalog_snapshot_merge_all', True)),
+                )
+                st.session_state.catalog_snapshot_df = snapshot_df
+                st.session_state.catalog_snapshot_duplicates = duplicate_payload
+                st.session_state.catalog_snapshot_path = str(resolved_path)
+                st.success(f"✓ БД загружена: {resolved_path}")
+            except Exception as e:
+                logger.error(f"❌ Ошибка подготовки выгрузки БД: {e}", exc_info=True)
+                st.error(f"❌ Не удалось подготовить БД: {e}")
+
+        if st.session_state.catalog_snapshot_df is not None:
+            payload = st.session_state.catalog_snapshot_duplicates or {}
+            stats = payload.get('stats', {})
+            duplicate_df = payload.get('duplicate_df', pd.DataFrame())
+            st.write(f"Активный источник: `{st.session_state.catalog_snapshot_path}`")
+            st.write(f"Строк всего: **{stats.get('rows_total', 0)}**")
+            st.write(f"Дублей: **{stats.get('duplicates_total', 0)}** (артикул: {stats.get('duplicates_by_article', 0)}, наименование: {stats.get('duplicates_by_name', 0)})")
+
+            csv_bytes = st.session_state.catalog_snapshot_df.to_csv(index=False, sep=';', encoding='utf-8').encode('utf-8')
+            st.download_button(
+                "⬇️ Скачать входную БД (CSV)",
+                data=csv_bytes,
+                file_name=f"catalog_snapshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                key="download_catalog_snapshot_csv",
+            )
+
+            excel_buffer = io.BytesIO()
+            st.session_state.catalog_snapshot_df.to_excel(excel_buffer, index=False, engine='openpyxl')
+            excel_buffer.seek(0)
+            st.download_button(
+                "⬇️ Скачать входную БД (Excel)",
+                data=excel_buffer.getvalue(),
+                file_name=f"catalog_snapshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="download_catalog_snapshot_excel",
+            )
+
+            if not duplicate_df.empty:
+                duplicate_csv = duplicate_df.to_csv(index=False, sep=';', encoding='utf-8').encode('utf-8')
+                st.download_button(
+                    "⬇️ Скачать только дубли (CSV)",
+                    data=duplicate_csv,
+                    file_name=f"catalog_duplicates_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    key="download_catalog_duplicates_csv",
+                )
+
+        st.subheader("2️⃣ Тонкая настройка matcher")
+        st.slider(
+            "Параллельные запросы к Gemini",
+            min_value=1,
+            max_value=10,
+            key="matcher_parallel_requests",
+            help="Чем больше значение, тем быстрее обработка, но выше риск rate-limit/нестабильности.",
+        )
+        st.slider(
+            "Размер сэмпла каталога для контекста",
+            min_value=100,
+            max_value=1500,
+            step=50,
+            key="matcher_catalog_sample_items",
+            help="Больше контекста может повысить качество, но замедляет и увеличивает токены.",
+        )
+
+        if st.button("✅ Применить параметры matcher"):
+            st.session_state.matcher = None
+            st.session_state.matcher_db_csv = None
+            st.session_state.matcher_settings_signature = None
+            st.success("✓ Параметры применены. Matcher будет переинициализирован при следующем запуске.")
         
         st.divider()
         
@@ -271,39 +421,50 @@ def main():
         if uploaded_file:
             logger.info(f"📤 Файл загружен пользователем: {uploaded_file.name} ({uploaded_file.size} байт)")
             st.info(f"📄 Файл выбран: {uploaded_file.name}")
-            
-            col1, col2 = st.columns([1, 1])
-            with col1:
-                process_button = st.button("🚀 Начать обработку", key="process_btn")
-            
-            with col2:
-                st.markdown("")  # Выравнивание
-            
+
+            db_csv = str(get_catalog_csv_path(st.session_state.get('db_csv_path')))
+            issues = _validate_runtime_readiness(db_csv)
+            if issues:
+                st.warning("⚠️ Перед обработкой исправьте настройки:")
+                for issue in issues:
+                    st.write(f"- {issue}")
+
+            with st.form("process_form", clear_on_submit=False):
+                process_button = st.form_submit_button(
+                    "🚀 Начать обработку",
+                    disabled=bool(issues),
+                    width="stretch",
+                )
+
             if process_button:
                 logger.info("🔘 Пользователь нажал кнопку 'Начать обработку'")
                 try:
                     df_result, stats = process_uploaded_file(uploaded_file)
-                    
+
                     # Успешно
-                    st.markdown('<div class="success-box">✅ Обработка завершена успешно!</div>', 
+                    st.markdown('<div class="success-box">✅ Обработка завершена успешно!</div>',
                                unsafe_allow_html=True)
                     logger.info("✅ Обработка успешно завершена")
-                    
+
                     show_statistics(stats)
-                    
+
                     # Опции после обработки
                     col1, col2, col3 = st.columns(3)
-                    
+
                     with col1:
                         if st.button("📋 Просмотреть результаты"):
                             logger.info("📋 Пользователь открыл результаты")
                             st.session_state.show_results = True
-                    
+                            st.session_state.show_corrections = False
+                            st.rerun()
+
                     with col2:
                         if st.button("✏️ Коррекция"):
                             logger.info("✏️ Пользователь открыл коррекцию")
+                            st.session_state.show_results = True
                             st.session_state.show_corrections = True
-                    
+                            st.rerun()
+
                     with col3:
                         output_filename = f"{uploaded_file.name.split('.')[0]}_matched_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
                         csv_data = df_result.to_csv(index=False, sep=';', encoding='utf-8')
@@ -315,10 +476,10 @@ def main():
                             key="download_csv"
                         )
                         logger.info(f"💾 Кнопка скачивания готова: {output_filename}")
-                
+
                 except Exception as e:
                     logger.error(f"❌ Ошибка при обработке: {e}", exc_info=True)
-                    st.markdown(f'<div class="error-box">❌ Ошибка: {str(e)}</div>', 
+                    st.markdown(f'<div class="error-box">❌ Ошибка: {str(e)}</div>',
                                unsafe_allow_html=True)
                     st.error(str(e))
     
@@ -328,11 +489,22 @@ def main():
         if st.session_state.df_processed is not None:
             df = st.session_state.df_processed
             stats = st.session_state.stats
-            
+
             show_statistics(stats)
-            
+
             st.divider()
-            
+
+            default_mode = "Коррекция" if st.session_state.get('show_corrections') else "Просмотр"
+            mode = st.radio("Режим", ["Просмотр", "Коррекция"], index=1 if default_mode == "Коррекция" else 0, horizontal=True)
+
+            if mode == "Коррекция":
+                edited_df = show_corrections_table(df)
+                if st.button("💾 Сохранить правки", key="save_corrections"):
+                    st.session_state.df_processed = edited_df.copy()
+                    st.session_state.show_corrections = False
+                    st.success("✓ Правки сохранены")
+                    st.rerun()
+
             # Фильтры
             col1, col2, col3 = st.columns(3)
             
@@ -382,7 +554,7 @@ def main():
             start_idx = (page - 1) * page_size
             end_idx = start_idx + page_size
             
-            st.dataframe(df_view.iloc[start_idx:end_idx], use_container_width=True)
+            st.dataframe(_prepare_df_for_display(df_view.iloc[start_idx:end_idx]), width="stretch")
             
             st.markdown(f"Страница {page} из {max(1, total_pages)}")
             
@@ -454,7 +626,7 @@ def main():
                 st.divider()
                 
                 # Таблица истории
-                st.dataframe(df_history, use_container_width=True)
+                st.dataframe(_prepare_df_for_display(df_history), width="stretch")
             else:
                 st.info("📭 История пуста")
             
