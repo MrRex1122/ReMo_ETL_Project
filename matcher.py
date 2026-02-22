@@ -497,6 +497,13 @@ class ReMoMatcher:
             if result:
                 logger.debug(f"ðŸ’¾ Ð ÐµÐ·ÑƒÐ»ÑŒÑ‚Ð°Ñ‚ Ð½Ð°Ð¹Ð´ÐµÐ½ Ð² ÐºÑÑˆÐµ: {query}")
                 found_name = result[0] or MISSING_POSITION_TEXT
+
+                # Не используем кэш для "не найдено":
+                # такие позиции нужно прогонять повторно при новом запуске,
+                # чтобы поймать улучшения каталога/моделей.
+                if found_name == MISSING_POSITION_TEXT:
+                    return None
+
                 return {
                     'found_name': found_name,
                     'price': result[1],

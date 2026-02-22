@@ -289,6 +289,24 @@ def show_statistics(stats):
         st.metric("⚠️ Ошибок", stats['errors'])
 
 
+
+
+def _ensure_history_table_exists(conn: sqlite3.Connection) -> None:
+    """Создать таблицу истории, если БД открыта до инициализации matcher."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS match_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            original_query TEXT,
+            found_name TEXT,
+            price REAL,
+            article TEXT,
+            user_approved BOOLEAN,
+            correction_note TEXT,
+            created_at TIMESTAMP
+        )
+    """)
+    conn.commit()
+
 def _prepare_df_for_display(df: pd.DataFrame) -> pd.DataFrame:
     """Сделать DataFrame безопасным для отображения в Streamlit/Arrow."""
     display_df = df.copy()
@@ -684,6 +702,7 @@ def main():
         
         try:
             conn = sqlite3.connect(str(get_matcher_cache_db_path()))
+            _ensure_history_table_exists(conn)
             
             # История результатов
             df_history = pd.read_sql_query(
