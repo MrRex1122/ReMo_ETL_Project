@@ -14,7 +14,7 @@ from datetime import datetime
 import sqlite3
 import logging
 import io
-from config import get_catalog_csv_path
+from config import get_catalog_csv_path, get_upload_dir
 from catalog_snapshot import prepare_catalog_snapshot
 
 # ============ ЛОГИРОВАНИЕ ============
@@ -94,35 +94,6 @@ if 'catalog_snapshot_path' not in st.session_state:
     st.session_state.catalog_snapshot_path = None
 if 'catalog_snapshot_duplicates' not in st.session_state:
     st.session_state.catalog_snapshot_duplicates = None
-
-
-
-def _get_gemini_api_key() -> str | None:
-    """Безопасно получить API-ключ из secrets/env без падения при отсутствии secrets.toml."""
-    try:
-        secret_value = st.secrets.get("GEMINI_API_KEY")
-    except StreamlitSecretNotFoundError:
-        secret_value = None
-    except Exception as e:
-        logger.warning(f"⚠️ Не удалось прочитать Streamlit secrets: {e}")
-        secret_value = None
-
-    return secret_value or os.getenv("GEMINI_API_KEY")
-
-def _validate_runtime_readiness(db_csv: str) -> list[str]:
-    """Проверить готовность приложения к обработке перед запуском matcher."""
-    issues = []
-
-    api_key = _get_gemini_api_key()
-    if not api_key:
-        issues.append("Не задан GEMINI_API_KEY")
-
-    if not Path(db_csv).exists():
-        issues.append(f"Не найден каталог price_clean.csv: {db_csv}")
-
-    return issues
-
-
 
 
 
