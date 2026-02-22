@@ -94,6 +94,8 @@ if 'catalog_snapshot_path' not in st.session_state:
     st.session_state.catalog_snapshot_path = None
 if 'catalog_snapshot_duplicates' not in st.session_state:
     st.session_state.catalog_snapshot_duplicates = None
+if 'catalog_snapshot_merge_all' not in st.session_state:
+    st.session_state.catalog_snapshot_merge_all = True
 
 
 
@@ -385,9 +387,17 @@ def main():
             st.success("✓ БД перезагружена")
 
         st.caption("Проверка входной БД (после merge и до matcher)")
+        st.checkbox(
+            "Объединять все *_clean.csv из папки",
+            key="catalog_snapshot_merge_all",
+            help="Если путь указывает на один файл, включенная опция объединит все *_clean.csv из той же папки перед выгрузкой.",
+        )
         if st.button("📥 Подготовить выгрузку входной БД"):
             try:
-                snapshot_df, duplicate_payload, resolved_path = prepare_catalog_snapshot(st.session_state.get('db_csv_path'))
+                snapshot_df, duplicate_payload, resolved_path = prepare_catalog_snapshot(
+                    st.session_state.get('db_csv_path'),
+                    merge_all_sources=bool(st.session_state.get('catalog_snapshot_merge_all', True)),
+                )
                 st.session_state.catalog_snapshot_df = snapshot_df
                 st.session_state.catalog_snapshot_duplicates = duplicate_payload
                 st.session_state.catalog_snapshot_path = str(resolved_path)

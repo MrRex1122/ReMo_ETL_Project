@@ -45,6 +45,27 @@ class CatalogSnapshotTests(unittest.TestCase):
             self.assertEqual(len(snapshot_df), 2)
             self.assertIn("stats", payload)
 
+    def test_prepare_catalog_snapshot_file_path_can_merge_all_sources(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            file_a = root / "price14_clean.csv"
+            file_a.write_text(
+                "Наименование;Артикул;Цена розничная\nКабель UTP cat6;A-1;100\n",
+                encoding="utf-8",
+            )
+            (root / "price17_clean.csv").write_text(
+                "Наименование;Артикул;Цена розничная\nАвтомат 16A;B-2;110\n",
+                encoding="utf-8",
+            )
+
+            single_df, _, single_path = prepare_catalog_snapshot(str(file_a), merge_all_sources=False)
+            merged_df, _, merged_path = prepare_catalog_snapshot(str(file_a), merge_all_sources=True)
+
+            self.assertEqual(single_path, file_a)
+            self.assertEqual(len(single_df), 1)
+            self.assertTrue(merged_path.name.endswith("price_clean_merged.csv"))
+            self.assertEqual(len(merged_df), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

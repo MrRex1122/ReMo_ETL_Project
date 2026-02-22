@@ -11,10 +11,14 @@ from catalog_merge import build_merged_catalog
 from config import get_catalog_csv_path
 
 
-def resolve_catalog_path_for_inspection(db_csv_value: str | None) -> Path:
+def resolve_catalog_path_for_inspection(db_csv_value: str | None, merge_all_sources: bool = False) -> Path:
     base_path = get_catalog_csv_path(db_csv_value)
     if base_path.is_dir():
         return build_merged_catalog(base_path, base_path / "price_clean_merged.csv")
+
+    if merge_all_sources and base_path.suffix.lower() == ".csv" and base_path.parent.exists():
+        return build_merged_catalog(base_path.parent, base_path.parent / "price_clean_merged.csv")
+
     return base_path
 
 
@@ -50,8 +54,8 @@ def build_duplicate_report(catalog_df: pd.DataFrame) -> tuple[dict, pd.DataFrame
     return stats, duplicate_df
 
 
-def prepare_catalog_snapshot(db_csv_value: str | None) -> tuple[pd.DataFrame, dict, Path]:
-    resolved_path = resolve_catalog_path_for_inspection(db_csv_value)
+def prepare_catalog_snapshot(db_csv_value: str | None, merge_all_sources: bool = False) -> tuple[pd.DataFrame, dict, Path]:
+    resolved_path = resolve_catalog_path_for_inspection(db_csv_value, merge_all_sources=merge_all_sources)
     catalog_df = pd.read_csv(resolved_path, sep=';', encoding='utf-8')
     duplicate_stats, duplicate_df = build_duplicate_report(catalog_df)
     return catalog_df, {'stats': duplicate_stats, 'duplicate_df': duplicate_df}, resolved_path
