@@ -933,6 +933,31 @@ class ReMoMatcher:
 
         return results
 
+    def _compose_not_found_reason(self, query: str, result: Dict) -> str:
+        """Сформировать подробную причину отсутствия позиции для отчета."""
+        query_text = str(query or "").strip()
+        model_reason = str((result or {}).get("reason") or "").strip()
+        model_error = str((result or {}).get("error") or "").strip()
+
+        if model_error:
+            return (
+                f"Позиция '{query_text}' не сопоставлена из-за ошибки обращения к модели/сервису: {model_error}. "
+                "Рекомендуется повторить попытку позже и проверить доступность API/лимиты."
+            )
+
+        if model_reason:
+            return (
+                f"Позиция '{query_text}' не найдена в текущем каталоге. "
+                f"Причина: {model_reason}. "
+                "Проверьте формулировку, категорию, ключевые характеристики и наличие аналога в БД поставщика."
+            )
+
+        return (
+            f"Позиция '{query_text}' не найдена: релевантное совпадение в текущем каталоге отсутствует "
+            "или не достигнут порог уверенности. Проверьте, что позиция есть в БД, совпадают категория, "
+            "длина/сечение/материал, а также попробуйте режим 'analog' для поиска близкого аналога."
+        )
+
     def process_excel(self, excel_path: str, output_path: str = None) -> Tuple[pd.DataFrame, Dict]:
         """
         Обработать весь Excel файл КП
@@ -1004,6 +1029,7 @@ class ReMoMatcher:
             tasks.append((idx, query))
 
         stats['total'] = len(tasks)
+        task_query_map = {idx: query for idx, query in tasks}
         for idx, result in self._run_matches_parallel(tasks):
             # Заполнить результаты
             found_name = result.get("found_name") or MISSING_POSITION_TEXT
@@ -1011,7 +1037,11 @@ class ReMoMatcher:
             df.at[idx, "Найденная номенклатура"] = found_name
             df.at[idx, "Артикул"] = result.get("article")
             df.at[idx, "Ошибка сопоставления"] = result.get("error")
-            df.at[idx, "Причина отсутствия"] = result.get("reason") if found_name == MISSING_POSITION_TEXT else None
+            if found_name == MISSING_POSITION_TEXT:
+                reason_text = self._compose_not_found_reason(task_query_map.get(idx, ""), result)
+                df.at[idx, "Причина отсутствия"] = reason_text
+            else:
+                df.at[idx, "Причина отсутствия"] = None
 
             if result.get("from_cache"):
                 stats["from_cache"] += 1
