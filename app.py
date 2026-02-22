@@ -484,6 +484,18 @@ def main():
             ),
         )
 
+        st.selectbox(
+            "Режим сопоставления",
+            options=["exact", "analog"],
+            key="matcher_mode",
+            format_func=lambda value: "Точный матч" if value == "exact" else "Аналог/замена",
+            help=(
+                "exact: только строгие совпадения по типу товара. "
+                "analog: допускает близкие аналоги, но не подменяет тип товара "
+                "(например, патч-корд не заменяется витой парой в бухте)."
+            ),
+        )
+
         if st.button("✅ Применить параметры matcher"):
             st.session_state.matcher = None
             st.session_state.matcher_db_csv = None
