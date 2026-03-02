@@ -97,8 +97,8 @@ def test_process_raw_catalogs_with_etl_uses_chunked_for_large_files(monkeypatch,
     # Force large size reading without writing huge files.
     original_stat = Path.stat
 
-    def fake_stat(self):
-        result = original_stat(self)
+    def fake_stat(self, *args, **kwargs):
+        result = original_stat(self, *args, **kwargs)
         if self.name == "big.csv":
             class StatProxy:
                 st_size = 2 * 1024 * 1024

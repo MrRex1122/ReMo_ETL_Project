@@ -625,7 +625,7 @@ def main():
             st.write(f"Строк всего: **{stats.get('rows_total', 0)}**")
             st.write(f"Дублей: **{stats.get('duplicates_total', 0)}** (артикул: {stats.get('duplicates_by_article', 0)}, наименование: {stats.get('duplicates_by_name', 0)})")
 
-            csv_bytes = st.session_state.catalog_snapshot_df.to_csv(index=False, sep=';', encoding='utf-8').encode('utf-8')
+            csv_bytes = st.session_state.catalog_snapshot_df.to_csv(index=False, sep=';').encode('utf-8-sig')
             st.download_button(
                 "⬇️ Скачать входную БД (CSV)",
                 data=csv_bytes,
@@ -646,7 +646,7 @@ def main():
             )
 
             if not duplicate_df.empty:
-                duplicate_csv = duplicate_df.to_csv(index=False, sep=';', encoding='utf-8').encode('utf-8')
+                duplicate_csv = duplicate_df.to_csv(index=False, sep=';').encode('utf-8-sig')
                 st.download_button(
                     "⬇️ Скачать только дубли (CSV)",
                     data=duplicate_csv,

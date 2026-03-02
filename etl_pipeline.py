@@ -278,6 +278,9 @@ class PriceETL:
         output_path = Path(self.output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
+        if output_path.exists():
+            output_path.unlink()
+
         total_in = 0
         total_out = 0
         first_chunk = True
@@ -301,7 +304,14 @@ class PriceETL:
                 drop_sparse_columns=False,
             )
             total_out += len(transformed)
-            transformed.to_csv(output_path, sep=";", encoding="utf-8", index=False, mode="a", header=first_chunk)
+            transformed.to_csv(
+                output_path,
+                sep=";",
+                encoding="utf-8",
+                index=False,
+                mode="w" if first_chunk else "a",
+                header=first_chunk,
+            )
             first_chunk = False
             logger.info(
                 "📦 Chunk %s: in=%s out=%s total_out=%s",

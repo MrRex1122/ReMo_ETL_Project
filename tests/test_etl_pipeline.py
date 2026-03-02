@@ -74,6 +74,41 @@ class PriceETLTests(unittest.TestCase):
             self.assertIn("ДопПоле", out_df.columns)
             self.assertEqual(len(out_df), 4)
 
+    def test_run_chunked_overwrites_previous_output_instead_of_appending(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            first_input_csv = tmp / "input_first.csv"
+            second_input_csv = tmp / "input_second.csv"
+            output_csv = tmp / "clean_chunked.csv"
+
+            first_df = pd.DataFrame(
+                {
+                    "name": ["A", "B"],
+                    "sku": ["A1", "B1"],
+                    "price": ["100", "200"],
+                }
+            )
+            second_df = pd.DataFrame(
+                {
+                    "name": ["C"],
+                    "sku": ["C1"],
+                    "price": ["300"],
+                }
+            )
+
+            first_df.to_csv(first_input_csv, sep=";", encoding="utf-8", index=False)
+            second_df.to_csv(second_input_csv, sep=";", encoding="utf-8", index=False)
+
+            PriceETL(str(first_input_csv), str(output_csv)).run_chunked(chunksize=1)
+            PriceETL(str(second_input_csv), str(output_csv)).run_chunked(chunksize=1)
+
+            out_df = pd.read_csv(output_csv, sep=";", encoding="utf-8")
+            self.assertEqual(len(out_df), 1)
+            row_text = " ".join(out_df.astype(str).iloc[0].tolist())
+            self.assertIn("C1", row_text)
+            self.assertNotIn("A1", row_text)
+            self.assertNotIn("B1", row_text)
+
 
 if __name__ == "__main__":
     unittest.main()
