@@ -99,6 +99,8 @@ class ProcessExcelExistingColumnsTests(unittest.TestCase):
         self.assertTrue(pd.isna(result_df.loc[1, "Цена"]))
         self.assertEqual(result_df.loc[1, "Найденная номенклатура"], MISSING_POSITION_TEXT)
         self.assertTrue(pd.isna(result_df.loc[1, "Артикул"]))
+        self.assertIn("Позиция 2", str(result_df.loc[1, "Причина отсутствия"]))
+        self.assertIn("не найдена", str(result_df.loc[1, "Причина отсутствия"]).lower())
 
 
 if __name__ == "__main__":
