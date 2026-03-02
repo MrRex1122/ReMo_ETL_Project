@@ -335,19 +335,16 @@ def sync_catalogs_from_google_drive(folder_url_or_id: str, service_account_json:
     if not downloaded_raw_paths:
         return []
 
+    if not run_etl:
+        logger.info("📦 Этап 1 завершен: файлы сохранены в raw без ETL. Файлов: %s", len(downloaded_raw_paths))
+        return downloaded_raw_paths
+
     saved_paths: list[Path] = []
     total_files = len(downloaded_raw_paths)
     for idx, raw_path in enumerate(downloaded_raw_paths, start=1):
         source_name = Path(raw_path.name).name
         source_stem = Path(source_name).stem
         logger.info("🧩 Постобработка файла %s/%s: %s", idx, total_files, source_name)
-
-        if not run_etl:
-            target_path = storage_dir / source_name
-            raw_path.replace(target_path)
-            saved_paths.append(target_path)
-            logger.info("💾 Файл сохранен без ETL: %s", target_path)
-            continue
 
         converted_dir = storage_dir / "converted"
         clean_dir = storage_dir / "clean"
@@ -366,6 +363,38 @@ def sync_catalogs_from_google_drive(folder_url_or_id: str, service_account_json:
     logger.info("✅ Синхронизация и постобработка завершены. Файлов: %s", len(saved_paths))
     return saved_paths
 
+
+def process_raw_catalogs_with_etl() -> list[Path]:
+    """Обработать уже скачанные raw CSV в отдельный этап ETL."""
+    storage_dir = get_upload_dir()
+    raw_dir = storage_dir / "raw"
+    raw_files = sorted(raw_dir.glob("*.csv"), key=lambda p: p.name.lower())
+    if not raw_files:
+        logger.warning("⚠️ В папке raw нет CSV для ETL: %s", raw_dir)
+        return []
+
+    converted_dir = storage_dir / "converted"
+    clean_dir = storage_dir / "clean"
+    converted_dir.mkdir(parents=True, exist_ok=True)
+    clean_dir.mkdir(parents=True, exist_ok=True)
+
+    saved_paths: list[Path] = []
+    total_files = len(raw_files)
+    logger.info("🚀 Этап 2: старт ETL для raw CSV. Файлов: %s", total_files)
+    for idx, raw_path in enumerate(raw_files, start=1):
+        source_name = raw_path.name
+        source_stem = raw_path.stem
+        converted_path = converted_dir / f"{source_stem}_converted.csv"
+        clean_path = clean_dir / f"{source_stem}_clean.csv"
+
+        logger.info("🧩 ETL файл %s/%s: %s", idx, total_files, source_name)
+        convert_csv(raw_path, converted_path)
+        PriceETL(str(converted_path), str(clean_path)).run()
+        saved_paths.append(clean_path)
+        logger.info("✅ ETL готов: %s (%s/%s)", clean_path.name, idx, total_files)
+
+    logger.info("✅ Этап 2 завершен: ETL обработан для %s файлов", len(saved_paths))
+    return saved_paths
 def show_statistics(stats):
     """Отобразить статистику"""
     col1, col2, col3, col4, col5 = st.columns(5)
@@ -490,7 +519,7 @@ def main():
             st.session_state.matcher = None
             st.session_state.matcher_db_csv = None
 
-        st.caption("Синхронизация Google Drive использует преднастроенную папку")
+        st.caption("Синхронизация Google Drive в 2 этапа: скачать → отдельно ETL")
         if st.button("☁️ Выгрузить файлы из Google Drive", key="sync_drive_catalogs_btn"):
             folder_url_or_id, service_account_json = _get_drive_sync_config()
             if not folder_url_or_id or not service_account_json:
@@ -504,7 +533,7 @@ def main():
                     saved_paths = sync_catalogs_from_google_drive(
                         folder_url_or_id=folder_url_or_id,
                         service_account_json=service_account_json,
-                        run_etl=run_etl_before_save,
+                        run_etl=False,
                     )
                     if not saved_paths:
                         st.warning("⚠️ В папке Google Drive не найдено CSV-файлов")
@@ -521,6 +550,25 @@ def main():
                 except Exception as e:
                     logger.error(f"❌ Ошибка синхронизации из Google Drive: {e}", exc_info=True)
                     st.error(f"❌ Не удалось синхронизировать каталоги из Google Drive: {e}")
+
+
+        if st.button("🧪 Прогнать ETL для raw CSV", key="run_raw_etl_btn"):
+            try:
+                clean_paths = process_raw_catalogs_with_etl()
+                if not clean_paths:
+                    st.warning("⚠️ В raw нет CSV для ETL")
+                else:
+                    st.success(f"✓ ETL обработал файлов: {len(clean_paths)}")
+                    for path in clean_paths[:20]:
+                        st.write(f"- {path.name}")
+                    if len(clean_paths) > 20:
+                        st.write(f"... и еще {len(clean_paths) - 20}")
+                    st.session_state.matcher = None
+                    st.session_state.matcher_db_csv = None
+                    st.session_state.matcher_settings_signature = None
+            except Exception as e:
+                logger.error(f"❌ Ошибка этапа ETL для raw CSV: {e}", exc_info=True)
+                st.error(f"❌ Не удалось выполнить ETL для raw CSV: {e}")
 
         st.caption("Источник каталога выбирается автоматически")
         st.info(
