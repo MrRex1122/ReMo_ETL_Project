@@ -42,6 +42,23 @@ class CatalogMergeTests(unittest.TestCase):
             merged_df = pd.read_csv(output, sep=';', encoding='utf-8')
             self.assertEqual(len(merged_df), 2)
 
+    def test_build_merged_catalog_skips_malformed_rows(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            bad = root / "bad_clean.csv"
+            bad.write_text(
+                "Наименование;Артикул;Цена розничная\n"
+                "Товар1;A1;100\n"
+                "Товар2;A2;200;EXTRA\n"
+                "Товар3;A3;300\n",
+                encoding="utf-8",
+            )
+
+            output = build_merged_catalog(root, root / "price_clean_merged.csv")
+            merged_df = pd.read_csv(output, sep=';', encoding='utf-8')
+            self.assertEqual(len(merged_df), 2)
+            self.assertSetEqual(set(merged_df["Артикул"].astype(str)), {"A1", "A3"})
+
 
 if __name__ == "__main__":
     unittest.main()
