@@ -1,7 +1,7 @@
 """
 ReMo Matcher v1.0 - Project Structure
 
-📂 Viktor Halayava/
+📂 ReMo_ETL_Project/
 │
 ├── 📄 app.py                      [Streamlit UI - основное приложение]
 │   └── Запуск: streamlit run app.py

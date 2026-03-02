@@ -27,7 +27,7 @@ AIzaSyD_U_K1Z-J_Z_K1Z-J_Z_K1Z_7_K1Z...
 
 ```bash
 # Переходим в папку проекта
-cd "d:\Python Gemini Tool\Viktor Halayava"
+cd "d:\Python Gemini Tool\ReMo_ETL_Project"
 
 # Создаем виртуальное окружение (опционально, но рекомендуется)
 python -m venv venv
