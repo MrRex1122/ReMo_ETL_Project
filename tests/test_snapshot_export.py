@@ -11,8 +11,10 @@ from snapshot_export import (
     ARTICLE_DUPLICATE_COLUMN,
     NAME_DUPLICATE_COLUMN,
     build_duplicate_report_from_csv,
+    build_snapshot_export_basename,
     build_xlsx_from_csv_streaming,
     get_snapshot_xlsx_status,
+    make_snapshot_bundle,
     stage_public_export,
 )
 
@@ -104,6 +106,64 @@ class SnapshotExportTests(unittest.TestCase):
 
             self.assertEqual(status, "failed_stale")
             self.assertIsNotNone(started_at)
+
+    def test_make_snapshot_bundle_prunes_stale_exports_for_same_source(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            public_dir = root / "public"
+            source_csv = root / "catalog snapshot.csv"
+            source_csv.write_text("Наименование;Артикул\nКабель;A-1\n", encoding="utf-8")
+
+            stale_files = [
+                public_dir / "catalog_snapshot_old.csv",
+                public_dir / "catalog_snapshot_old_duplicates.csv",
+                public_dir / "catalog_snapshot_old.xlsx",
+                public_dir / "catalog_snapshot_old.xlsx.part",
+            ]
+            public_dir.mkdir(parents=True, exist_ok=True)
+            for path in stale_files:
+                path.write_text("stale", encoding="utf-8")
+
+            export_base = build_snapshot_export_basename(source_csv)
+            duplicate_csv = public_dir / f"{export_base}_duplicates.csv"
+            duplicate_csv.write_text("Артикул\nA-1\n", encoding="utf-8")
+
+            bundle = make_snapshot_bundle(
+                source_csv,
+                {"rows_total": 1, "duplicates_total": 0, "duplicates_by_article": 0, "duplicates_by_name": 0},
+                duplicate_csv,
+                public_dir=public_dir,
+            )
+
+            self.assertTrue(bundle.public_csv_path.exists())
+            self.assertTrue(duplicate_csv.exists())
+            for path in stale_files:
+                self.assertFalse(path.exists())
+
+    def test_make_snapshot_bundle_keeps_current_xlsx_partial_file(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            public_dir = root / "public"
+            source_csv = root / "catalog snapshot.csv"
+            source_csv.write_text("Наименование;Артикул\nКабель;A-1\n", encoding="utf-8")
+
+            export_base = build_snapshot_export_basename(source_csv)
+            current_xlsx_part = public_dir / f"{export_base}.xlsx.part"
+            stale_xlsx_part = public_dir / "catalog_snapshot_old.xlsx.part"
+            public_dir.mkdir(parents=True, exist_ok=True)
+            current_xlsx_part.write_text("building", encoding="utf-8")
+            stale_xlsx_part.write_text("stale", encoding="utf-8")
+
+            bundle = make_snapshot_bundle(
+                source_csv,
+                {"rows_total": 1, "duplicates_total": 0, "duplicates_by_article": 0, "duplicates_by_name": 0},
+                None,
+                public_dir=public_dir,
+            )
+
+            self.assertEqual(bundle.xlsx_status, "building")
+            self.assertTrue(current_xlsx_part.exists())
+            self.assertFalse(stale_xlsx_part.exists())
 
 
 if __name__ == "__main__":

@@ -70,6 +70,40 @@ def build_snapshot_export_basename(source_path: Path) -> str:
     return f"{_sanitize_export_stem(source_path.stem)}_{stat.st_size}_{stat.st_mtime_ns}"
 
 
+def _is_snapshot_artifact(path: Path, source_stem: str) -> bool:
+    stem_prefix = f"{_sanitize_export_stem(source_stem)}_"
+    if not path.name.startswith(stem_prefix):
+        return False
+    return any(
+        path.name.endswith(suffix)
+        for suffix in (".csv", ".csv.part", ".xlsx", ".xlsx.part")
+    )
+
+
+def prune_stale_snapshot_exports(
+    source_path: Path,
+    keep_paths: set[Path],
+    *,
+    public_dir: Path | None = None,
+) -> list[Path]:
+    source_path = Path(source_path)
+    export_dir = get_public_export_dir(public_dir)
+    normalized_keep = {Path(path) for path in keep_paths}
+    removed_paths: list[Path] = []
+
+    for candidate in export_dir.iterdir():
+        if not candidate.is_file():
+            continue
+        if not _is_snapshot_artifact(candidate, source_path.stem):
+            continue
+        if candidate in normalized_keep:
+            continue
+        candidate.unlink()
+        removed_paths.append(candidate)
+
+    return removed_paths
+
+
 def _xlsx_part_path(target_xlsx: Path) -> Path:
     return target_xlsx.with_suffix(f"{target_xlsx.suffix}.part")
 
@@ -339,6 +373,19 @@ def make_snapshot_bundle(
     public_xlsx_url = build_public_export_url(xlsx_path) if xlsx_status == "ready" else None
     public_duplicate_csv_url = (
         build_public_export_url(duplicate_csv_path) if duplicate_csv_path is not None else None
+    )
+    keep_paths = {public_csv_path}
+    if duplicate_csv_path is not None:
+        keep_paths.add(duplicate_csv_path)
+    if xlsx_path is not None:
+        keep_paths.add(xlsx_path)
+        xlsx_part_path = _xlsx_part_path(xlsx_path)
+        if xlsx_part_path.exists():
+            keep_paths.add(xlsx_part_path)
+    prune_stale_snapshot_exports(
+        resolved_csv_path,
+        keep_paths,
+        public_dir=export_dir,
     )
 
     return CatalogSnapshotBundle(

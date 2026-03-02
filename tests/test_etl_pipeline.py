@@ -109,6 +109,49 @@ class PriceETLTests(unittest.TestCase):
             self.assertNotIn("A1", row_text)
             self.assertNotIn("B1", row_text)
 
+    def test_transform_keeps_identified_rows_with_zero_numeric_values(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            input_csv = tmp / "input_zero_values.csv"
+            output_csv = tmp / "clean.csv"
+
+            source_df = pd.DataFrame(
+                [
+                    {"Наименование": "Кабель UTP", "Артикул": "A-1", "Цена розничная": 0},
+                    {"Наименование": "", "Артикул": "", "Цена розничная": 0},
+                ]
+            )
+            source_df.to_csv(input_csv, sep=";", encoding="utf-8", index=False)
+
+            out_df = PriceETL(str(input_csv), str(output_csv)).run()
+
+            self.assertEqual(len(out_df), 1)
+            self.assertEqual(out_df.iloc[0]["Артикул"], "A-1")
+            self.assertEqual(out_df.iloc[0]["Наименование"], "Кабель UTP")
+            self.assertEqual(float(out_df.iloc[0]["Цена розничная"]), 0.0)
+
+    def test_transform_keeps_identified_duplicate_rows(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            input_csv = tmp / "input_duplicates.csv"
+            output_csv = tmp / "clean.csv"
+
+            source_df = pd.DataFrame(
+                [
+                    {"Наименование": "Кабель UTP", "Артикул": "A-1", "Цена розничная": 100, "Комментарий": "dup"},
+                    {"Наименование": "Кабель UTP", "Артикул": "A-1", "Цена розничная": 100, "Комментарий": "dup"},
+                    {"Наименование": "", "Артикул": "", "Цена розничная": 50, "Комментарий": "anon"},
+                    {"Наименование": "", "Артикул": "", "Цена розничная": 50, "Комментарий": "anon"},
+                ]
+            )
+            source_df.to_csv(input_csv, sep=";", encoding="utf-8", index=False)
+
+            out_df = PriceETL(str(input_csv), str(output_csv)).run()
+
+            self.assertEqual(len(out_df), 3)
+            self.assertEqual(int((out_df["Артикул"] == "A-1").sum()), 2)
+            self.assertEqual(int((out_df["Комментарий"] == "anon").sum()), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -370,7 +370,7 @@ def sync_catalogs_from_google_drive(folder_url_or_id: str, service_account_json:
 def _run_etl_for_raw_file(raw_path: Path, converted_path: Path, clean_path: Path) -> Path | None:
     """Запустить ETL для raw файла с memory-safe режимом для крупных CSV."""
     threshold_mb = int(os.getenv("REMO_CHUNKED_ETL_THRESHOLD_MB", "512"))
-    chunksize = int(os.getenv("REMO_CHUNKED_ETL_CHUNKSIZE", "50000"))
+    chunksize = int(os.getenv("REMO_CHUNKED_ETL_CHUNKSIZE", "100000"))
     file_mb = raw_path.stat().st_size / (1024 * 1024)
 
     if file_mb >= threshold_mb:

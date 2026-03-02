@@ -10,6 +10,7 @@ import pandas as pd
 
 from catalog_schema import (
     CANONICAL_ARTICLE_COLUMN,
+    CANONICAL_NAME_COLUMN,
     CANONICAL_PRICE_COLUMN,
     REQUIRED_CATALOG_COLUMNS,
     canonicalize_catalog_columns,
@@ -76,6 +77,45 @@ class PriceETL:
         )
         return pd.to_numeric(cleaned, errors="coerce")
 
+    @staticmethod
+    def _has_text_value(series: pd.Series) -> pd.Series:
+        normalized = series.fillna("").astype(str).str.strip()
+        lowered = normalized.str.lower()
+        return normalized.ne("") & ~lowered.isin({"nan", "none", "null", "nat"})
+
+    def _has_identity_payload(self, df: pd.DataFrame) -> pd.Series:
+        article_series = df.get(CANONICAL_ARTICLE_COLUMN)
+        name_series = df.get(CANONICAL_NAME_COLUMN)
+        if article_series is None or name_series is None:
+            return pd.Series(False, index=df.index)
+        return self._has_text_value(article_series) & self._has_text_value(name_series)
+
+    def _drop_unidentified_duplicates(self, df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+        identity_mask = self._has_identity_payload(df)
+        if identity_mask.all():
+            return df, 0
+
+        preserved_rows = df.loc[identity_mask]
+        deduped_rows = df.loc[~identity_mask].drop_duplicates()
+        removed_rows = int((~identity_mask).sum()) - len(deduped_rows)
+        if preserved_rows.empty:
+            return deduped_rows, removed_rows
+        return pd.concat([preserved_rows, deduped_rows]).sort_index(kind="stable"), removed_rows
+
+    def _drop_unidentified_zero_rows(self, df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+        removed_rows = 0
+        for col in df.select_dtypes(include=["number"]).columns:
+            lower_name = col.lower()
+            if not any(marker in lower_name for marker in ("цена", "количество", "вес", "объем")):
+                continue
+            identity_mask = self._has_identity_payload(df)
+            remove_mask = df[col].eq(0) & ~identity_mask
+            if not remove_mask.any():
+                continue
+            removed_rows += int(remove_mask.sum())
+            df = df.loc[~remove_mask]
+        return df, removed_rows
+
     def _transform_dataframe(
         self,
         df: pd.DataFrame,
@@ -94,7 +134,7 @@ class PriceETL:
                 df = df.drop(columns=empty_cols)
 
         df = df.dropna(how="all")
-        df = df.drop_duplicates()
+        df, _ = self._drop_unidentified_duplicates(df)
 
         string_cols = df.select_dtypes(include=["object"]).columns
         for col in string_cols:
@@ -107,11 +147,7 @@ class PriceETL:
         if CANONICAL_PRICE_COLUMN in df.columns:
             df[CANONICAL_PRICE_COLUMN] = self._normalize_price_column(df[CANONICAL_PRICE_COLUMN])
 
-        numeric_cols = df.select_dtypes(include=["float64", "int64"]).columns
-        for col in numeric_cols:
-            lower_name = col.lower()
-            if any(marker in lower_name for marker in ("цена", "количество", "вес", "объем")):
-                df = df[df[col] != 0]
+        df, _ = self._drop_unidentified_zero_rows(df)
 
         if drop_sparse_columns:
             if len(df) > 0:
@@ -172,10 +208,8 @@ class PriceETL:
         self.report["removed_empty_rows"] = removed_empty_rows
 
         # 3. Drop duplicate rows.
-        initial_rows = len(self.df)
-        self.df = self.df.drop_duplicates()
-        removed_duplicates = initial_rows - len(self.df)
-        logger.info(f"  ✓ Удалены дубликаты: {removed_duplicates}")
+        self.df, removed_duplicates = self._drop_unidentified_duplicates(self.df)
+        logger.info(f"  ✓ Удалены дубликаты без артикула и наименования: {removed_duplicates}")
         self.report["removed_duplicates"] = removed_duplicates
 
         # 4. Trim spaces in string columns.
@@ -194,12 +228,13 @@ class PriceETL:
         if CANONICAL_PRICE_COLUMN in self.df.columns:
             self.df[CANONICAL_PRICE_COLUMN] = self._normalize_price_column(self.df[CANONICAL_PRICE_COLUMN])
 
-        numeric_cols = self.df.select_dtypes(include=["float64", "int64"]).columns
-        for col in numeric_cols:
-            lower_name = col.lower()
-            if any(marker in lower_name for marker in ("цена", "количество", "вес", "объем")):
-                self.df = self.df[self.df[col] != 0]
-        logger.info(f"  ✓ Обработаны числовые поля ({len(numeric_cols)} колонок)")
+        numeric_cols = self.df.select_dtypes(include=["number"]).columns
+        self.df, removed_zero_rows = self._drop_unidentified_zero_rows(self.df)
+        logger.info(
+            f"  ✓ Обработаны числовые поля ({len(numeric_cols)} колонок), "
+            f"удалены строки без артикула и наименования с нулевыми значениями: {removed_zero_rows}"
+        )
+        self.report["removed_zero_value_rows"] = removed_zero_rows
 
         # 7. Drop sparse columns (>95% missing), but keep required columns.
         if len(self.df) > 0:
@@ -263,6 +298,7 @@ class PriceETL:
         logger.info(f"Удалено пустых колонок:        {self.report.get('removed_empty_cols', 0)}")
         logger.info(f"Удалено разреженных колонок:   {self.report.get('removed_sparse_cols', 0)}")
         logger.info(f"Удалено дубликатов:            {self.report.get('removed_duplicates', 0)}")
+        logger.info(f"Удалено строк с нулями:        {self.report.get('removed_zero_value_rows', 0)}")
         logger.info(f"Финальные колонки:             {len(self.df.columns)}")
         logger.info("=" * 60)
         logger.info(f"✅ ETL завершен успешно - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -272,7 +308,7 @@ class PriceETL:
         self.extract().transform().load().generate_report()
         return self.df
 
-    def run_chunked(self, *, chunksize: int = 50000) -> pd.DataFrame:
+    def run_chunked(self, *, chunksize: int = 100000) -> pd.DataFrame:
         """Memory-safe ETL for very large CSV by processing chunks."""
         sep, enc = self._detect_csv_params(self.input_path)
         output_path = Path(self.output_path)
