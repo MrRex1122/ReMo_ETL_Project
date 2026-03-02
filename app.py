@@ -166,6 +166,27 @@ def _validate_runtime_readiness(db_csv: str) -> list[str]:
 
     return issues
 
+
+def _safe_matcher_mode_select(current_mode: str, mode_options: list[str]) -> str:
+    """Безопасно получить режим matcher из selectbox без падения UI."""
+    fallback_mode = current_mode if current_mode in mode_options else "exact"
+    try:
+        return st.selectbox(
+            "Режим сопоставления",
+            options=mode_options,
+            index=mode_options.index(fallback_mode),
+            format_func=lambda value: "Точный матч" if value == "exact" else "Аналог/замена",
+            help=(
+                "exact: только строгие совпадения по типу товара. "
+                "analog: допускает близкие аналоги, но не подменяет тип товара "
+                "(например, патч-корд не заменяется витой парой в бухте)."
+            ),
+        )
+    except Exception as e:
+        logger.error("❌ Ошибка рендера выбора режима matcher, применён fallback '%s': %s", fallback_mode, e)
+        st.warning("⚠️ Не удалось отрисовать selector режима matcher, применён fallback.")
+        return fallback_mode
+
 def get_matcher() -> ReMoMatcher:
     """Получить или инициализировать экземпляр matcher"""
     db_csv = str(_catalog_source_path())
@@ -583,75 +604,7 @@ def main():
 
         mode_options = ["exact", "analog"]
         current_mode = str(st.session_state.get("matcher_mode", "exact"))
-        if current_mode not in mode_options:
-            current_mode = "exact"
-        st.session_state.matcher_mode = st.selectbox(
-            "Режим сопоставления",
-            options=mode_options,
-            index=mode_options.index(current_mode),
-            format_func=lambda value: "Точный матч" if value == "exact" else "Аналог/замена",
-            help=(
-                "exact: только строгие совпадения по типу товара. "
-                "analog: допускает близкие аналоги, но не подменяет тип товара "
-                "(например, патч-корд не заменяется витой парой в бухте)."
-            ),
-        )
-
-        mode_options = ["exact", "analog"]
-        current_mode = str(st.session_state.get("matcher_mode", "exact"))
-        if current_mode not in mode_options:
-            current_mode = "exact"
-        st.session_state.matcher_mode = st.selectbox(
-            "Режим сопоставления",
-            options=mode_options,
-            index=mode_options.index(current_mode),
-            key="matcher_mode_select",
-            format_func=lambda value: "Точный матч" if value == "exact" else "Аналог/замена",
-            help=(
-                "exact: только строгие совпадения по типу товара. "
-                "analog: допускает близкие аналоги, но не подменяет тип товара "
-                "(например, патч-корд не заменяется витой парой в бухте)."
-            ),
-        )
-        st.session_state.matcher_mode = selected_mode
-
-        mode_options = ["exact", "analog"]
-        current_mode = str(st.session_state.get("matcher_mode", "exact"))
-        if current_mode not in mode_options:
-            current_mode = "exact"
-        selected_mode = st.selectbox(
-            "Режим сопоставления",
-            options=mode_options,
-            index=mode_options.index(current_mode),
-            key="matcher_mode_select",
-            format_func=lambda value: "Точный матч" if value == "exact" else "Аналог/замена",
-            help=(
-                "exact: только строгие совпадения по типу товара. "
-                "analog: допускает близкие аналоги, но не подменяет тип товара "
-                "(например, патч-корд не заменяется витой парой в бухте)."
-            ),
-        )
-        st.session_state.matcher_mode = selected_mode
-
-        mode_options = ["exact", "analog"]
-        current_mode = str(st.session_state.get("matcher_mode", "exact"))
-        if current_mode not in mode_options:
-            current_mode = "exact"
-        selected_mode = st.selectbox(
-            "Режим сопоставления",
-            options=mode_options,
-            index=mode_options.index(current_mode),
-            key="matcher_mode_select",
-            format_func=lambda value: "Точный матч" if value == "exact" else "Аналог/замена",
-            help=(
-                "exact: только строгие совпадения по типу товара. "
-                "analog: допускает близкие аналоги, но не подменяет тип товара "
-                "(например, патч-корд не заменяется витой парой в бухте)."
-            ),
-        )
-        # Streamlit уже синхронизирует значение в ключе matcher_mode_select,
-        # но дублируем в matcher_mode для обратной совместимости с остальным кодом.
-        st.session_state.matcher_mode = st.session_state.get("matcher_mode_select", selected_mode)
+        st.session_state.matcher_mode = _safe_matcher_mode_select(current_mode, mode_options)
 
         if st.button("✅ Применить параметры matcher"):
             st.session_state.matcher = None
