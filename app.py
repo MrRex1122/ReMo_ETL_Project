@@ -550,6 +550,23 @@ def main():
             key="matcher_catalog_sample_items",
             help="Больше контекста обычно повышает точность сопоставления, но замедляет обработку и увеличивает токены.",
         )
+
+        mode_options = ["exact", "analog"]
+        current_mode = str(st.session_state.get("matcher_mode", "exact"))
+        if current_mode not in mode_options:
+            current_mode = "exact"
+        st.session_state.matcher_mode = st.selectbox(
+            "Режим сопоставления",
+            options=mode_options,
+            index=mode_options.index(current_mode),
+            key="matcher_mode_select",
+            format_func=lambda value: "Точный матч" if value == "exact" else "Аналог/замена",
+            help=(
+                "exact: только строгие совпадения по типу товара. "
+                "analog: допускает близкие аналоги, но не подменяет тип товара "
+                "(например, патч-корд не заменяется витой парой в бухте)."
+            ),
+        )
         st.session_state.matcher_mode = selected_mode
 
         mode_options = ["exact", "analog"]
