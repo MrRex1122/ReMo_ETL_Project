@@ -550,6 +550,7 @@ def main():
             key="matcher_catalog_sample_items",
             help="Больше контекста обычно повышает точность сопоставления, но замедляет обработку и увеличивает токены.",
         )
+        st.session_state.matcher_mode = selected_mode
 
         mode_options = ["exact", "analog"]
         current_mode = str(st.session_state.get("matcher_mode", "exact"))
