@@ -49,6 +49,31 @@ class PriceETLTests(unittest.TestCase):
             self.assertAlmostEqual(float(clean_df.loc[0, "Цена розничная"]), 1200.50, places=2)
             self.assertEqual(clean_df.loc[1, "Артикул"], "UNKNOWN")
 
+    def test_run_chunked_keeps_stable_csv_schema_when_chunk_has_empty_columns(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            input_csv = tmp / "input_chunked.csv"
+            output_csv = tmp / "clean_chunked.csv"
+
+            source_df = pd.DataFrame(
+                {
+                    "Номенклатура": ["A", "B", "C", "D"],
+                    "Код товара": ["A1", "B1", "C1", "D1"],
+                    "Цена": ["100", "200", "300", "400"],
+                    # 1-й чанк полностью пустой по этой колонке,
+                    # 2-й чанк содержит значения.
+                    "ДопПоле": [None, None, "x", "y"],
+                }
+            )
+            source_df.to_csv(input_csv, sep=";", encoding="utf-8", index=False)
+
+            etl = PriceETL(str(input_csv), str(output_csv))
+            etl.run_chunked(chunksize=2)
+
+            out_df = pd.read_csv(output_csv, sep=";", encoding="utf-8")
+            self.assertIn("ДопПоле", out_df.columns)
+            self.assertEqual(len(out_df), 4)
+
 
 if __name__ == "__main__":
     unittest.main()
