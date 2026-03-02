@@ -303,6 +303,7 @@ def sync_catalogs_from_google_drive(folder_url_or_id: str, service_account_json:
     storage_dir = get_upload_dir()
     raw_dir = storage_dir / "raw"
 
+    logger.info("☁️ Старт синхронизации каталогов из Google Drive")
     service_account_info = json.loads(service_account_json)
     downloaded_raw_paths = sync_drive_folder_csvs(
         folder_url_or_id=folder_url_or_id,
@@ -314,14 +315,17 @@ def sync_catalogs_from_google_drive(folder_url_or_id: str, service_account_json:
         return []
 
     saved_paths: list[Path] = []
-    for raw_path in downloaded_raw_paths:
+    total_files = len(downloaded_raw_paths)
+    for idx, raw_path in enumerate(downloaded_raw_paths, start=1):
         source_name = Path(raw_path.name).name
         source_stem = Path(source_name).stem
+        logger.info("🧩 Постобработка файла %s/%s: %s", idx, total_files, source_name)
 
         if not run_etl:
             target_path = storage_dir / source_name
             raw_path.replace(target_path)
             saved_paths.append(target_path)
+            logger.info("💾 Файл сохранен без ETL: %s", target_path)
             continue
 
         converted_dir = storage_dir / "converted"
@@ -332,10 +336,13 @@ def sync_catalogs_from_google_drive(folder_url_or_id: str, service_account_json:
         converted_path = converted_dir / f"{source_stem}_converted.csv"
         clean_path = clean_dir / f"{source_stem}_clean.csv"
 
+        logger.info("🔄 ETL старт: %s", source_name)
         convert_csv(raw_path, converted_path)
         PriceETL(str(converted_path), str(clean_path)).run()
         saved_paths.append(clean_path)
+        logger.info("✅ ETL завершен: %s", clean_path)
 
+    logger.info("✅ Синхронизация и постобработка завершены. Файлов: %s", len(saved_paths))
     return saved_paths
 
 def show_statistics(stats):

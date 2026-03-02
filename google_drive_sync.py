@@ -34,6 +34,7 @@ class DriveCsvFile:
     file_id: str
     name: str
     modified_time: str
+    size_bytes: int = 0
 
 
 @dataclass
@@ -93,7 +94,7 @@ def _list_csv_files(service, folder_id: str) -> list[DriveCsvFile]:
             response = service.files().list(
                 q=query,
                 pageSize=1000,
-                fields="nextPageToken, files(id, name, modifiedTime)",
+                fields="nextPageToken, files(id, name, modifiedTime, size)",
                 pageToken=page_token,
                 supportsAllDrives=True,
                 includeItemsFromAllDrives=True,
@@ -107,6 +108,7 @@ def _list_csv_files(service, folder_id: str) -> list[DriveCsvFile]:
                     file_id=item["id"],
                     name=item["name"],
                     modified_time=item.get("modifiedTime", ""),
+                    size_bytes=int(item.get("size", 0) or 0),
                 )
             )
 
@@ -121,14 +123,24 @@ def _download_csv_file(service, file_info: DriveCsvFile, destination: Path) -> P
     destination.parent.mkdir(parents=True, exist_ok=True)
     request = service.files().get_media(fileId=file_info.file_id, supportsAllDrives=True)
 
+    total_mb = file_info.size_bytes / (1024 * 1024) if file_info.size_bytes else 0
+    logger.info("📥 Начинаем скачивание файла из Drive: %s (%.2f MB)", file_info.name, total_mb)
+
     with open(destination, "wb") as fh:
         downloader = MediaIoBaseDownload(fh, request, chunksize=8 * 1024 * 1024)
         done = False
+        last_logged_percent = -1
         while not done:
             try:
-                _status, done = downloader.next_chunk()
+                status, done = downloader.next_chunk()
             except HttpError as e:
                 raise PermissionError(f"Ошибка скачивания файла {file_info.name}: {e}") from e
+
+            if status is not None:
+                percent = int(status.progress() * 100)
+                if percent >= last_logged_percent + 10 or percent == 100:
+                    logger.info("📦 %s: %s%%", file_info.name, percent)
+                    last_logged_percent = percent
 
     return destination
 
@@ -162,11 +174,13 @@ def sync_drive_folder_csvs(
         return []
 
     downloaded_paths: list[Path] = []
-    for file_info in csv_files:
+    total_files = len(csv_files)
+    for idx, file_info in enumerate(csv_files, start=1):
         safe_name = Path(file_info.name).name
+        logger.info("➡️ Обработка файла %s/%s: %s", idx, total_files, safe_name)
         path = _download_csv_file(service, file_info, destination_dir / safe_name)
         downloaded_paths.append(path)
-        logger.info("⬇️ Скачан CSV из Drive: %s", path.name)
+        logger.info("⬇️ Скачан CSV из Drive: %s (%s/%s)", path.name, idx, total_files)
 
     logger.info("✅ Синхронизация из Google Drive завершена. Файлов: %s", len(downloaded_paths))
     return downloaded_paths
