@@ -2,33 +2,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import pandas as pd
-
-from catalog_snapshot import build_duplicate_report, prepare_catalog_snapshot
+from catalog_snapshot import prepare_catalog_snapshot
 
 
 class CatalogSnapshotTests(unittest.TestCase):
-    def test_build_duplicate_report_marks_article_and_name_duplicates(self):
-        df = pd.DataFrame(
-            [
-                {"Наименование": "Кабель UTP cat6", "Артикул": "A-1", "Цена розничная": 10},
-                {"Наименование": "Кабель UTP cat6", "Артикул": "", "Цена розничная": 11},
-                {"Наименование": "Автомат 16A", "Артикул": "A-1", "Цена розничная": 12},
-            ]
-        )
-
-        stats, duplicate_df = build_duplicate_report(df)
-
-        self.assertEqual(stats["rows_total"], 3)
-        self.assertEqual(stats["duplicates_total"], 3)
-        self.assertEqual(stats["duplicates_by_article"], 2)
-        self.assertEqual(stats["duplicates_by_name"], 2)
-        self.assertIn("Дубль по артикулу", duplicate_df.columns)
-        self.assertIn("Дубль по наименованию", duplicate_df.columns)
-
-    def test_prepare_catalog_snapshot_merges_directory_and_returns_path(self):
+    def test_prepare_catalog_snapshot_merges_directory_and_returns_bundle(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
+            public_dir = root / "public"
             (root / "price14_clean.csv").write_text(
                 "Наименование;Артикул;Цена розничная\nКабель UTP cat6;A-1;100\n",
                 encoding="utf-8",
@@ -38,16 +19,22 @@ class CatalogSnapshotTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            snapshot_df, payload, resolved_path = prepare_catalog_snapshot(str(root))
+            bundle = prepare_catalog_snapshot(str(root), public_dir=public_dir)
 
-            self.assertTrue(resolved_path.name.endswith("price_clean_merged.csv"))
-            self.assertTrue(resolved_path.exists())
-            self.assertEqual(len(snapshot_df), 2)
-            self.assertIn("stats", payload)
+            self.assertTrue(bundle.resolved_csv_path.name.endswith("price_clean_merged.csv"))
+            self.assertTrue(bundle.resolved_csv_path.exists())
+            self.assertTrue(bundle.public_csv_path.exists())
+            self.assertEqual(bundle.duplicate_stats["rows_total"], 2)
+            self.assertEqual(bundle.duplicate_stats["duplicates_total"], 2)
+            self.assertIsNotNone(bundle.duplicate_csv_path)
+            self.assertTrue(bundle.duplicate_csv_path.exists())
+            self.assertEqual(bundle.xlsx_status, "idle")
+            self.assertIsNone(bundle.public_xlsx_url)
 
     def test_prepare_catalog_snapshot_file_path_can_merge_all_sources(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
+            public_dir = root / "public"
             file_a = root / "price14_clean.csv"
             file_a.write_text(
                 "Наименование;Артикул;Цена розничная\nКабель UTP cat6;A-1;100\n",
@@ -58,13 +45,21 @@ class CatalogSnapshotTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            single_df, _, single_path = prepare_catalog_snapshot(str(file_a), merge_all_sources=False)
-            merged_df, _, merged_path = prepare_catalog_snapshot(str(file_a), merge_all_sources=True)
+            single_bundle = prepare_catalog_snapshot(
+                str(file_a),
+                merge_all_sources=False,
+                public_dir=public_dir,
+            )
+            merged_bundle = prepare_catalog_snapshot(
+                str(file_a),
+                merge_all_sources=True,
+                public_dir=public_dir,
+            )
 
-            self.assertEqual(single_path, file_a)
-            self.assertEqual(len(single_df), 1)
-            self.assertTrue(merged_path.name.endswith("price_clean_merged.csv"))
-            self.assertEqual(len(merged_df), 2)
+            self.assertEqual(single_bundle.resolved_csv_path, file_a)
+            self.assertEqual(single_bundle.duplicate_stats["rows_total"], 1)
+            self.assertTrue(merged_bundle.resolved_csv_path.name.endswith("price_clean_merged.csv"))
+            self.assertEqual(merged_bundle.duplicate_stats["rows_total"], 2)
 
 
 if __name__ == "__main__":

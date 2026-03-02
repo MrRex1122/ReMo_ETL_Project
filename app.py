@@ -20,6 +20,7 @@ from catalog_snapshot import prepare_catalog_snapshot
 from google_drive_sync import sync_drive_folder_csvs
 from etl_pipeline import PriceETL
 from main import convert_csv
+from snapshot_export import build_public_export_url, get_snapshot_xlsx_status, start_snapshot_xlsx_build
 
 # ============ ЛОГИРОВАНИЕ ============
 logging.basicConfig(
@@ -94,12 +95,14 @@ if 'show_results' not in st.session_state:
 if 'show_corrections' not in st.session_state:
     st.session_state.show_corrections = False
 
-if 'catalog_snapshot_df' not in st.session_state:
-    st.session_state.catalog_snapshot_df = None
-if 'catalog_snapshot_path' not in st.session_state:
-    st.session_state.catalog_snapshot_path = None
-if 'catalog_snapshot_duplicates' not in st.session_state:
-    st.session_state.catalog_snapshot_duplicates = None
+if 'catalog_snapshot_bundle' not in st.session_state:
+    st.session_state.catalog_snapshot_bundle = None
+if 'catalog_snapshot_xlsx_status' not in st.session_state:
+    st.session_state.catalog_snapshot_xlsx_status = "idle"
+if 'catalog_snapshot_xlsx_path' not in st.session_state:
+    st.session_state.catalog_snapshot_xlsx_path = None
+if 'catalog_snapshot_xlsx_url' not in st.session_state:
+    st.session_state.catalog_snapshot_xlsx_url = None
 
 
 
@@ -600,59 +603,113 @@ def main():
             st.session_state.matcher = None
             st.session_state.matcher_db_csv = None
             st.session_state.matcher_settings_signature = None
+            st.session_state.catalog_snapshot_bundle = None
+            st.session_state.catalog_snapshot_xlsx_status = "idle"
+            st.session_state.catalog_snapshot_xlsx_path = None
+            st.session_state.catalog_snapshot_xlsx_url = None
             st.success("✓ БД перезагружена")
 
         st.caption("Проверка входной БД (после merge и до matcher)")
         if st.button("📥 Подготовить выгрузку входной БД"):
             try:
-                snapshot_df, duplicate_payload, resolved_path = prepare_catalog_snapshot(
+                snapshot_bundle = prepare_catalog_snapshot(
                     str(_catalog_source_path()),
                     merge_all_sources=True,
                 )
-                st.session_state.catalog_snapshot_df = snapshot_df
-                st.session_state.catalog_snapshot_duplicates = duplicate_payload
-                st.session_state.catalog_snapshot_path = str(resolved_path)
-                st.success(f"✓ БД загружена: {resolved_path}")
+                st.session_state.catalog_snapshot_bundle = snapshot_bundle
+                st.session_state.catalog_snapshot_xlsx_status = snapshot_bundle.xlsx_status
+                st.session_state.catalog_snapshot_xlsx_path = (
+                    str(snapshot_bundle.xlsx_path) if snapshot_bundle.xlsx_path is not None else None
+                )
+                st.session_state.catalog_snapshot_xlsx_url = snapshot_bundle.public_xlsx_url
+                st.success(f"✓ БД подготовлена: {snapshot_bundle.resolved_csv_path}")
             except Exception as e:
                 logger.error(f"❌ Ошибка подготовки выгрузки БД: {e}", exc_info=True)
                 st.error(f"❌ Не удалось подготовить БД: {e}")
 
-        if st.session_state.catalog_snapshot_df is not None:
-            payload = st.session_state.catalog_snapshot_duplicates or {}
-            stats = payload.get('stats', {})
-            duplicate_df = payload.get('duplicate_df', pd.DataFrame())
-            st.write(f"Активный источник: `{st.session_state.catalog_snapshot_path}`")
+        if st.session_state.catalog_snapshot_bundle is not None:
+            bundle = st.session_state.catalog_snapshot_bundle
+            xlsx_status, xlsx_started_at = get_snapshot_xlsx_status(
+                bundle.resolved_csv_path,
+                bundle.xlsx_path,
+            )
+            bundle.xlsx_status = xlsx_status
+            bundle.xlsx_started_at = xlsx_started_at
+            bundle.public_xlsx_url = (
+                build_public_export_url(bundle.xlsx_path)
+                if bundle.xlsx_path is not None and xlsx_status == "ready"
+                else None
+            )
+            st.session_state.catalog_snapshot_xlsx_status = xlsx_status
+            st.session_state.catalog_snapshot_xlsx_path = (
+                str(bundle.xlsx_path) if bundle.xlsx_path is not None else None
+            )
+            st.session_state.catalog_snapshot_xlsx_url = bundle.public_xlsx_url
+
+            stats = bundle.duplicate_stats or {}
+            size_mb = bundle.resolved_csv_size_bytes / (1024 * 1024)
+            st.write(f"Активный источник: `{bundle.resolved_csv_path}`")
+            st.write(f"Размер CSV: **{size_mb:.2f} MB**")
             st.write(f"Строк всего: **{stats.get('rows_total', 0)}**")
-            st.write(f"Дублей: **{stats.get('duplicates_total', 0)}** (артикул: {stats.get('duplicates_by_article', 0)}, наименование: {stats.get('duplicates_by_name', 0)})")
+            st.write(
+                f"Дублей: **{stats.get('duplicates_total', 0)}** "
+                f"(артикул: {stats.get('duplicates_by_article', 0)}, "
+                f"наименование: {stats.get('duplicates_by_name', 0)})"
+            )
 
-            csv_bytes = st.session_state.catalog_snapshot_df.to_csv(index=False, sep=';').encode('utf-8-sig')
-            st.download_button(
+            st.link_button(
                 "⬇️ Скачать входную БД (CSV)",
-                data=csv_bytes,
-                file_name=f"catalog_snapshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv",
-                key="download_catalog_snapshot_csv",
+                bundle.public_csv_url,
+                use_container_width=True,
             )
 
-            excel_buffer = io.BytesIO()
-            st.session_state.catalog_snapshot_df.to_excel(excel_buffer, index=False, engine='openpyxl')
-            excel_buffer.seek(0)
-            st.download_button(
-                "⬇️ Скачать входную БД (Excel)",
-                data=excel_buffer.getvalue(),
-                file_name=f"catalog_snapshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="download_catalog_snapshot_excel",
-            )
-
-            if not duplicate_df.empty:
-                duplicate_csv = duplicate_df.to_csv(index=False, sep=';').encode('utf-8-sig')
-                st.download_button(
+            if bundle.public_duplicate_csv_url:
+                st.link_button(
                     "⬇️ Скачать только дубли (CSV)",
-                    data=duplicate_csv,
-                    file_name=f"catalog_duplicates_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv",
-                    key="download_catalog_duplicates_csv",
+                    bundle.public_duplicate_csv_url,
+                    use_container_width=True,
+                )
+
+            if st.button("🧮 Подготовить Excel-файл"):
+                try:
+                    xlsx_status, xlsx_started_at = start_snapshot_xlsx_build(
+                        bundle.resolved_csv_path,
+                        bundle.xlsx_path,
+                    )
+                    bundle.xlsx_status = xlsx_status
+                    bundle.xlsx_started_at = xlsx_started_at
+                    bundle.public_xlsx_url = (
+                        build_public_export_url(bundle.xlsx_path)
+                        if bundle.xlsx_path is not None and xlsx_status == "ready"
+                        else None
+                    )
+                    st.session_state.catalog_snapshot_xlsx_status = xlsx_status
+                    st.session_state.catalog_snapshot_xlsx_path = (
+                        str(bundle.xlsx_path) if bundle.xlsx_path is not None else None
+                    )
+                    st.session_state.catalog_snapshot_xlsx_url = bundle.public_xlsx_url
+                    if xlsx_status == "ready":
+                        st.success("✓ Excel-файл уже готов")
+                    else:
+                        st.info("⏳ Подготовка Excel-файла запущена")
+                except Exception as e:
+                    logger.error(f"❌ Ошибка подготовки Excel-файла: {e}", exc_info=True)
+                    st.error(f"❌ Не удалось подготовить Excel-файл: {e}")
+
+            xlsx_status_labels = {
+                "idle": "Не подготовлен",
+                "building": "Подготовка Excel-файла...",
+                "ready": "Excel-файл готов",
+                "failed_stale": "Подготовка зависла, перезапустите сборку",
+            }
+            st.write(f"Excel-выгрузка: **{xlsx_status_labels.get(bundle.xlsx_status, bundle.xlsx_status)}**")
+            if bundle.xlsx_started_at:
+                st.caption(f"Статус обновлен: {bundle.xlsx_started_at}")
+            if bundle.public_xlsx_url:
+                st.link_button(
+                    "⬇️ Скачать входную БД (Excel)",
+                    bundle.public_xlsx_url,
+                    use_container_width=True,
                 )
 
         st.subheader("2️⃣ Тонкая настройка matcher")

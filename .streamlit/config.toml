@@ -2,3 +2,4 @@
 # Практически снимаем лимит загрузки для крупных CSV (2+ ГБ) в рамках ресурсов хоста.
 maxUploadSize = 8192
 maxMessageSize = 8192
+enableStaticServing = true
