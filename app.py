@@ -125,6 +125,29 @@ def _get_gemini_api_key() -> str | None:
 
     return secret_value or os.getenv("GEMINI_API_KEY")
 
+
+def _get_drive_sync_config() -> tuple[str | None, str | None]:
+    """Получить конфиг Google Drive sync из secrets/env без UI-ввода."""
+    folder = None
+    service_account_json = None
+
+    try:
+        folder = st.secrets.get("GOOGLE_DRIVE_FOLDER_ID") or st.secrets.get("GOOGLE_DRIVE_FOLDER_URL")
+        service_account_secret = st.secrets.get("GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON")
+        if service_account_secret:
+            service_account_json = str(service_account_secret)
+        elif "GOOGLE_DRIVE_SERVICE_ACCOUNT" in st.secrets:
+            service_account_json = json.dumps(dict(st.secrets["GOOGLE_DRIVE_SERVICE_ACCOUNT"]))
+    except StreamlitSecretNotFoundError:
+        pass
+    except Exception as e:
+        logger.warning(f"⚠️ Не удалось прочитать Google Drive secrets: {e}")
+
+    folder = folder or os.getenv("GOOGLE_DRIVE_FOLDER_ID") or os.getenv("GOOGLE_DRIVE_FOLDER_URL")
+    service_account_json = service_account_json or os.getenv("GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON")
+
+    return folder, service_account_json
+
 def _validate_runtime_readiness(db_csv: str) -> list[str]:
     """Проверить готовность приложения к обработке перед запуском matcher."""
     issues = []
@@ -435,41 +458,37 @@ def main():
             st.session_state.matcher = None
             st.session_state.matcher_db_csv = None
 
-        st.caption("или синхронизируйте CSV напрямую из Google Drive")
-        drive_folder_input = st.text_input(
-            "Ссылка/ID папки Google Drive",
-            key="drive_folder_url",
-            placeholder="https://drive.google.com/drive/folders/...",
-        )
-        drive_credentials_input = st.text_area(
-            "Service Account JSON (Google Drive)",
-            key="drive_service_account_json",
-            height=160,
-            help="JSON ключ сервисного аккаунта с доступом к папке Google Drive.",
-        )
-
-        if st.button("☁️ Синхронизировать каталоги из Google Drive", key="sync_drive_catalogs_btn"):
-            try:
-                saved_paths = sync_catalogs_from_google_drive(
-                    folder_url_or_id=drive_folder_input,
-                    service_account_json=drive_credentials_input,
-                    run_etl=run_etl_before_save,
+        st.caption("Синхронизация Google Drive использует преднастроенную папку")
+        if st.button("☁️ Выгрузить файлы из Google Drive", key="sync_drive_catalogs_btn"):
+            folder_url_or_id, service_account_json = _get_drive_sync_config()
+            if not folder_url_or_id or not service_account_json:
+                st.error(
+                    "❌ Не настроен доступ к Google Drive. "
+                    "Задайте GOOGLE_DRIVE_FOLDER_ID/GOOGLE_DRIVE_FOLDER_URL и "
+                    "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON в secrets или env."
                 )
-                if not saved_paths:
-                    st.warning("⚠️ В папке Google Drive не найдено CSV-файлов")
-                else:
-                    st.success(f"✓ Синхронизировано файлов: {len(saved_paths)}")
-                    for path in saved_paths[:20]:
-                        st.write(f"- {path.name}")
-                    if len(saved_paths) > 20:
-                        st.write(f"... и еще {len(saved_paths) - 20}")
+            else:
+                try:
+                    saved_paths = sync_catalogs_from_google_drive(
+                        folder_url_or_id=folder_url_or_id,
+                        service_account_json=service_account_json,
+                        run_etl=run_etl_before_save,
+                    )
+                    if not saved_paths:
+                        st.warning("⚠️ В папке Google Drive не найдено CSV-файлов")
+                    else:
+                        st.success(f"✓ Синхронизировано файлов: {len(saved_paths)}")
+                        for path in saved_paths[:20]:
+                            st.write(f"- {path.name}")
+                        if len(saved_paths) > 20:
+                            st.write(f"... и еще {len(saved_paths) - 20}")
 
-                    st.session_state.matcher = None
-                    st.session_state.matcher_db_csv = None
-                    st.session_state.matcher_settings_signature = None
-            except Exception as e:
-                logger.error(f"❌ Ошибка синхронизации из Google Drive: {e}", exc_info=True)
-                st.error(f"❌ Не удалось синхронизировать каталоги из Google Drive: {e}")
+                        st.session_state.matcher = None
+                        st.session_state.matcher_db_csv = None
+                        st.session_state.matcher_settings_signature = None
+                except Exception as e:
+                    logger.error(f"❌ Ошибка синхронизации из Google Drive: {e}", exc_info=True)
+                    st.error(f"❌ Не удалось синхронизировать каталоги из Google Drive: {e}")
 
         st.caption("Источник каталога выбирается автоматически")
         st.info(
@@ -549,6 +568,23 @@ def main():
             step=50,
             key="matcher_catalog_sample_items",
             help="Больше контекста обычно повышает точность сопоставления, но замедляет обработку и увеличивает токены.",
+        )
+
+        mode_options = ["exact", "analog"]
+        current_mode = str(st.session_state.get("matcher_mode", "exact"))
+        if current_mode not in mode_options:
+            current_mode = "exact"
+        st.session_state.matcher_mode = st.selectbox(
+            "Режим сопоставления",
+            options=mode_options,
+            index=mode_options.index(current_mode),
+            key="matcher_mode_select",
+            format_func=lambda value: "Точный матч" if value == "exact" else "Аналог/замена",
+            help=(
+                "exact: только строгие совпадения по типу товара. "
+                "analog: допускает близкие аналоги, но не подменяет тип товара "
+                "(например, патч-корд не заменяется витой парой в бухте)."
+            ),
         )
 
         mode_options = ["exact", "analog"]
