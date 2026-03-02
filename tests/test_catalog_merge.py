@@ -4,7 +4,13 @@ from pathlib import Path
 
 import pandas as pd
 
-from catalog_merge import build_merged_catalog, merge_catalog_frames
+from catalog_merge import (
+    CANONICAL_ARTICLE_COLUMN,
+    CANONICAL_NAME_COLUMN,
+    CANONICAL_PRICE_COLUMN,
+    build_merged_catalog,
+    merge_catalog_frames,
+)
 
 
 class CatalogMergeTests(unittest.TestCase):
@@ -58,6 +64,29 @@ class CatalogMergeTests(unittest.TestCase):
             merged_df = pd.read_csv(output, sep=';', encoding='utf-8')
             self.assertEqual(len(merged_df), 2)
             self.assertSetEqual(set(merged_df["Артикул"].astype(str)), {"A1", "A3"})
+
+    def test_build_merged_catalog_prefers_valid_price_and_keeps_union_columns(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            extra_column = "Тип изделия"
+            (root / "price14_clean.csv").write_text(
+                f"{CANONICAL_NAME_COLUMN};{CANONICAL_ARTICLE_COLUMN};{CANONICAL_PRICE_COLUMN}\n"
+                "PDU 19;PDU-1;\n",
+                encoding="utf-8",
+            )
+            (root / "price17_clean.csv").write_text(
+                f"{CANONICAL_NAME_COLUMN};{CANONICAL_ARTICLE_COLUMN};{CANONICAL_PRICE_COLUMN};{extra_column}\n"
+                "PDU 19;PDU-1;150;PDU\n",
+                encoding="utf-8",
+            )
+
+            output = build_merged_catalog(root, root / "price_clean_merged.csv")
+            merged_df = pd.read_csv(output, sep=";", encoding="utf-8")
+
+            self.assertEqual(len(merged_df), 1)
+            self.assertIn(extra_column, merged_df.columns)
+            self.assertEqual(float(merged_df.iloc[0][CANONICAL_PRICE_COLUMN]), 150.0)
+            self.assertEqual(merged_df.iloc[0][extra_column], "PDU")
 
 
 if __name__ == "__main__":
