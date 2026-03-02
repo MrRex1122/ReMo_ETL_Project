@@ -14,8 +14,12 @@ from datetime import datetime
 import sqlite3
 import logging
 import io
-from config import get_catalog_csv_path, get_upload_dir
+import json
+from config import get_catalog_csv_path, get_upload_dir, get_matcher_cache_db_path
 from catalog_snapshot import prepare_catalog_snapshot
+from google_drive_sync import sync_drive_folder_csvs
+from etl_pipeline import PriceETL
+from main import convert_csv
 
 # ============ ЛОГИРОВАНИЕ ============
 logging.basicConfig(
@@ -74,13 +78,15 @@ if 'stats' not in st.session_state:
 if 'corrections' not in st.session_state:
     st.session_state.corrections = {}
 if 'db_csv_path' not in st.session_state:
-    st.session_state.db_csv_path = str(get_catalog_csv_path())
+    st.session_state.db_csv_path = str(get_upload_dir() / 'clean')
 if 'matcher_db_csv' not in st.session_state:
     st.session_state.matcher_db_csv = None
 if 'matcher_parallel_requests' not in st.session_state:
     st.session_state.matcher_parallel_requests = 1
 if 'matcher_catalog_sample_items' not in st.session_state:
-    st.session_state.matcher_catalog_sample_items = 500
+    st.session_state.matcher_catalog_sample_items = 1500
+if 'matcher_mode' not in st.session_state:
+    st.session_state.matcher_mode = 'exact'
 if 'matcher_settings_signature' not in st.session_state:
     st.session_state.matcher_settings_signature = None
 if 'show_results' not in st.session_state:
@@ -94,8 +100,16 @@ if 'catalog_snapshot_path' not in st.session_state:
     st.session_state.catalog_snapshot_path = None
 if 'catalog_snapshot_duplicates' not in st.session_state:
     st.session_state.catalog_snapshot_duplicates = None
-if 'catalog_snapshot_merge_all' not in st.session_state:
-    st.session_state.catalog_snapshot_merge_all = True
+
+
+
+
+def _catalog_source_path() -> Path:
+    """Вернуть актуальный источник каталога для matcher и выгрузки."""
+    clean_dir = get_upload_dir() / "clean"
+    if clean_dir.exists():
+        return clean_dir
+    return get_catalog_csv_path(st.session_state.get('db_csv_path'))
 
 
 
@@ -111,6 +125,29 @@ def _get_gemini_api_key() -> str | None:
 
     return secret_value or os.getenv("GEMINI_API_KEY")
 
+
+def _get_drive_sync_config() -> tuple[str | None, str | None]:
+    """Получить конфиг Google Drive sync из secrets/env без UI-ввода."""
+    folder = None
+    service_account_json = None
+
+    try:
+        folder = st.secrets.get("GOOGLE_DRIVE_FOLDER_ID") or st.secrets.get("GOOGLE_DRIVE_FOLDER_URL")
+        service_account_secret = st.secrets.get("GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON")
+        if service_account_secret:
+            service_account_json = str(service_account_secret)
+        elif "GOOGLE_DRIVE_SERVICE_ACCOUNT" in st.secrets:
+            service_account_json = json.dumps(dict(st.secrets["GOOGLE_DRIVE_SERVICE_ACCOUNT"]))
+    except StreamlitSecretNotFoundError:
+        pass
+    except Exception as e:
+        logger.warning(f"⚠️ Не удалось прочитать Google Drive secrets: {e}")
+
+    folder = folder or os.getenv("GOOGLE_DRIVE_FOLDER_ID") or os.getenv("GOOGLE_DRIVE_FOLDER_URL")
+    service_account_json = service_account_json or os.getenv("GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON")
+
+    return folder, service_account_json
+
 def _validate_runtime_readiness(db_csv: str) -> list[str]:
     """Проверить готовность приложения к обработке перед запуском matcher."""
     issues = []
@@ -119,17 +156,44 @@ def _validate_runtime_readiness(db_csv: str) -> list[str]:
     if not api_key:
         issues.append("Не задан GEMINI_API_KEY")
 
-    if not Path(db_csv).exists():
+    source_path = Path(db_csv)
+    if source_path.is_dir():
+        clean_files = list(source_path.glob('*_clean.csv'))
+        if not clean_files:
+            issues.append(f"В папке нет файлов *_clean.csv: {db_csv}")
+    elif not source_path.exists():
         issues.append(f"Не найден каталог price_clean.csv: {db_csv}")
 
     return issues
 
+
+def _safe_matcher_mode_select(current_mode: str, mode_options: list[str]) -> str:
+    """Безопасно получить режим matcher из selectbox без падения UI."""
+    fallback_mode = current_mode if current_mode in mode_options else "exact"
+    try:
+        return st.selectbox(
+            "Режим сопоставления",
+            options=mode_options,
+            index=mode_options.index(fallback_mode),
+            format_func=lambda value: "Точный матч" if value == "exact" else "Аналог/замена",
+            help=(
+                "exact: только строгие совпадения по типу товара. "
+                "analog: допускает близкие аналоги, но не подменяет тип товара "
+                "(например, патч-корд не заменяется витой парой в бухте)."
+            ),
+        )
+    except Exception as e:
+        logger.error("❌ Ошибка рендера выбора режима matcher, применён fallback '%s': %s", fallback_mode, e)
+        st.warning("⚠️ Не удалось отрисовать selector режима matcher, применён fallback.")
+        return fallback_mode
+
 def get_matcher() -> ReMoMatcher:
     """Получить или инициализировать экземпляр matcher"""
-    db_csv = str(get_catalog_csv_path(st.session_state.get('db_csv_path')))
+    db_csv = str(_catalog_source_path())
     settings_signature = (
         int(st.session_state.get('matcher_parallel_requests', 1)),
         int(st.session_state.get('matcher_catalog_sample_items', 500)),
+        str(st.session_state.get('matcher_mode', 'exact')),
     )
     needs_reinit = (
         st.session_state.matcher is None
@@ -174,6 +238,7 @@ def get_matcher() -> ReMoMatcher:
                     db_csv,
                     parallel_requests=int(st.session_state.get('matcher_parallel_requests', 1)),
                     catalog_sample_items=int(st.session_state.get('matcher_catalog_sample_items', 500)),
+                    match_mode=str(st.session_state.get('matcher_mode', 'exact')),
                 )
                 st.session_state.matcher_db_csv = db_csv
                 st.session_state.matcher_settings_signature = settings_signature
@@ -252,15 +317,54 @@ def save_uploaded_catalog(uploaded_catalog, run_etl: bool = False) -> Path:
     return clean_path
 
 
-def list_available_catalogs() -> list[Path]:
-    """Вернуть список доступных CSV-каталогов в рабочей папке данных."""
-    storage_dir = get_upload_dir()
-    storage_dir.mkdir(parents=True, exist_ok=True)
-    top_level = set(storage_dir.glob("*.csv"))
-    clean_dir = storage_dir / "clean"
-    clean_level = set(clean_dir.glob("*.csv")) if clean_dir.exists() else set()
-    return sorted(top_level | clean_level)
 
+
+def sync_catalogs_from_google_drive(folder_url_or_id: str, service_account_json: str, run_etl: bool = False) -> list[Path]:
+    """Синхронизировать CSV-каталоги из папки Google Drive в локальное хранилище."""
+    storage_dir = get_upload_dir()
+    raw_dir = storage_dir / "raw"
+
+    logger.info("☁️ Старт синхронизации каталогов из Google Drive")
+    service_account_info = json.loads(service_account_json)
+    downloaded_raw_paths = sync_drive_folder_csvs(
+        folder_url_or_id=folder_url_or_id,
+        service_account_info=service_account_info,
+        destination_dir=raw_dir,
+    )
+
+    if not downloaded_raw_paths:
+        return []
+
+    saved_paths: list[Path] = []
+    total_files = len(downloaded_raw_paths)
+    for idx, raw_path in enumerate(downloaded_raw_paths, start=1):
+        source_name = Path(raw_path.name).name
+        source_stem = Path(source_name).stem
+        logger.info("🧩 Постобработка файла %s/%s: %s", idx, total_files, source_name)
+
+        if not run_etl:
+            target_path = storage_dir / source_name
+            raw_path.replace(target_path)
+            saved_paths.append(target_path)
+            logger.info("💾 Файл сохранен без ETL: %s", target_path)
+            continue
+
+        converted_dir = storage_dir / "converted"
+        clean_dir = storage_dir / "clean"
+        converted_dir.mkdir(parents=True, exist_ok=True)
+        clean_dir.mkdir(parents=True, exist_ok=True)
+
+        converted_path = converted_dir / f"{source_stem}_converted.csv"
+        clean_path = clean_dir / f"{source_stem}_clean.csv"
+
+        logger.info("🔄 ETL старт: %s", source_name)
+        convert_csv(raw_path, converted_path)
+        PriceETL(str(converted_path), str(clean_path)).run()
+        saved_paths.append(clean_path)
+        logger.info("✅ ETL завершен: %s", clean_path)
+
+    logger.info("✅ Синхронизация и постобработка завершены. Файлов: %s", len(saved_paths))
+    return saved_paths
 
 def show_statistics(stats):
     """Отобразить статистику"""
@@ -282,6 +386,24 @@ def show_statistics(stats):
     with col5:
         st.metric("⚠️ Ошибок", stats['errors'])
 
+
+
+
+def _ensure_history_table_exists(conn: sqlite3.Connection) -> None:
+    """Создать таблицу истории, если БД открыта до инициализации matcher."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS match_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            original_query TEXT,
+            found_name TEXT,
+            price REAL,
+            article TEXT,
+            user_approved BOOLEAN,
+            correction_note TEXT,
+            created_at TIMESTAMP
+        )
+    """)
+    conn.commit()
 
 def _prepare_df_for_display(df: pd.DataFrame) -> pd.DataFrame:
     """Сделать DataFrame безопасным для отображения в Streamlit/Arrow."""
@@ -328,6 +450,10 @@ def show_corrections_table(df):
 def main():
     st.title("🔍 ReMo Matcher")
     st.markdown("*Семантическое сопоставление номенклатуры с товарной БД*")
+    build_sha = os.getenv("RAILWAY_GIT_COMMIT_SHA") or os.getenv("RAILWAY_GIT_COMMIT")
+    if build_sha:
+        st.caption(f"Build: `{build_sha[:8]}`")
+        logger.info("🚢 Build commit: %s", build_sha)
     
     # Боковая панель
     with st.sidebar:
@@ -364,21 +490,44 @@ def main():
             st.session_state.matcher = None
             st.session_state.matcher_db_csv = None
 
-        available_catalogs = list_available_catalogs()
-        if available_catalogs:
-            selected_catalog = st.selectbox(
-                "Выбрать активный каталог",
-                options=[str(path) for path in available_catalogs],
-                index=0,
-            )
-            if selected_catalog != st.session_state.get('db_csv_path'):
-                st.session_state.db_csv_path = selected_catalog
+        st.caption("Синхронизация Google Drive использует преднастроенную папку")
+        if st.button("☁️ Выгрузить файлы из Google Drive", key="sync_drive_catalogs_btn"):
+            folder_url_or_id, service_account_json = _get_drive_sync_config()
+            if not folder_url_or_id or not service_account_json:
+                st.error(
+                    "❌ Не настроен доступ к Google Drive. "
+                    "Задайте GOOGLE_DRIVE_FOLDER_ID/GOOGLE_DRIVE_FOLDER_URL и "
+                    "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON в secrets или env."
+                )
+            else:
+                try:
+                    saved_paths = sync_catalogs_from_google_drive(
+                        folder_url_or_id=folder_url_or_id,
+                        service_account_json=service_account_json,
+                        run_etl=run_etl_before_save,
+                    )
+                    if not saved_paths:
+                        st.warning("⚠️ В папке Google Drive не найдено CSV-файлов")
+                    else:
+                        st.success(f"✓ Синхронизировано файлов: {len(saved_paths)}")
+                        for path in saved_paths[:20]:
+                            st.write(f"- {path.name}")
+                        if len(saved_paths) > 20:
+                            st.write(f"... и еще {len(saved_paths) - 20}")
 
-        st.text_input(
-            "Путь к price_clean.csv (или к папке с *_clean.csv)",
-            key="db_csv_path",
-            help="Если указана папка, matcher автоматически соберет единый price_clean_merged.csv из всех *_clean.csv.",
+                        st.session_state.matcher = None
+                        st.session_state.matcher_db_csv = None
+                        st.session_state.matcher_settings_signature = None
+                except Exception as e:
+                    logger.error(f"❌ Ошибка синхронизации из Google Drive: {e}", exc_info=True)
+                    st.error(f"❌ Не удалось синхронизировать каталоги из Google Drive: {e}")
+
+        st.caption("Источник каталога выбирается автоматически")
+        st.info(
+            "Используется только объединенный каталог без дублей: "
+            "из всех *_clean.csv в папке `clean` формируется `price_clean_merged.csv`."
         )
+        st.code(str(_catalog_source_path()))
         
         if st.button("🔄 Перезагрузить БД"):
             st.session_state.matcher = None
@@ -387,16 +536,11 @@ def main():
             st.success("✓ БД перезагружена")
 
         st.caption("Проверка входной БД (после merge и до matcher)")
-        st.checkbox(
-            "Объединять все *_clean.csv из папки",
-            key="catalog_snapshot_merge_all",
-            help="Если путь указывает на один файл, включенная опция объединит все *_clean.csv из той же папки перед выгрузкой.",
-        )
         if st.button("📥 Подготовить выгрузку входной БД"):
             try:
                 snapshot_df, duplicate_payload, resolved_path = prepare_catalog_snapshot(
-                    st.session_state.get('db_csv_path'),
-                    merge_all_sources=bool(st.session_state.get('catalog_snapshot_merge_all', True)),
+                    str(_catalog_source_path()),
+                    merge_all_sources=True,
                 )
                 st.session_state.catalog_snapshot_df = snapshot_df
                 st.session_state.catalog_snapshot_duplicates = duplicate_payload
@@ -445,21 +589,22 @@ def main():
                 )
 
         st.subheader("2️⃣ Тонкая настройка matcher")
-        st.slider(
-            "Параллельные запросы к Gemini",
-            min_value=1,
-            max_value=10,
-            key="matcher_parallel_requests",
-            help="Чем больше значение, тем быстрее обработка, но выше риск rate-limit/нестабильности.",
+        st.info(
+            "Параллелизм установлен на максимум: одновременно отправляется число запросов, "
+            "равное числу позиций в файле."
         )
         st.slider(
             "Размер сэмпла каталога для контекста",
             min_value=100,
-            max_value=1500,
+            max_value=5000,
             step=50,
             key="matcher_catalog_sample_items",
-            help="Больше контекста может повысить качество, но замедляет и увеличивает токены.",
+            help="Больше контекста обычно повышает точность сопоставления, но замедляет обработку и увеличивает токены.",
         )
+
+        mode_options = ["exact", "analog"]
+        current_mode = str(st.session_state.get("matcher_mode", "exact"))
+        st.session_state.matcher_mode = _safe_matcher_mode_select(current_mode, mode_options)
 
         if st.button("✅ Применить параметры matcher"):
             st.session_state.matcher = None
@@ -513,7 +658,7 @@ def main():
             logger.info(f"📤 Файл загружен пользователем: {uploaded_file.name} ({uploaded_file.size} байт)")
             st.info(f"📄 Файл выбран: {uploaded_file.name}")
 
-            db_csv = str(get_catalog_csv_path(st.session_state.get('db_csv_path')))
+            db_csv = str(_catalog_source_path())
             issues = _validate_runtime_readiness(db_csv)
             if issues:
                 st.warning("⚠️ Перед обработкой исправьте настройки:")
@@ -644,13 +789,20 @@ def main():
             
             # Таблица с пагинацией
             total_pages = (len(df_view) + page_size - 1) // page_size
-            page = st.slider("Страница", 1, max(1, total_pages), 1)
+            max_pages = max(1, total_pages)
+            if max_pages > 1:
+                page = st.slider("Страница", 1, max_pages, 1)
+            else:
+                page = 1
+                st.caption("Страница 1 из 1")
+
             start_idx = (page - 1) * page_size
             end_idx = start_idx + page_size
-            
+
             st.dataframe(_prepare_df_for_display(df_view.iloc[start_idx:end_idx]), width="stretch")
-            
-            st.markdown(f"Страница {page} из {max(1, total_pages)}")
+
+            if max_pages > 1:
+                st.markdown(f"Страница {page} из {max_pages}")
             
             # Скачать
             st.divider()
@@ -692,6 +844,7 @@ def main():
         
         try:
             conn = sqlite3.connect(str(get_matcher_cache_db_path()))
+            _ensure_history_table_exists(conn)
             
             # История результатов
             df_history = pd.read_sql_query(
