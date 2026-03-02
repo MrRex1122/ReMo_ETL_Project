@@ -14,8 +14,10 @@ from datetime import datetime
 import sqlite3
 import logging
 import io
+import json
 from config import get_catalog_csv_path, get_upload_dir, get_matcher_cache_db_path
 from catalog_snapshot import prepare_catalog_snapshot
+from google_drive_sync import sync_drive_folder_csvs
 from etl_pipeline import PriceETL
 from main import convert_csv
 
@@ -272,6 +274,47 @@ def save_uploaded_catalog(uploaded_catalog, run_etl: bool = False) -> Path:
 
 
 
+
+def sync_catalogs_from_google_drive(folder_url_or_id: str, service_account_json: str, run_etl: bool = False) -> list[Path]:
+    """Синхронизировать CSV-каталоги из папки Google Drive в локальное хранилище."""
+    storage_dir = get_upload_dir()
+    raw_dir = storage_dir / "raw"
+
+    service_account_info = json.loads(service_account_json)
+    downloaded_raw_paths = sync_drive_folder_csvs(
+        folder_url_or_id=folder_url_or_id,
+        service_account_info=service_account_info,
+        destination_dir=raw_dir,
+    )
+
+    if not downloaded_raw_paths:
+        return []
+
+    saved_paths: list[Path] = []
+    for raw_path in downloaded_raw_paths:
+        source_name = Path(raw_path.name).name
+        source_stem = Path(source_name).stem
+
+        if not run_etl:
+            target_path = storage_dir / source_name
+            raw_path.replace(target_path)
+            saved_paths.append(target_path)
+            continue
+
+        converted_dir = storage_dir / "converted"
+        clean_dir = storage_dir / "clean"
+        converted_dir.mkdir(parents=True, exist_ok=True)
+        clean_dir.mkdir(parents=True, exist_ok=True)
+
+        converted_path = converted_dir / f"{source_stem}_converted.csv"
+        clean_path = clean_dir / f"{source_stem}_clean.csv"
+
+        convert_csv(raw_path, converted_path)
+        PriceETL(str(converted_path), str(clean_path)).run()
+        saved_paths.append(clean_path)
+
+    return saved_paths
+
 def show_statistics(stats):
     """Отобразить статистику"""
     col1, col2, col3, col4, col5 = st.columns(5)
@@ -392,6 +435,42 @@ def main():
             st.session_state.matcher = None
             st.session_state.matcher_db_csv = None
 
+        st.caption("или синхронизируйте CSV напрямую из Google Drive")
+        drive_folder_input = st.text_input(
+            "Ссылка/ID папки Google Drive",
+            key="drive_folder_url",
+            placeholder="https://drive.google.com/drive/folders/...",
+        )
+        drive_credentials_input = st.text_area(
+            "Service Account JSON (Google Drive)",
+            key="drive_service_account_json",
+            height=160,
+            help="JSON ключ сервисного аккаунта с доступом к папке Google Drive.",
+        )
+
+        if st.button("☁️ Синхронизировать каталоги из Google Drive", key="sync_drive_catalogs_btn"):
+            try:
+                saved_paths = sync_catalogs_from_google_drive(
+                    folder_url_or_id=drive_folder_input,
+                    service_account_json=drive_credentials_input,
+                    run_etl=run_etl_before_save,
+                )
+                if not saved_paths:
+                    st.warning("⚠️ В папке Google Drive не найдено CSV-файлов")
+                else:
+                    st.success(f"✓ Синхронизировано файлов: {len(saved_paths)}")
+                    for path in saved_paths[:20]:
+                        st.write(f"- {path.name}")
+                    if len(saved_paths) > 20:
+                        st.write(f"... и еще {len(saved_paths) - 20}")
+
+                    st.session_state.matcher = None
+                    st.session_state.matcher_db_csv = None
+                    st.session_state.matcher_settings_signature = None
+            except Exception as e:
+                logger.error(f"❌ Ошибка синхронизации из Google Drive: {e}", exc_info=True)
+                st.error(f"❌ Не удалось синхронизировать каталоги из Google Drive: {e}")
+
         st.caption("Источник каталога выбирается автоматически")
         st.info(
             "Используется только объединенный каталог без дублей: "
@@ -471,6 +550,7 @@ def main():
             key="matcher_catalog_sample_items",
             help="Больше контекста обычно повышает точность сопоставления, но замедляет обработку и увеличивает токены.",
         )
+        st.session_state.matcher_mode = selected_mode
 
         mode_options = ["exact", "analog"]
         current_mode = str(st.session_state.get("matcher_mode", "exact"))
