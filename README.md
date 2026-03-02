@@ -66,6 +66,7 @@ $env:GEMINI_API_KEY = "ваш_ключ"
 ```bash
 streamlit run app.py
 ```
+> Для загрузки очень больших CSV (до нескольких ГБ) в проекте выставлены повышенные лимиты Streamlit в `.streamlit/config.toml` и Docker CMD (`maxUploadSize/maxMessageSize`).
 
 Приложение откроется на `http://localhost:8502` (порт задан в `.streamlit/config.toml`)
 
