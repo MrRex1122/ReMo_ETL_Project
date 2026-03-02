@@ -76,15 +76,22 @@ class PriceETL:
         )
         return pd.to_numeric(cleaned, errors="coerce")
 
-    def _transform_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _transform_dataframe(
+        self,
+        df: pd.DataFrame,
+        *,
+        drop_empty_columns: bool = True,
+        drop_sparse_columns: bool = True,
+    ) -> pd.DataFrame:
         df = canonicalize_catalog_columns(df, create_missing=True)
 
-        empty_cols = [
-            col for col in df.columns
-            if df[col].isna().all() and col not in REQUIRED_CATALOG_COLUMNS
-        ]
-        if empty_cols:
-            df = df.drop(columns=empty_cols)
+        if drop_empty_columns:
+            empty_cols = [
+                col for col in df.columns
+                if df[col].isna().all() and col not in REQUIRED_CATALOG_COLUMNS
+            ]
+            if empty_cols:
+                df = df.drop(columns=empty_cols)
 
         df = df.dropna(how="all")
         df = df.drop_duplicates()
@@ -106,17 +113,18 @@ class PriceETL:
             if any(marker in lower_name for marker in ("цена", "количество", "вес", "объем")):
                 df = df[df[col] != 0]
 
-        if len(df) > 0:
-            missing_ratio = df.isnull().sum() / len(df)
-            cols_to_drop = [
-                col for col in missing_ratio[missing_ratio > 0.95].index.tolist()
-                if col not in REQUIRED_CATALOG_COLUMNS
-            ]
-        else:
-            cols_to_drop = []
+        if drop_sparse_columns:
+            if len(df) > 0:
+                missing_ratio = df.isnull().sum() / len(df)
+                cols_to_drop = [
+                    col for col in missing_ratio[missing_ratio > 0.95].index.tolist()
+                    if col not in REQUIRED_CATALOG_COLUMNS
+                ]
+            else:
+                cols_to_drop = []
 
-        if cols_to_drop:
-            df = df.drop(columns=cols_to_drop)
+            if cols_to_drop:
+                df = df.drop(columns=cols_to_drop)
 
         key_fields = {
             CANONICAL_ARTICLE_COLUMN: "UNKNOWN",
@@ -287,7 +295,11 @@ class PriceETL:
             start=1,
         ):
             total_in += len(chunk)
-            transformed = self._transform_dataframe(chunk)
+            transformed = self._transform_dataframe(
+                chunk,
+                drop_empty_columns=False,
+                drop_sparse_columns=False,
+            )
             total_out += len(transformed)
             transformed.to_csv(output_path, sep=";", encoding="utf-8", index=False, mode="a", header=first_chunk)
             first_chunk = False
