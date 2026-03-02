@@ -429,6 +429,10 @@ def show_corrections_table(df):
 def main():
     st.title("🔍 ReMo Matcher")
     st.markdown("*Семантическое сопоставление номенклатуры с товарной БД*")
+    build_sha = os.getenv("RAILWAY_GIT_COMMIT_SHA") or os.getenv("RAILWAY_GIT_COMMIT")
+    if build_sha:
+        st.caption(f"Build: `{build_sha[:8]}`")
+        logger.info("🚢 Build commit: %s", build_sha)
     
     # Боковая панель
     with st.sidebar:
