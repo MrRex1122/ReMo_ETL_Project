@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+import logging
 import re
 from typing import Iterable
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 CANONICAL_NAME_COLUMN = "Наименование"
 CANONICAL_ARTICLE_COLUMN = "Артикул"
@@ -32,6 +35,19 @@ def _build_dedupe_key(df: pd.DataFrame) -> pd.Series:
     name_key = df[CANONICAL_NAME_COLUMN].fillna("").astype(str).map(_normalize_text)
     return article_key.where(article_key != "", name_key)
 
+
+
+
+def _read_catalog_csv(path: Path) -> pd.DataFrame:
+    try:
+        return pd.read_csv(path, sep=';', encoding='utf-8')
+    except pd.errors.ParserError as e:
+        logger.warning(
+            "⚠️ Обнаружены битые строки в %s, повторное чтение с пропуском bad lines: %s",
+            path,
+            e,
+        )
+        return pd.read_csv(path, sep=';', encoding='utf-8', engine='python', on_bad_lines='skip')
 
 def merge_catalog_frames(frames: Iterable[pd.DataFrame]) -> pd.DataFrame:
     prepared_frames: list[pd.DataFrame] = []
@@ -76,7 +92,7 @@ def build_merged_catalog(clean_dir: Path, output_path: Path) -> Path:
     if output_path.exists() and output_path.stat().st_mtime >= latest_source_mtime:
         return output_path
 
-    frames = [pd.read_csv(path, sep=';', encoding='utf-8') for path in sources]
+    frames = [_read_catalog_csv(path) for path in sources]
     merged = merge_catalog_frames(frames)
     merged.to_csv(output_path, sep=';', index=False, encoding='utf-8')
     return output_path
