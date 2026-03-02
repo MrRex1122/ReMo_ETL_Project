@@ -27,7 +27,7 @@ AIzaSyD_U_K1Z-J_Z_K1Z-J_Z_K1Z_7_K1Z...
 
 ```bash
 # Переходим в папку проекта
-cd "d:\Python Gemini Tool\ReMo_ETL_Project"
+cd "<путь_к_проекту>\\ReMo_ETL_Project"
 
 # Создаем виртуальное окружение (опционально, но рекомендуется)
 python -m venv venv
@@ -97,7 +97,7 @@ python -c "import pandas, streamlit; from google import genai; print('✓ All pa
 Убедиться что товарная база находится в правильном месте:
 
 ```powershell
-Test-Path "D:\Data\Downloads\upload\price_clean.csv"
+Test-Path "<путь_к_данным>\\price_clean.csv"
 ```
 
 Вывод должен быть `True`.
@@ -105,7 +105,7 @@ Test-Path "D:\Data\Downloads\upload\price_clean.csv"
 Если БД находится в другом месте, задайте путь через переменную:
 
 ```powershell
-$env:REMO_DB_CSV = "D:\MyData\price_clean.csv"
+$env:REMO_DB_CSV = "<путь_к_данным>\\price_clean.csv"
 ```
 
 Если файл не найден - запустить ETL:
@@ -126,13 +126,13 @@ streamlit run app.py
 ```
   You can now view your Streamlit app in your browser.
 
-  Local URL: http://localhost:8502
-  Network URL: http://192.168.1.100:8502
+  Local URL: <local-url>
+  Network URL: <network-url>
 
   For better performance, install Watchdog.
 ```
 
-**Окно браузера должно открыться автоматически на http://localhost:8502**
+**Окно браузера должно открыться автоматически по локальному адресу из вывода Streamlit**
 
 Если браузер не открылся - скопировать URL в адресную строку вручную.
 
@@ -231,7 +231,7 @@ python etl_pipeline.py
 Или указать явный путь:
 
 ```powershell
-$env:REMO_DB_CSV = "D:\MyData\price_clean.csv"
+$env:REMO_DB_CSV = "<путь_к_данным>\\price_clean.csv"
 ```
 
 ### 4. Ошибка подключения к Gemini
@@ -252,7 +252,7 @@ $env:REMO_DB_CSV = "D:\MyData\price_clean.csv"
 - [ ] Python 3.8+ установлен (`python --version`)
 - [ ] Создан файл `.streamlit/secrets.toml` с API ключом
 - [ ] Зависимости установлены (`pip list | grep streamlit`)
-- [ ] Файл `price_clean.csv` доступен по пути `REMO_DB_CSV` или по умолчанию в `D:\Data\Downloads\upload\`
+- [ ] Файл `price_clean.csv` доступен по пути `REMO_DB_CSV` или в настроенной папке данных проекта
 - [ ] Приложение запускается без ошибок (`streamlit run app.py`)
 - [ ] Можно загрузить и обработать тестовый файл
 

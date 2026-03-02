@@ -68,7 +68,7 @@ streamlit run app.py
 ```
 > Для загрузки очень больших CSV (до нескольких ГБ) в проекте выставлены повышенные лимиты Streamlit в `.streamlit/config.toml` и Docker CMD (`maxUploadSize/maxMessageSize`).
 
-Приложение откроется на `http://localhost:8502` (порт задан в `.streamlit/config.toml`)
+Приложение откроется на локальном URL, который покажет Streamlit в консоли (порт по умолчанию задается в `.streamlit/config.toml`)
 
 
 ### 4.1 Google Drive синхронизация (одна преднастроенная папка)
@@ -86,7 +86,7 @@ GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON = "{...json...}"
 ### 5. Batch-режим (обработка набора файлов)
 
 ```bash
-python batch_process.py --input-dir "D:\\Data\\Downloads\\upload" --output-dir "batch_output"
+python batch_process.py --input-dir "<input-dir>" --output-dir "batch_output"
 ```
 
 Скрипт обработает все `.xlsx/.xls` в папке, создаст выходные файлы и два отчёта:

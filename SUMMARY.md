@@ -82,7 +82,7 @@
    >>> pip install -r requirements.txt
    >>> streamlit run app.py
    
-   ✅ Браузер откроется на http://localhost:8501
+   ✅ Браузер откроется на локальном URL Streamlit
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 💡 ОСНОВНЫЕ ВОЗМОЖНОСТИ
@@ -237,7 +237,7 @@ A: Есть локальный кэш (matcher_cache.db) с результата
 ☐ Получен API ключ Gemini
 ☐ Заполнен файл .streamlit/secrets.toml
 ☐ Установлены зависимости (pip install -r requirements.txt)
-☐ Файл price_clean.csv находится в D:\Data\Downloads\upload\
+☐ Файл price_clean.csv находится в настроенной папке данных проекта
 ☐ Приложение запускается (streamlit run app.py)
 ☐ Загружается тестовый файл Excel без ошибок
 
@@ -247,7 +247,7 @@ A: Есть локальный кэш (matcher_cache.db) с результата
                    
                    Запустите: streamlit run app.py
                    
-                   Откроется браузер на http://localhost:8501
+                   Откроется браузер на локальном URL Streamlit
 
 ═══════════════════════════════════════════════════════════════════════════════
 

@@ -28,7 +28,7 @@ DEFAULT_MATCHER_RETRIEVAL_CANDIDATES = 3000
 
 def _normalize_path(raw: str | Path) -> Path:
     text = str(raw).strip()
-    # На Linux/macOS pathlib не считает путь вида D:\... абсолютным.
+    # На Linux/macOS pathlib не считает Windows-путь с буквой диска абсолютным.
     if re.match(r"^[A-Za-z]:[\\/]", text) or text.startswith("\\\\"):
         return Path(text)
 
