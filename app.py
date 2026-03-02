@@ -367,7 +367,7 @@ def sync_catalogs_from_google_drive(folder_url_or_id: str, service_account_json:
     return saved_paths
 
 
-def _run_etl_for_raw_file(raw_path: Path, converted_path: Path, clean_path: Path) -> None:
+def _run_etl_for_raw_file(raw_path: Path, converted_path: Path, clean_path: Path) -> Path | None:
     """Запустить ETL для raw файла с memory-safe режимом для крупных CSV."""
     threshold_mb = int(os.getenv("REMO_CHUNKED_ETL_THRESHOLD_MB", "512"))
     chunksize = int(os.getenv("REMO_CHUNKED_ETL_CHUNKSIZE", "50000"))
@@ -381,10 +381,30 @@ def _run_etl_for_raw_file(raw_path: Path, converted_path: Path, clean_path: Path
             chunksize,
         )
         PriceETL(str(raw_path), str(clean_path)).run_chunked(chunksize=chunksize)
-        return
+        return None
 
     convert_csv(raw_path, converted_path)
     PriceETL(str(converted_path), str(clean_path)).run()
+    return converted_path
+
+
+def _prune_orphan_files(directory: Path, pattern: str, keep_paths: set[Path]) -> list[Path]:
+    """Удалить файлы, которые больше не относятся к актуальному набору источников."""
+    if not directory.exists():
+        return []
+
+    removed: list[Path] = []
+    normalized_keep = {path.resolve() for path in keep_paths}
+    for candidate in directory.glob(pattern):
+        try:
+            if candidate.resolve() in normalized_keep:
+                continue
+        except FileNotFoundError:
+            continue
+        if candidate.is_file():
+            candidate.unlink()
+            removed.append(candidate)
+    return removed
 
 
 def process_raw_catalogs_with_etl() -> list[Path]:
@@ -402,6 +422,8 @@ def process_raw_catalogs_with_etl() -> list[Path]:
     clean_dir.mkdir(parents=True, exist_ok=True)
 
     saved_paths: list[Path] = []
+    active_converted_paths: set[Path] = set()
+    active_clean_paths: set[Path] = set()
     total_files = len(raw_files)
     logger.info("🚀 Этап 2: старт ETL для raw CSV. Файлов: %s", total_files)
     for idx, raw_path in enumerate(raw_files, start=1):
@@ -411,9 +433,19 @@ def process_raw_catalogs_with_etl() -> list[Path]:
         clean_path = clean_dir / f"{source_stem}_clean.csv"
 
         logger.info("🧩 ETL файл %s/%s: %s", idx, total_files, source_name)
-        _run_etl_for_raw_file(raw_path, converted_path, clean_path)
+        used_converted_path = _run_etl_for_raw_file(raw_path, converted_path, clean_path)
         saved_paths.append(clean_path)
+        active_clean_paths.add(clean_path)
+        if used_converted_path is not None:
+            active_converted_paths.add(used_converted_path)
         logger.info("✅ ETL готов: %s (%s/%s)", clean_path.name, idx, total_files)
+
+    removed_converted = _prune_orphan_files(converted_dir, "*_converted.csv", active_converted_paths)
+    removed_clean = _prune_orphan_files(clean_dir, "*_clean.csv", active_clean_paths)
+    if removed_converted:
+        logger.info("🧹 Удалены устаревшие converted-файлы: %s", len(removed_converted))
+    if removed_clean:
+        logger.info("🧹 Удалены устаревшие clean-файлы: %s", len(removed_clean))
 
     logger.info("✅ Этап 2 завершен: ETL обработан для %s файлов", len(saved_paths))
     return saved_paths

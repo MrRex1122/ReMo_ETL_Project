@@ -145,6 +145,25 @@ def _download_csv_file(service, file_info: DriveCsvFile, destination: Path) -> P
     return destination
 
 
+def _prune_orphan_destination_csvs(destination_dir: Path, keep_paths: list[Path]) -> list[Path]:
+    destination_dir = Path(destination_dir)
+    if not destination_dir.exists():
+        return []
+
+    keep_resolved = {path.resolve() for path in keep_paths}
+    removed: list[Path] = []
+    for candidate in destination_dir.glob("*.csv"):
+        try:
+            if candidate.resolve() in keep_resolved:
+                continue
+        except FileNotFoundError:
+            continue
+        if candidate.is_file():
+            candidate.unlink()
+            removed.append(candidate)
+    return removed
+
+
 def check_drive_folder_access(*, folder_url_or_id: str, service_account_info: dict) -> DriveAccessReport:
     folder_id = extract_drive_folder_id(folder_url_or_id)
     logger.info("🔎 Проверка доступа к Google Drive папке: %s", folder_id)
@@ -181,6 +200,10 @@ def sync_drive_folder_csvs(
         path = _download_csv_file(service, file_info, destination_dir / safe_name)
         downloaded_paths.append(path)
         logger.info("⬇️ Скачан CSV из Drive: %s (%s/%s)", path.name, idx, total_files)
+
+    removed_paths = _prune_orphan_destination_csvs(destination_dir, downloaded_paths)
+    if removed_paths:
+        logger.info("🧹 Удалены устаревшие raw-файлы после sync: %s", len(removed_paths))
 
     logger.info("✅ Синхронизация из Google Drive завершена. Файлов: %s", len(downloaded_paths))
     return downloaded_paths

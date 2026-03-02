@@ -112,3 +112,88 @@ def test_process_raw_catalogs_with_etl_uses_chunked_for_large_files(monkeypatch,
     assert [p.name for p in result] == ["big_clean.csv"]
     assert convert_called["value"] is False
     assert calls == [("run_chunked", "big.csv", "big_clean.csv", 123)]
+
+
+def test_process_raw_catalogs_with_etl_prunes_orphan_processed_files(monkeypatch, tmp_path):
+    storage = tmp_path / "storage"
+    raw_dir = storage / "raw"
+    converted_dir = storage / "converted"
+    clean_dir = storage / "clean"
+    raw_dir.mkdir(parents=True)
+    converted_dir.mkdir(parents=True)
+    clean_dir.mkdir(parents=True)
+
+    (raw_dir / "a.csv").write_text("x", encoding="utf-8")
+    (converted_dir / "a_converted.csv").write_text("old-current", encoding="utf-8")
+    (converted_dir / "stale_converted.csv").write_text("stale", encoding="utf-8")
+    (clean_dir / "a_clean.csv").write_text("old-current", encoding="utf-8")
+    (clean_dir / "stale_clean.csv").write_text("stale", encoding="utf-8")
+
+    monkeypatch.setattr(app, "get_upload_dir", lambda: storage)
+
+    def fake_convert_csv(src, dst):
+        Path(dst).write_text("converted", encoding="utf-8")
+        return Path(dst)
+
+    monkeypatch.setattr(app, "convert_csv", fake_convert_csv)
+
+    class FakePriceETL:
+        def __init__(self, inp, out):
+            self.out = Path(out)
+
+        def run(self):
+            self.out.write_text("clean", encoding="utf-8")
+            return self
+
+    monkeypatch.setattr(app, "PriceETL", FakePriceETL)
+
+    result = app.process_raw_catalogs_with_etl()
+
+    assert [p.name for p in result] == ["a_clean.csv"]
+    assert (converted_dir / "a_converted.csv").exists()
+    assert not (converted_dir / "stale_converted.csv").exists()
+    assert (clean_dir / "a_clean.csv").exists()
+    assert not (clean_dir / "stale_clean.csv").exists()
+
+
+def test_process_raw_catalogs_with_etl_removes_stale_converted_for_chunked_file(monkeypatch, tmp_path):
+    storage = tmp_path / "storage"
+    raw_dir = storage / "raw"
+    converted_dir = storage / "converted"
+    raw_dir.mkdir(parents=True)
+    converted_dir.mkdir(parents=True)
+    big = raw_dir / "big.csv"
+    big.write_bytes(b"0" * 1024)
+    stale_converted = converted_dir / "big_converted.csv"
+    stale_converted.write_text("stale", encoding="utf-8")
+
+    monkeypatch.setattr(app, "get_upload_dir", lambda: storage)
+    monkeypatch.setenv("REMO_CHUNKED_ETL_THRESHOLD_MB", "1")
+    monkeypatch.setenv("REMO_CHUNKED_ETL_CHUNKSIZE", "123")
+
+    class FakePriceETL:
+        def __init__(self, inp, out):
+            self.out = Path(out)
+
+        def run_chunked(self, *, chunksize):
+            self.out.parent.mkdir(parents=True, exist_ok=True)
+            self.out.write_text("clean", encoding="utf-8")
+            return self
+
+    monkeypatch.setattr(app, "PriceETL", FakePriceETL)
+
+    original_stat = Path.stat
+
+    def fake_stat(self, *args, **kwargs):
+        result = original_stat(self, *args, **kwargs)
+        if self.name == "big.csv":
+            class StatProxy:
+                st_size = 2 * 1024 * 1024
+            return StatProxy()
+        return result
+
+    monkeypatch.setattr(Path, "stat", fake_stat)
+
+    app.process_raw_catalogs_with_etl()
+
+    assert not stale_converted.exists()
