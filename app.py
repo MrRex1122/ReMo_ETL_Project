@@ -578,7 +578,6 @@ def main():
             "Режим сопоставления",
             options=mode_options,
             index=mode_options.index(current_mode),
-            key="matcher_mode_select",
             format_func=lambda value: "Точный матч" if value == "exact" else "Аналог/замена",
             help=(
                 "exact: только строгие совпадения по типу товара. "
