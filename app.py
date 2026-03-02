@@ -364,6 +364,26 @@ def sync_catalogs_from_google_drive(folder_url_or_id: str, service_account_json:
     return saved_paths
 
 
+def _run_etl_for_raw_file(raw_path: Path, converted_path: Path, clean_path: Path) -> None:
+    """Запустить ETL для raw файла с memory-safe режимом для крупных CSV."""
+    threshold_mb = int(os.getenv("REMO_CHUNKED_ETL_THRESHOLD_MB", "512"))
+    chunksize = int(os.getenv("REMO_CHUNKED_ETL_CHUNKSIZE", "50000"))
+    file_mb = raw_path.stat().st_size / (1024 * 1024)
+
+    if file_mb >= threshold_mb:
+        logger.info(
+            "🧠 Большой CSV (%.2f MB) — запускаем chunked ETL (threshold=%s MB, chunksize=%s)",
+            file_mb,
+            threshold_mb,
+            chunksize,
+        )
+        PriceETL(str(raw_path), str(clean_path)).run_chunked(chunksize=chunksize)
+        return
+
+    convert_csv(raw_path, converted_path)
+    PriceETL(str(converted_path), str(clean_path)).run()
+
+
 def process_raw_catalogs_with_etl() -> list[Path]:
     """Обработать уже скачанные raw CSV в отдельный этап ETL."""
     storage_dir = get_upload_dir()
@@ -388,8 +408,7 @@ def process_raw_catalogs_with_etl() -> list[Path]:
         clean_path = clean_dir / f"{source_stem}_clean.csv"
 
         logger.info("🧩 ETL файл %s/%s: %s", idx, total_files, source_name)
-        convert_csv(raw_path, converted_path)
-        PriceETL(str(converted_path), str(clean_path)).run()
+        _run_etl_for_raw_file(raw_path, converted_path, clean_path)
         saved_paths.append(clean_path)
         logger.info("✅ ETL готов: %s (%s/%s)", clean_path.name, idx, total_files)
 

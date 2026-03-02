@@ -4,6 +4,7 @@ import argparse
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import Iterator
 
 import pandas as pd
 
@@ -31,12 +32,32 @@ class PriceETL:
         self.df: pd.DataFrame | None = None
         self.report: dict[str, int] = {}
 
+    @staticmethod
+    def _detect_csv_params(input_path: str | Path) -> tuple[str, str]:
+        supported_encodings = ("utf-8-sig", "utf-8", "cp1251")
+        supported_separators = (";", ",", "	")
+        last_error: Exception | None = None
+
+        for sep in supported_separators:
+            for enc in supported_encodings:
+                try:
+                    probe = pd.read_csv(input_path, sep=sep, encoding=enc, decimal=".", low_memory=False, nrows=1000)
+                    if probe.shape[1] <= 1:
+                        continue
+                    return sep, enc
+                except (UnicodeDecodeError, pd.errors.ParserError, ValueError) as e:
+                    last_error = e
+
+        raise ValueError(f"Не удалось определить формат CSV: {input_path}. Ошибка: {last_error}")
+
     def extract(self) -> "PriceETL":
         logger.info(f"📥 Загрузка данных из {self.input_path}")
+        sep, enc = self._detect_csv_params(self.input_path)
+        logger.info(f"🧭 Определен формат CSV: sep={repr(sep)} encoding={enc}")
         self.df = pd.read_csv(
             self.input_path,
-            sep=";",
-            encoding="utf-8",
+            sep=sep,
+            encoding=enc,
             decimal=".",
             low_memory=False,
         )
@@ -54,6 +75,63 @@ class PriceETL:
             .str.replace(r"[^\d\.\-]", "", regex=True)
         )
         return pd.to_numeric(cleaned, errors="coerce")
+
+    def _transform_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = canonicalize_catalog_columns(df, create_missing=True)
+
+        empty_cols = [
+            col for col in df.columns
+            if df[col].isna().all() and col not in REQUIRED_CATALOG_COLUMNS
+        ]
+        if empty_cols:
+            df = df.drop(columns=empty_cols)
+
+        df = df.dropna(how="all")
+        df = df.drop_duplicates()
+
+        string_cols = df.select_dtypes(include=["object"]).columns
+        for col in string_cols:
+            df[col] = df[col].map(lambda value: value.strip() if isinstance(value, str) else value)
+
+        for col in ("Единица измерения", "Название класса", "Страна"):
+            if col in df.columns:
+                df[col] = df[col].astype(str).str.title()
+
+        if CANONICAL_PRICE_COLUMN in df.columns:
+            df[CANONICAL_PRICE_COLUMN] = self._normalize_price_column(df[CANONICAL_PRICE_COLUMN])
+
+        numeric_cols = df.select_dtypes(include=["float64", "int64"]).columns
+        for col in numeric_cols:
+            lower_name = col.lower()
+            if any(marker in lower_name for marker in ("цена", "количество", "вес", "объем")):
+                df = df[df[col] != 0]
+
+        if len(df) > 0:
+            missing_ratio = df.isnull().sum() / len(df)
+            cols_to_drop = [
+                col for col in missing_ratio[missing_ratio > 0.95].index.tolist()
+                if col not in REQUIRED_CATALOG_COLUMNS
+            ]
+        else:
+            cols_to_drop = []
+
+        if cols_to_drop:
+            df = df.drop(columns=cols_to_drop)
+
+        key_fields = {
+            CANONICAL_ARTICLE_COLUMN: "UNKNOWN",
+            "Единица измерения": "шт",
+            "Ставка НДС": 20,
+            "Страна": "РФ",
+        }
+        for col, default_val in key_fields.items():
+            if col not in df.columns:
+                continue
+            if df[col].dtype == object:
+                df[col] = df[col].replace(r"^\s*$", pd.NA, regex=True)
+            df[col] = df[col].fillna(default_val)
+
+        return df
 
     def transform(self) -> "PriceETL":
         if self.df is None:
@@ -185,6 +263,46 @@ class PriceETL:
     def run(self) -> pd.DataFrame:
         self.extract().transform().load().generate_report()
         return self.df
+
+    def run_chunked(self, *, chunksize: int = 50000) -> pd.DataFrame:
+        """Memory-safe ETL for very large CSV by processing chunks."""
+        sep, enc = self._detect_csv_params(self.input_path)
+        output_path = Path(self.output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        total_in = 0
+        total_out = 0
+        first_chunk = True
+
+        logger.info("🚚 Chunked ETL старт: file=%s chunksize=%s", self.input_path, chunksize)
+        for chunk_idx, chunk in enumerate(
+            pd.read_csv(
+                self.input_path,
+                sep=sep,
+                encoding=enc,
+                decimal=".",
+                low_memory=False,
+                chunksize=chunksize,
+            ),
+            start=1,
+        ):
+            total_in += len(chunk)
+            transformed = self._transform_dataframe(chunk)
+            total_out += len(transformed)
+            transformed.to_csv(output_path, sep=";", encoding="utf-8", index=False, mode="a", header=first_chunk)
+            first_chunk = False
+            logger.info(
+                "📦 Chunk %s: in=%s out=%s total_out=%s",
+                chunk_idx,
+                len(chunk),
+                len(transformed),
+                total_out,
+            )
+
+        self.report["initial_rows"] = total_in
+        self.report["final_rows"] = total_out
+        logger.info("✅ Chunked ETL завершен: in=%s out=%s", total_in, total_out)
+        return pd.DataFrame()
 
 
 if __name__ == "__main__":
