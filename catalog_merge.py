@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import csv
 import json
 import logging
+import os
 from pathlib import Path
 import re
 import sqlite3
+import tempfile
+import time
 from typing import Iterable, Iterator
+import uuid
 
 import pandas as pd
 
@@ -18,12 +23,20 @@ CANONICAL_NAME_COLUMN = "Наименование"
 CANONICAL_ARTICLE_COLUMN = "Артикул"
 CANONICAL_PRICE_COLUMN = "Цена розничная"
 DEFAULT_MERGE_CHUNKSIZE = 50000
+DEFAULT_MERGE_LOCK_TIMEOUT_SECONDS = 10 * 60
+DEFAULT_MERGE_LOCK_STALE_SECONDS = 30 * 60
 
 
 def _normalize_text(text: str) -> str:
     lowered = str(text or "").lower().replace("ё", "е")
     lowered = re.sub(r"[^a-zа-я0-9]+", " ", lowered)
     return " ".join(lowered.split())
+
+
+def _sanitize_temp_stem(value: str) -> str:
+    sanitized = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value or "").strip())
+    sanitized = sanitized.strip("._")
+    return sanitized or "catalog_merge"
 
 
 def _catalog_sources(clean_dir: Path, output_path: Path) -> list[Path]:
@@ -110,7 +123,70 @@ def _prepare_merge_frame(frame: pd.DataFrame, source_order: int) -> pd.DataFrame
 
 
 def _sqlite_temp_path(output_path: Path) -> Path:
-    return output_path.with_suffix(f"{output_path.suffix}.merge.sqlite3")
+    safe_stem = _sanitize_temp_stem(output_path.stem)
+    return Path(tempfile.gettempdir()) / f"{safe_stem}_{os.getpid()}_{uuid.uuid4().hex}.merge.sqlite3"
+
+
+def _output_part_path(output_path: Path) -> Path:
+    return output_path.with_name(f"{output_path.name}.{os.getpid()}.{uuid.uuid4().hex}.part")
+
+
+@contextmanager
+def _merge_build_lock(
+    output_path: Path,
+    *,
+    timeout_seconds: int = DEFAULT_MERGE_LOCK_TIMEOUT_SECONDS,
+    stale_after_seconds: int = DEFAULT_MERGE_LOCK_STALE_SECONDS,
+):
+    lock_path = output_path.with_suffix(f"{output_path.suffix}.lock")
+    started_at = time.time()
+
+    while True:
+        try:
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(f"{os.getpid()}\n{time.time()}\n")
+            logger.info("🔒 Merge lock acquired: %s", lock_path)
+            break
+        except FileExistsError:
+            try:
+                age_seconds = max(0.0, time.time() - lock_path.stat().st_mtime)
+            except FileNotFoundError:
+                continue
+
+            if age_seconds > stale_after_seconds:
+                logger.warning(
+                    "🧹 Removing stale merge lock: %s age_seconds=%.1f",
+                    lock_path,
+                    age_seconds,
+                )
+                try:
+                    lock_path.unlink()
+                except FileNotFoundError:
+                    pass
+                continue
+
+            waited_seconds = max(0.0, time.time() - started_at)
+            if waited_seconds > timeout_seconds:
+                raise TimeoutError(
+                    f"Не удалось дождаться merge lock {lock_path} за {timeout_seconds} секунд"
+                )
+
+            logger.info(
+                "⏳ Waiting for merge lock: %s waited_seconds=%.1f",
+                lock_path,
+                waited_seconds,
+            )
+            time.sleep(1.0)
+
+    try:
+        yield
+    finally:
+        try:
+            lock_path.unlink()
+            logger.info("🔓 Merge lock released: %s", lock_path)
+        except FileNotFoundError:
+            pass
 
 
 def _cleanup_sqlite_sidecars(db_path: Path) -> None:
@@ -123,6 +199,8 @@ def _init_merge_db(db_path: Path) -> sqlite3.Connection:
     if db_path.exists():
         db_path.unlink()
 
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    logger.info("🗄️ Initializing merge temp DB: %s", db_path)
     connection = sqlite3.connect(db_path)
     connection.execute("PRAGMA journal_mode=DELETE")
     connection.execute("PRAGMA synchronous=NORMAL")
@@ -239,10 +317,11 @@ def _write_merged_catalog_from_db(
     *,
     columns: list[str],
 ) -> None:
-    part_path = output_path.with_suffix(f"{output_path.suffix}.part")
+    part_path = _output_part_path(output_path)
     if part_path.exists():
         part_path.unlink()
 
+    logger.info("📝 Writing merged catalog from temp DB: output=%s part=%s", output_path, part_path)
     try:
         with part_path.open("w", encoding="utf-8", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=columns, delimiter=";")
@@ -299,72 +378,79 @@ def build_merged_catalog(clean_dir: Path, output_path: Path) -> Path:
         logger.info("♻️ Reusing up-to-date merged catalog: %s", output_path)
         return output_path
 
-    db_path = _sqlite_temp_path(output_path)
-    connection = _init_merge_db(db_path)
-    all_columns: list[str] = []
-    seen_columns: set[str] = set()
-    total_chunks = 0
-    total_rows_read = 0
+    with _merge_build_lock(output_path):
+        if output_path.exists() and output_path.stat().st_mtime >= latest_source_mtime:
+            logger.info("♻️ Merge completed by another worker while waiting: %s", output_path)
+            return output_path
 
-    try:
-        for source_order, source_path in enumerate(sources):
-            logger.info("📥 Merge source start: #%s file=%s", source_order + 1, source_path)
-            header_df = _read_catalog_header(source_path)
-            source_columns = list(header_df.columns)
-            for required_column in (CANONICAL_NAME_COLUMN, CANONICAL_ARTICLE_COLUMN, CANONICAL_PRICE_COLUMN):
-                if required_column not in source_columns:
-                    source_columns.append(required_column)
-            for column in source_columns:
-                if column in seen_columns:
-                    continue
-                seen_columns.add(column)
-                all_columns.append(column)
+        db_path = _sqlite_temp_path(output_path)
+        connection: sqlite3.Connection | None = None
+        all_columns: list[str] = []
+        seen_columns: set[str] = set()
+        total_chunks = 0
+        total_rows_read = 0
 
-            source_chunks = 0
-            source_rows = 0
-            for chunk in _iter_catalog_chunks(source_path, chunksize=DEFAULT_MERGE_CHUNKSIZE):
-                source_chunks += 1
-                total_chunks += 1
-                source_rows += len(chunk)
-                total_rows_read += len(chunk)
-                payload_columns = list(chunk.columns)
+        try:
+            connection = _init_merge_db(db_path)
+            for source_order, source_path in enumerate(sources):
+                logger.info("📥 Merge source start: #%s file=%s", source_order + 1, source_path)
+                header_df = _read_catalog_header(source_path)
+                source_columns = list(header_df.columns)
                 for required_column in (CANONICAL_NAME_COLUMN, CANONICAL_ARTICLE_COLUMN, CANONICAL_PRICE_COLUMN):
-                    if required_column not in payload_columns:
-                        payload_columns.append(required_column)
-                _upsert_chunk_rows(
-                    connection,
-                    chunk,
-                    source_order=source_order,
-                    payload_columns=payload_columns,
-                )
-                if source_chunks == 1 or source_chunks % 10 == 0:
-                    logger.info(
-                        "📥 Merge source progress: file=%s chunks=%s rows=%s total_rows=%s",
-                        source_path.name,
-                        source_chunks,
-                        source_rows,
-                        total_rows_read,
-                    )
-            logger.info(
-                "✅ Merge source complete: file=%s chunks=%s rows=%s columns=%s",
-                source_path.name,
-                source_chunks,
-                source_rows,
-                len(source_columns),
-            )
+                    if required_column not in source_columns:
+                        source_columns.append(required_column)
+                for column in source_columns:
+                    if column in seen_columns:
+                        continue
+                    seen_columns.add(column)
+                    all_columns.append(column)
 
-        _write_merged_catalog_from_db(connection, output_path, columns=all_columns)
-        final_rows = connection.execute("SELECT COUNT(*) FROM merged_catalog").fetchone()[0]
-        logger.info(
-            "✅ Merge catalog complete: output=%s rows=%s columns=%s total_rows_read=%s total_chunks=%s size_bytes=%s",
-            output_path,
-            final_rows,
-            len(all_columns),
-            total_rows_read,
-            total_chunks,
-            output_path.stat().st_size,
-        )
-        return output_path
-    finally:
-        connection.close()
-        _cleanup_sqlite_sidecars(db_path)
+                source_chunks = 0
+                source_rows = 0
+                for chunk in _iter_catalog_chunks(source_path, chunksize=DEFAULT_MERGE_CHUNKSIZE):
+                    source_chunks += 1
+                    total_chunks += 1
+                    source_rows += len(chunk)
+                    total_rows_read += len(chunk)
+                    payload_columns = list(chunk.columns)
+                    for required_column in (CANONICAL_NAME_COLUMN, CANONICAL_ARTICLE_COLUMN, CANONICAL_PRICE_COLUMN):
+                        if required_column not in payload_columns:
+                            payload_columns.append(required_column)
+                    _upsert_chunk_rows(
+                        connection,
+                        chunk,
+                        source_order=source_order,
+                        payload_columns=payload_columns,
+                    )
+                    if source_chunks == 1 or source_chunks % 10 == 0:
+                        logger.info(
+                            "📥 Merge source progress: file=%s chunks=%s rows=%s total_rows=%s",
+                            source_path.name,
+                            source_chunks,
+                            source_rows,
+                            total_rows_read,
+                        )
+                logger.info(
+                    "✅ Merge source complete: file=%s chunks=%s rows=%s columns=%s",
+                    source_path.name,
+                    source_chunks,
+                    source_rows,
+                    len(source_columns),
+                )
+
+            _write_merged_catalog_from_db(connection, output_path, columns=all_columns)
+            final_rows = connection.execute("SELECT COUNT(*) FROM merged_catalog").fetchone()[0]
+            logger.info(
+                "✅ Merge catalog complete: output=%s rows=%s columns=%s total_rows_read=%s total_chunks=%s size_bytes=%s",
+                output_path,
+                final_rows,
+                len(all_columns),
+                total_rows_read,
+                total_chunks,
+                output_path.stat().st_size,
+            )
+            return output_path
+        finally:
+            if connection is not None:
+                connection.close()
+            _cleanup_sqlite_sidecars(db_path)

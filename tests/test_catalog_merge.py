@@ -47,6 +47,8 @@ class CatalogMergeTests(unittest.TestCase):
             self.assertTrue(output.exists())
             merged_df = pd.read_csv(output, sep=';', encoding='utf-8')
             self.assertEqual(len(merged_df), 2)
+            self.assertFalse((root / "price_clean_merged.csv.lock").exists())
+            self.assertEqual(list(root.glob("price_clean_merged.csv.*.part")), [])
 
     def test_build_merged_catalog_skips_malformed_rows(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
