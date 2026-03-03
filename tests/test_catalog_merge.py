@@ -93,6 +93,24 @@ class CatalogMergeTests(unittest.TestCase):
             self.assertEqual(float(merged_df.iloc[0][CANONICAL_PRICE_COLUMN]), 150.0)
             self.assertEqual(merged_df.iloc[0][extra_column], "PDU")
 
+    def test_build_merged_catalog_replaces_orphan_lock_from_dead_pid(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            output = root / "price_clean_merged.csv"
+            lock_path = root / "price_clean_merged.csv.lock"
+            (root / "price14_clean.csv").write_text(
+                f"{CANONICAL_NAME_COLUMN};{CANONICAL_ARTICLE_COLUMN};{CANONICAL_PRICE_COLUMN}\n"
+                "Кабель;A-1;100\n",
+                encoding="utf-8",
+            )
+            lock_path.write_text("999999\n0\n", encoding="utf-8")
+
+            resolved = build_merged_catalog(root, output)
+
+            self.assertEqual(resolved, output)
+            self.assertTrue(output.exists())
+            self.assertFalse(lock_path.exists())
+
     def test_get_catalog_readiness_reports_missing_stale_and_ready(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

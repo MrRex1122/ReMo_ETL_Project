@@ -25,6 +25,8 @@ CANONICAL_ARTICLE_COLUMN = "Артикул"
 CANONICAL_PRICE_COLUMN = "Цена розничная"
 MERGED_CATALOG_FILENAME = "price_clean_merged.csv"
 DEFAULT_MERGE_CHUNKSIZE = 50000
+DEFAULT_MERGE_DB_BATCH_SIZE = 1000
+DEFAULT_MERGE_PROGRESS_ROWS = 25000
 DEFAULT_MERGE_LOCK_TIMEOUT_SECONDS = 10 * 60
 DEFAULT_MERGE_LOCK_STALE_SECONDS = 30 * 60
 
@@ -41,6 +43,19 @@ class CatalogReadiness:
     merged_mtime: float | None
 
 
+def _configure_csv_field_limit() -> None:
+    limit = 2**31 - 1
+    while limit > 1024:
+        try:
+            csv.field_size_limit(limit)
+            return
+        except OverflowError:
+            limit //= 10
+
+
+_configure_csv_field_limit()
+
+
 def _normalize_text(text: str) -> str:
     lowered = str(text or "").lower().replace("ё", "е")
     lowered = re.sub(r"[^a-zа-я0-9]+", " ", lowered)
@@ -51,6 +66,88 @@ def _sanitize_temp_stem(value: str) -> str:
     sanitized = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value or "").strip())
     sanitized = sanitized.strip("._")
     return sanitized or "catalog_merge"
+
+
+def _read_env_int(name: str, default: int, *, minimum: int = 1) -> int:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    try:
+        return max(minimum, int(raw_value))
+    except (TypeError, ValueError):
+        logger.warning("Invalid integer env %s=%r, using default=%s", name, raw_value, default)
+        return default
+
+
+def _current_rss_mb() -> float | None:
+    status_path = Path("/proc/self/status")
+    if not status_path.exists():
+        return None
+
+    try:
+        for line in status_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if line.startswith("VmRSS:"):
+                parts = line.split()
+                if len(parts) >= 2:
+                    return int(parts[1]) / 1024.0
+    except OSError:
+        return None
+    return None
+
+
+def _enforce_merge_memory_budget(*, context: str) -> None:
+    limit_mb = _read_env_int("REMO_MERGE_MAX_RSS_MB", 0, minimum=0)
+    if limit_mb <= 0:
+        return
+
+    rss_mb = _current_rss_mb()
+    if rss_mb is None:
+        return
+
+    if rss_mb > limit_mb:
+        raise MemoryError(
+            f"Merge memory budget exceeded during {context}: rss_mb={rss_mb:.1f} limit_mb={limit_mb}"
+        )
+
+
+def _touch_lock_file(lock_path: Path | None) -> None:
+    if lock_path is None:
+        return
+    try:
+        os.utime(lock_path, None)
+    except FileNotFoundError:
+        pass
+
+
+def _read_lock_pid(lock_path: Path) -> int | None:
+    try:
+        with lock_path.open("r", encoding="utf-8") as handle:
+            first_line = handle.readline().strip()
+    except OSError:
+        return None
+
+    if not first_line:
+        return None
+
+    try:
+        return int(first_line)
+    except ValueError:
+        return None
+
+
+def _is_process_alive(pid: int | None) -> bool:
+    if pid is None or pid <= 0:
+        return False
+
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
 
 
 def get_merged_catalog_path(clean_dir: Path) -> Path:
@@ -252,6 +349,74 @@ def _read_catalog_header(path: Path) -> pd.DataFrame:
         )
 
 
+def _read_catalog_columns(path: Path) -> list[str]:
+    with path.open("r", encoding="utf-8-sig", errors="replace", newline="") as handle:
+        reader = csv.reader(handle, delimiter=";")
+        header = next(reader, [])
+    return [column for column in header if column]
+
+
+def _has_numeric_value(value) -> bool:
+    if value is None:
+        return False
+
+    text = str(value).strip()
+    if not text:
+        return False
+
+    normalized = text.replace("\xa0", "").replace(" ", "").replace(",", ".")
+    try:
+        float(normalized)
+    except ValueError:
+        return False
+    return True
+
+
+def _build_upsert_record(row: dict[str, object], *, source_order: int, payload_columns: list[str]) -> tuple[str, int, int, int, str]:
+    article_value = str(row.get(CANONICAL_ARTICLE_COLUMN) or "").strip()
+    name_value = str(row.get(CANONICAL_NAME_COLUMN) or "").strip()
+    dedupe_key = article_value.lower() if article_value else _normalize_text(name_value)
+    payload = {column: _json_safe_value(row.get(column)) for column in payload_columns}
+    return (
+        dedupe_key,
+        int(bool(article_value)),
+        int(_has_numeric_value(row.get(CANONICAL_PRICE_COLUMN))),
+        source_order,
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+    )
+
+
+def _iter_catalog_records(
+    path: Path,
+    *,
+    source_order: int,
+    payload_columns: list[str],
+) -> Iterator[tuple[int, tuple[str, int, int, int, str]]]:
+    with path.open("r", encoding="utf-8-sig", errors="replace", newline="") as handle:
+        reader = csv.DictReader(handle, delimiter=";")
+        if reader.fieldnames is None:
+            return
+
+        for line_number, raw_row in enumerate(reader, start=2):
+            if raw_row is None:
+                continue
+
+            extra_values = raw_row.pop(None, None)
+            if extra_values and any(str(value).strip() for value in extra_values):
+                logger.warning(
+                    "Skipping malformed merge row: file=%s line=%s extra_fields=%s",
+                    path,
+                    line_number,
+                    len(extra_values),
+                )
+                continue
+
+            row = dict(raw_row)
+            for column in payload_columns:
+                row.setdefault(column, "")
+            yield line_number, _build_upsert_record(row, source_order=source_order, payload_columns=payload_columns)
+
+
 def _iter_catalog_chunks(path: Path, *, chunksize: int = DEFAULT_MERGE_CHUNKSIZE) -> Iterator[pd.DataFrame]:
     try:
         yield from pd.read_csv(
@@ -305,6 +470,19 @@ def _merge_build_lock(
             logger.info("🔒 Merge lock acquired: %s", lock_path)
             break
         except FileExistsError:
+            lock_pid = _read_lock_pid(lock_path)
+            if lock_pid is not None and not _is_process_alive(lock_pid):
+                logger.warning(
+                    "Removing orphaned merge lock: %s pid=%s",
+                    lock_path,
+                    lock_pid,
+                )
+                try:
+                    lock_path.unlink()
+                except FileNotFoundError:
+                    pass
+                continue
+
             try:
                 age_seconds = max(0.0, time.time() - lock_path.stat().st_mtime)
             except FileNotFoundError:
@@ -336,7 +514,7 @@ def _merge_build_lock(
             time.sleep(1.0)
 
     try:
-        yield
+        yield lock_path
     finally:
         try:
             lock_path.unlink()
@@ -359,7 +537,9 @@ def _init_merge_db(db_path: Path) -> sqlite3.Connection:
     logger.info("🗄️ Initializing merge temp DB: %s", db_path)
     connection = sqlite3.connect(db_path)
     connection.execute("PRAGMA journal_mode=DELETE")
-    connection.execute("PRAGMA synchronous=NORMAL")
+    connection.execute("PRAGMA synchronous=OFF")
+    connection.execute("PRAGMA temp_store=FILE")
+    connection.execute("PRAGMA cache_size=-32768")
     connection.execute(
         """
         CREATE TABLE merged_catalog (
@@ -467,6 +647,39 @@ def _upsert_chunk_rows(
     connection.commit()
 
 
+def _upsert_records_batch(
+    connection: sqlite3.Connection,
+    records: list[tuple[str, int, int, int, str]],
+) -> None:
+    if not records:
+        return
+
+    connection.executemany(
+        """
+        INSERT INTO merged_catalog (dedupe_key, has_article, has_price, source_order, payload_json)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(dedupe_key) DO UPDATE SET
+            has_article = excluded.has_article,
+            has_price = excluded.has_price,
+            source_order = excluded.source_order,
+            payload_json = excluded.payload_json
+        WHERE
+            excluded.has_article > merged_catalog.has_article
+            OR (
+                excluded.has_article = merged_catalog.has_article
+                AND excluded.has_price > merged_catalog.has_price
+            )
+            OR (
+                excluded.has_article = merged_catalog.has_article
+                AND excluded.has_price = merged_catalog.has_price
+                AND excluded.source_order < merged_catalog.source_order
+            )
+        """,
+        records,
+    )
+    connection.commit()
+
+
 def _write_merged_catalog_from_db(
     connection: sqlite3.Connection,
     output_path: Path,
@@ -518,7 +731,7 @@ def merge_catalog_frames(frames: Iterable[pd.DataFrame]) -> pd.DataFrame:
     return deduped.drop(columns=["__source_order", "__has_article", "__has_price", "__dedupe_key"])
 
 
-def build_merged_catalog(clean_dir: Path, output_path: Path) -> Path:
+def _build_merged_catalog_streaming(clean_dir: Path, output_path: Path) -> Path:
     clean_dir = Path(clean_dir)
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -534,7 +747,16 @@ def build_merged_catalog(clean_dir: Path, output_path: Path) -> Path:
         logger.info("♻️ Reusing up-to-date merged catalog: %s", output_path)
         return output_path
 
-    with _merge_build_lock(output_path):
+    merge_batch_size = _read_env_int("REMO_MERGE_DB_BATCH_SIZE", DEFAULT_MERGE_DB_BATCH_SIZE)
+    merge_progress_rows = _read_env_int("REMO_MERGE_PROGRESS_ROWS", DEFAULT_MERGE_PROGRESS_ROWS)
+    logger.info(
+        "🧠 Merge config: batch_size=%s progress_rows=%s memory_limit_mb=%s",
+        merge_batch_size,
+        merge_progress_rows,
+        os.getenv("REMO_MERGE_MAX_RSS_MB", "disabled"),
+    )
+
+    with _merge_build_lock(output_path) as lock_path:
         if output_path.exists() and output_path.stat().st_mtime >= latest_source_mtime:
             logger.info("♻️ Merge completed by another worker while waiting: %s", output_path)
             return output_path
@@ -543,15 +765,14 @@ def build_merged_catalog(clean_dir: Path, output_path: Path) -> Path:
         connection: sqlite3.Connection | None = None
         all_columns: list[str] = []
         seen_columns: set[str] = set()
-        total_chunks = 0
+        total_batches = 0
         total_rows_read = 0
 
         try:
             connection = _init_merge_db(db_path)
             for source_order, source_path in enumerate(sources):
                 logger.info("📥 Merge source start: #%s file=%s", source_order + 1, source_path)
-                header_df = _read_catalog_header(source_path)
-                source_columns = list(header_df.columns)
+                source_columns = _read_catalog_columns(source_path)
                 for required_column in (CANONICAL_NAME_COLUMN, CANONICAL_ARTICLE_COLUMN, CANONICAL_PRICE_COLUMN):
                     if required_column not in source_columns:
                         source_columns.append(required_column)
@@ -561,7 +782,162 @@ def build_merged_catalog(clean_dir: Path, output_path: Path) -> Path:
                     seen_columns.add(column)
                     all_columns.append(column)
 
-                source_chunks = 0
+                source_batches = 0
+                source_rows = 0
+                skipped_rows = 0
+                next_progress_at = merge_progress_rows
+                pending_records: list[tuple[str, int, int, int, str]] = []
+
+                with source_path.open("r", encoding="utf-8-sig", errors="replace", newline="") as handle:
+                    reader = csv.DictReader(handle, delimiter=";")
+                    if reader.fieldnames is None:
+                        logger.warning("⚠️ Empty merge source header: %s", source_path)
+                        continue
+
+                    for line_number, raw_row in enumerate(reader, start=2):
+                        if raw_row is None:
+                            continue
+
+                        extra_values = raw_row.pop(None, None)
+                        if extra_values and any(str(value).strip() for value in extra_values):
+                            skipped_rows += 1
+                            if skipped_rows <= 3:
+                                logger.warning(
+                                    "⚠️ Skipping malformed merge row: file=%s line=%s extra_fields=%s",
+                                    source_path,
+                                    line_number,
+                                    len(extra_values),
+                                )
+                            continue
+
+                        row = dict(raw_row)
+                        for column in source_columns:
+                            row.setdefault(column, "")
+
+                        source_rows += 1
+                        total_rows_read += 1
+                        pending_records.append(
+                            _build_upsert_record(row, source_order=source_order, payload_columns=source_columns)
+                        )
+
+                        if len(pending_records) >= merge_batch_size:
+                            _upsert_records_batch(connection, pending_records)
+                            pending_records.clear()
+                            source_batches += 1
+                            total_batches += 1
+                            _touch_lock_file(lock_path)
+                            _enforce_merge_memory_budget(context=f"merge source {source_path.name}")
+                            if source_rows >= next_progress_at:
+                                rss_mb = _current_rss_mb()
+                                logger.info(
+                                    "📥 Merge source progress: file=%s rows=%s total_rows=%s batches=%s rss_mb=%s",
+                                    source_path.name,
+                                    source_rows,
+                                    total_rows_read,
+                                    source_batches,
+                                    f"{rss_mb:.1f}" if rss_mb is not None else "n/a",
+                                )
+                                next_progress_at += merge_progress_rows
+
+                if pending_records:
+                    _upsert_records_batch(connection, pending_records)
+                    pending_records.clear()
+                    source_batches += 1
+                    total_batches += 1
+                    _touch_lock_file(lock_path)
+                    _enforce_merge_memory_budget(context=f"merge source {source_path.name} tail")
+
+                if source_rows:
+                    rss_mb = _current_rss_mb()
+                    logger.info(
+                        "✅ Merge source complete: file=%s rows=%s columns=%s batches=%s skipped_rows=%s rss_mb=%s",
+                        source_path.name,
+                        source_rows,
+                        len(source_columns),
+                        source_batches,
+                        skipped_rows,
+                        f"{rss_mb:.1f}" if rss_mb is not None else "n/a",
+                    )
+                else:
+                    logger.info(
+                        "✅ Merge source complete: file=%s rows=%s columns=%s batches=%s skipped_rows=%s",
+                        source_path.name,
+                        source_rows,
+                        len(source_columns),
+                        source_batches,
+                        skipped_rows,
+                    )
+
+            _touch_lock_file(lock_path)
+            _enforce_merge_memory_budget(context="final write")
+            _write_merged_catalog_from_db(connection, output_path, columns=all_columns)
+            final_rows = connection.execute("SELECT COUNT(*) FROM merged_catalog").fetchone()[0]
+            rss_mb = _current_rss_mb()
+            logger.info(
+                "✅ Merge catalog complete: output=%s rows=%s columns=%s total_rows_read=%s total_batches=%s size_bytes=%s rss_mb=%s",
+                output_path,
+                final_rows,
+                len(all_columns),
+                total_rows_read,
+                total_batches,
+                output_path.stat().st_size,
+                f"{rss_mb:.1f}" if rss_mb is not None else "n/a",
+            )
+            return output_path
+        finally:
+            if connection is not None:
+                connection.close()
+            _cleanup_sqlite_sidecars(db_path)
+
+
+def build_merged_catalog(clean_dir: Path, output_path: Path) -> Path:
+    return _build_merged_catalog_streaming(clean_dir, output_path)
+
+    clean_dir = Path(clean_dir)
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    logger.info("🔗 Merge catalog start: clean_dir=%s output=%s", clean_dir, output_path)
+
+    sources = _catalog_sources(clean_dir, output_path)
+    if not sources:
+        raise FileNotFoundError(f"В папке {clean_dir} не найдено файлов *_clean.csv")
+    logger.info("🔗 Merge catalog sources: count=%s files=%s", len(sources), ", ".join(path.name for path in sources))
+
+    latest_source_mtime = max(path.stat().st_mtime for path in sources)
+    if output_path.exists() and output_path.stat().st_mtime >= latest_source_mtime:
+        logger.info("♻️ Reusing up-to-date merged catalog: %s", output_path)
+        return output_path
+
+    merge_batch_size = _read_env_int("REMO_MERGE_DB_BATCH_SIZE", DEFAULT_MERGE_DB_BATCH_SIZE)
+    merge_progress_rows = _read_env_int("REMO_MERGE_PROGRESS_ROWS", DEFAULT_MERGE_PROGRESS_ROWS)
+
+    with _merge_build_lock(output_path) as lock_path:
+        if output_path.exists() and output_path.stat().st_mtime >= latest_source_mtime:
+            logger.info("♻️ Merge completed by another worker while waiting: %s", output_path)
+            return output_path
+
+        db_path = _sqlite_temp_path(output_path)
+        connection: sqlite3.Connection | None = None
+        all_columns: list[str] = []
+        seen_columns: set[str] = set()
+        total_batches = 0
+        total_rows_read = 0
+
+        try:
+            connection = _init_merge_db(db_path)
+            for source_order, source_path in enumerate(sources):
+                logger.info("📥 Merge source start: #%s file=%s", source_order + 1, source_path)
+                source_columns = _read_catalog_columns(source_path)
+                for required_column in (CANONICAL_NAME_COLUMN, CANONICAL_ARTICLE_COLUMN, CANONICAL_PRICE_COLUMN):
+                    if required_column not in source_columns:
+                        source_columns.append(required_column)
+                for column in source_columns:
+                    if column in seen_columns:
+                        continue
+                    seen_columns.add(column)
+                    all_columns.append(column)
+
+                source_batches = 0
                 source_rows = 0
                 for chunk in _iter_catalog_chunks(source_path, chunksize=DEFAULT_MERGE_CHUNKSIZE):
                     source_chunks += 1
