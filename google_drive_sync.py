@@ -15,18 +15,20 @@ logger = logging.getLogger(__name__)
 try:
     from google.oauth2 import service_account
     from googleapiclient.discovery import build
-    from googleapiclient.http import MediaIoBaseDownload
+    from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
     from googleapiclient.errors import HttpError
     GOOGLE_DRIVE_AVAILABLE = True
 except ImportError:  # pragma: no cover - handled by runtime checks
     service_account = None
     build = None
+    MediaFileUpload = None
     MediaIoBaseDownload = None
     HttpError = Exception
     GOOGLE_DRIVE_AVAILABLE = False
 
 
 DRIVE_SCOPE_READONLY = "https://www.googleapis.com/auth/drive.readonly"
+DRIVE_SCOPE_FULL = "https://www.googleapis.com/auth/drive"
 
 
 @dataclass
@@ -42,6 +44,16 @@ class DriveAccessReport:
     folder_id: str
     csv_count: int
     can_access: bool
+
+
+@dataclass
+class DriveUploadResult:
+    file_id: str
+    folder_id: str
+    name: str
+    size_bytes: int
+    web_view_link: str
+    web_content_link: str | None
 
 
 def extract_drive_folder_id(value: str) -> str:
@@ -67,7 +79,7 @@ def extract_drive_folder_id(value: str) -> str:
     raise ValueError("Не удалось извлечь ID папки из ссылки Google Drive")
 
 
-def _build_drive_service(service_account_info: dict):
+def _build_drive_service(service_account_info: dict, *, scopes: list[str] | None = None):
     if not GOOGLE_DRIVE_AVAILABLE:
         raise ImportError(
             "Для синхронизации из Google Drive установите зависимости: "
@@ -76,9 +88,48 @@ def _build_drive_service(service_account_info: dict):
 
     credentials = service_account.Credentials.from_service_account_info(
         service_account_info,
-        scopes=[DRIVE_SCOPE_READONLY],
+        scopes=scopes or [DRIVE_SCOPE_READONLY],
     )
     return build("drive", "v3", credentials=credentials, cache_discovery=False)
+
+
+def _escape_drive_query_value(value: str) -> str:
+    return str(value).replace("\\", "\\\\").replace("'", "\\'")
+
+
+def _find_existing_file_id(service, folder_id: str, file_name: str) -> str | None:
+    query = (
+        f"'{folder_id}' in parents and trashed = false and "
+        f"name = '{_escape_drive_query_value(file_name)}'"
+    )
+    response = service.files().list(
+        q=query,
+        pageSize=1,
+        fields="files(id)",
+        supportsAllDrives=True,
+        includeItemsFromAllDrives=True,
+    ).execute()
+    files = response.get("files", [])
+    if not files:
+        return None
+    return str(files[0]["id"])
+
+
+def _build_drive_file_links(file_id: str, *, web_view_link: str | None, web_content_link: str | None) -> tuple[str, str | None]:
+    resolved_view = web_view_link or f"https://drive.google.com/file/d/{file_id}/view?usp=drive_link"
+    resolved_content = web_content_link or f"https://drive.google.com/uc?id={file_id}&export=download"
+    return resolved_view, resolved_content
+
+
+def _guess_drive_mime_type(source_path: Path) -> str:
+    suffix = source_path.suffix.lower()
+    if suffix == ".csv":
+        return "text/csv"
+    if suffix == ".xlsx":
+        return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    if suffix == ".xls":
+        return "application/vnd.ms-excel"
+    return "application/octet-stream"
 
 
 def _list_csv_files(service, folder_id: str) -> list[DriveCsvFile]:
@@ -143,6 +194,99 @@ def _download_csv_file(service, file_info: DriveCsvFile, destination: Path) -> P
                     last_logged_percent = percent
 
     return destination
+
+
+def upload_file_to_drive(
+    *,
+    source_path: Path,
+    folder_url_or_id: str,
+    service_account_info: dict,
+    target_name: str | None = None,
+) -> DriveUploadResult:
+    source_path = Path(source_path)
+    if not source_path.exists():
+        raise FileNotFoundError(f"Не найден файл для выгрузки в Google Drive: {source_path}")
+
+    folder_id = extract_drive_folder_id(folder_url_or_id)
+    service = _build_drive_service(service_account_info, scopes=[DRIVE_SCOPE_FULL])
+    upload_name = Path(target_name).name if target_name else source_path.name
+    file_size_bytes = source_path.stat().st_size
+    logger.info(
+        "☁️ Google Drive upload start: source=%s folder=%s name=%s size_mb=%.2f",
+        source_path,
+        folder_id,
+        upload_name,
+        file_size_bytes / (1024 * 1024),
+    )
+
+    existing_file_id = _find_existing_file_id(service, folder_id, upload_name)
+    media = MediaFileUpload(
+        str(source_path),
+        mimetype=_guess_drive_mime_type(source_path),
+        resumable=True,
+        chunksize=8 * 1024 * 1024,
+    )
+    fields = "id, name, size, webViewLink, webContentLink"
+
+    if existing_file_id:
+        logger.info(
+            "♻️ Google Drive upload will update existing file: folder=%s file_id=%s name=%s",
+            folder_id,
+            existing_file_id,
+            upload_name,
+        )
+        request = service.files().update(
+            fileId=existing_file_id,
+            body={"name": upload_name},
+            media_body=media,
+            fields=fields,
+            supportsAllDrives=True,
+        )
+    else:
+        request = service.files().create(
+            body={"name": upload_name, "parents": [folder_id]},
+            media_body=media,
+            fields=fields,
+            supportsAllDrives=True,
+        )
+
+    response = None
+    last_logged_percent = -1
+    while response is None:
+        try:
+            status, response = request.next_chunk()
+        except HttpError as e:
+            raise PermissionError(f"Ошибка загрузки файла {upload_name} в Google Drive: {e}") from e
+
+        if status is not None:
+            percent = int(status.progress() * 100)
+            if percent >= last_logged_percent + 10 or percent == 100:
+                logger.info("☁️ Upload progress %s: %s%%", upload_name, percent)
+                last_logged_percent = percent
+
+    file_id = str(response["id"])
+    web_view_link, web_content_link = _build_drive_file_links(
+        file_id,
+        web_view_link=response.get("webViewLink"),
+        web_content_link=response.get("webContentLink"),
+    )
+    uploaded_size = int(response.get("size", file_size_bytes) or file_size_bytes)
+    logger.info(
+        "✅ Google Drive upload complete: file_id=%s name=%s size_bytes=%s view_link=%s",
+        file_id,
+        response.get("name", upload_name),
+        uploaded_size,
+        web_view_link,
+    )
+
+    return DriveUploadResult(
+        file_id=file_id,
+        folder_id=folder_id,
+        name=str(response.get("name", upload_name)),
+        size_bytes=uploaded_size,
+        web_view_link=web_view_link,
+        web_content_link=web_content_link,
+    )
 
 
 def _prune_orphan_destination_csvs(destination_dir: Path, keep_paths: list[Path]) -> list[Path]:

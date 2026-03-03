@@ -18,10 +18,15 @@ import json
 from config import get_catalog_csv_path, get_upload_dir, get_matcher_cache_db_path
 from catalog_merge import get_catalog_readiness, get_merged_catalog_path, refresh_merged_catalog
 from catalog_snapshot import prepare_catalog_duplicate_report, prepare_catalog_snapshot
-from google_drive_sync import sync_drive_folder_csvs
+from google_drive_sync import sync_drive_folder_csvs, upload_file_to_drive
 from etl_pipeline import PriceETL
 from main import convert_csv
-from snapshot_export import build_public_export_url, get_snapshot_xlsx_status, start_snapshot_xlsx_build
+from snapshot_export import (
+    build_public_export_url,
+    build_snapshot_export_basename,
+    get_snapshot_xlsx_status,
+    start_snapshot_xlsx_build,
+)
 
 # ============ ЛОГИРОВАНИЕ ============
 logging.basicConfig(
@@ -104,6 +109,10 @@ if 'catalog_snapshot_xlsx_path' not in st.session_state:
     st.session_state.catalog_snapshot_xlsx_path = None
 if 'catalog_snapshot_xlsx_url' not in st.session_state:
     st.session_state.catalog_snapshot_xlsx_url = None
+if 'catalog_snapshot_drive_csv_url' not in st.session_state:
+    st.session_state.catalog_snapshot_drive_csv_url = None
+if 'catalog_snapshot_drive_csv_name' not in st.session_state:
+    st.session_state.catalog_snapshot_drive_csv_name = None
 
 
 
@@ -149,6 +158,48 @@ def _get_drive_sync_config() -> tuple[str | None, str | None]:
 
     folder = folder or os.getenv("GOOGLE_DRIVE_FOLDER_ID") or os.getenv("GOOGLE_DRIVE_FOLDER_URL")
     service_account_json = service_account_json or os.getenv("GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON")
+
+    return folder, service_account_json
+
+
+def _get_drive_export_config() -> tuple[str | None, str | None]:
+    """Получить конфиг Google Drive для выгрузки артефактов БД."""
+    folder = None
+    service_account_json = None
+
+    try:
+        folder = (
+            st.secrets.get("GOOGLE_DRIVE_EXPORT_FOLDER_ID")
+            or st.secrets.get("GOOGLE_DRIVE_EXPORT_FOLDER_URL")
+        )
+        service_account_secret = st.secrets.get("GOOGLE_DRIVE_EXPORT_SERVICE_ACCOUNT_JSON")
+        if service_account_secret:
+            service_account_json = str(service_account_secret)
+        elif "GOOGLE_DRIVE_EXPORT_SERVICE_ACCOUNT" in st.secrets:
+            service_account_json = json.dumps(dict(st.secrets["GOOGLE_DRIVE_EXPORT_SERVICE_ACCOUNT"]))
+    except StreamlitSecretNotFoundError:
+        pass
+    except Exception as e:
+        logger.warning(f"⚠️ Не удалось прочитать Google Drive export secrets: {e}")
+
+    if not service_account_json:
+        try:
+            shared_service_account_secret = st.secrets.get("GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON")
+            if shared_service_account_secret:
+                service_account_json = str(shared_service_account_secret)
+            elif "GOOGLE_DRIVE_SERVICE_ACCOUNT" in st.secrets:
+                service_account_json = json.dumps(dict(st.secrets["GOOGLE_DRIVE_SERVICE_ACCOUNT"]))
+        except StreamlitSecretNotFoundError:
+            pass
+        except Exception as e:
+            logger.warning(f"⚠️ Не удалось прочитать общий Google Drive service account: {e}")
+
+    folder = folder or os.getenv("GOOGLE_DRIVE_EXPORT_FOLDER_ID") or os.getenv("GOOGLE_DRIVE_EXPORT_FOLDER_URL")
+    service_account_json = (
+        service_account_json
+        or os.getenv("GOOGLE_DRIVE_EXPORT_SERVICE_ACCOUNT_JSON")
+        or os.getenv("GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON")
+    )
 
     return folder, service_account_json
 
@@ -413,6 +464,8 @@ def _reset_catalog_runtime_state() -> None:
     st.session_state.catalog_snapshot_xlsx_status = "idle"
     st.session_state.catalog_snapshot_xlsx_path = None
     st.session_state.catalog_snapshot_xlsx_url = None
+    st.session_state.catalog_snapshot_drive_csv_url = None
+    st.session_state.catalog_snapshot_drive_csv_name = None
 
 
 def _rebuild_merged_catalog_from_clean(clean_dir: Path) -> Path:
@@ -655,6 +708,11 @@ def main():
             st.session_state.catalog_snapshot_xlsx_status = "idle"
             st.session_state.catalog_snapshot_xlsx_path = None
             st.session_state.catalog_snapshot_xlsx_url = None
+            st.session_state.catalog_snapshot_drive_csv_url = None
+            st.session_state.catalog_snapshot_drive_csv_name = None
+        elif catalog_readiness.state != "ready" and st.session_state.catalog_snapshot_drive_csv_url is not None:
+            st.session_state.catalog_snapshot_drive_csv_url = None
+            st.session_state.catalog_snapshot_drive_csv_name = None
         readiness_labels = {
             "ready": "Готова",
             "missing": "Не собрана",
@@ -721,6 +779,8 @@ def main():
                         str(snapshot_bundle.xlsx_path) if snapshot_bundle.xlsx_path is not None else None
                     )
                     st.session_state.catalog_snapshot_xlsx_url = snapshot_bundle.public_xlsx_url
+                    st.session_state.catalog_snapshot_drive_csv_url = None
+                    st.session_state.catalog_snapshot_drive_csv_name = None
                     logger.info(
                         "✅ CSV export link prepared in UI: resolved_csv=%s public_csv=%s xlsx_status=%s",
                         snapshot_bundle.resolved_csv_path,
@@ -731,6 +791,58 @@ def main():
                 except Exception as e:
                     logger.error(f"❌ Ошибка подготовки выгрузки БД: {e}", exc_info=True)
                     st.error(f"❌ Не удалось подготовить ссылку на БД: {e}")
+
+        if st.button("☁️ Выгрузить БД в Google Drive (CSV)"):
+            if catalog_readiness.state != "ready":
+                st.error(
+                    f"❌ {catalog_readiness.reason or 'Итоговая БД не готова'}. "
+                    "Нажмите `🔄 Обновить БД`."
+                )
+            else:
+                export_folder, service_account_json = _get_drive_export_config()
+                if not export_folder or not service_account_json:
+                    st.error(
+                        "❌ Не настроена выгрузка в Google Drive. "
+                        "Задайте GOOGLE_DRIVE_EXPORT_FOLDER_ID/GOOGLE_DRIVE_EXPORT_FOLDER_URL и "
+                        "GOOGLE_DRIVE_EXPORT_SERVICE_ACCOUNT_JSON (или общий GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON)."
+                    )
+                else:
+                    try:
+                        source_path = _catalog_source_path()
+                        target_name = f"{build_snapshot_export_basename(source_path)}{source_path.suffix or '.csv'}"
+                        logger.info(
+                            "🖱️ Google Drive export button pressed: source=%s export_folder=%s target_name=%s",
+                            source_path,
+                            export_folder,
+                            target_name,
+                        )
+                        upload_result = upload_file_to_drive(
+                            source_path=source_path,
+                            folder_url_or_id=export_folder,
+                            service_account_info=json.loads(service_account_json),
+                            target_name=target_name,
+                        )
+                        st.session_state.catalog_snapshot_drive_csv_url = upload_result.web_view_link
+                        st.session_state.catalog_snapshot_drive_csv_name = upload_result.name
+                        logger.info(
+                            "✅ Google Drive export link prepared in UI: source=%s drive_name=%s file_id=%s",
+                            source_path,
+                            upload_result.name,
+                            upload_result.file_id,
+                        )
+                        st.success(f"✓ Файл выгружен в Google Drive: {upload_result.name}")
+                    except Exception as e:
+                        logger.error(f"❌ Ошибка выгрузки БД в Google Drive: {e}", exc_info=True)
+                        st.error(f"❌ Не удалось выгрузить БД в Google Drive: {e}")
+
+        if st.session_state.catalog_snapshot_drive_csv_url:
+            if st.session_state.catalog_snapshot_drive_csv_name:
+                st.caption(f"Файл в Google Drive: {st.session_state.catalog_snapshot_drive_csv_name}")
+            st.link_button(
+                "☁️ Открыть входную БД в Google Drive",
+                st.session_state.catalog_snapshot_drive_csv_url,
+                use_container_width=True,
+            )
 
         if st.session_state.catalog_snapshot_bundle is not None:
             bundle = st.session_state.catalog_snapshot_bundle
