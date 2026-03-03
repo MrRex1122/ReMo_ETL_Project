@@ -2,18 +2,24 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
+from concurrent.futures.process import BrokenProcessPool
 from contextlib import contextmanager
 import csv
 from dataclasses import dataclass
+import hashlib
 import json
 import logging
+import multiprocessing
 import os
 from pathlib import Path
 import re
+import shutil
 import sqlite3
 import tempfile
 import time
-from typing import Iterable, Iterator, Literal
+from typing import Iterable, Literal
 import uuid
 
 import pandas as pd
@@ -24,11 +30,36 @@ CANONICAL_NAME_COLUMN = "Наименование"
 CANONICAL_ARTICLE_COLUMN = "Артикул"
 CANONICAL_PRICE_COLUMN = "Цена розничная"
 MERGED_CATALOG_FILENAME = "price_clean_merged.csv"
-DEFAULT_MERGE_CHUNKSIZE = 50000
 DEFAULT_MERGE_DB_BATCH_SIZE = 1000
 DEFAULT_MERGE_PROGRESS_ROWS = 25000
 DEFAULT_MERGE_LOCK_TIMEOUT_SECONDS = 10 * 60
 DEFAULT_MERGE_LOCK_STALE_SECONDS = 30 * 60
+DEFAULT_SHARD_MERGE_WORKERS = 4
+DEFAULT_SHARD_MERGE_SHARDS = 16
+DEFAULT_SHARD_MERGE_OPEN_FILES = 8
+DEFAULT_SHARD_MERGE_PHASE_TIMEOUT_SECONDS = 60 * 60
+DEFAULT_SHARD_MERGE_PROGRESS_ROWS = 25000
+MAX_SHARD_MERGE_SHARDS = 128
+UPSERT_SQL = """
+INSERT INTO merged_catalog (dedupe_key, has_article, has_price, source_order, payload_json)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(dedupe_key) DO UPDATE SET
+    has_article = excluded.has_article,
+    has_price = excluded.has_price,
+    source_order = excluded.source_order,
+    payload_json = excluded.payload_json
+WHERE
+    excluded.has_article > merged_catalog.has_article
+    OR (
+        excluded.has_article = merged_catalog.has_article
+        AND excluded.has_price > merged_catalog.has_price
+    )
+    OR (
+        excluded.has_article = merged_catalog.has_article
+        AND excluded.has_price = merged_catalog.has_price
+        AND excluded.source_order < merged_catalog.source_order
+    )
+"""
 
 
 @dataclass
@@ -41,6 +72,26 @@ class CatalogReadiness:
     clean_sources_count: int
     latest_clean_mtime: float | None
     merged_mtime: float | None
+
+
+@dataclass
+class PartitionSourceResult:
+    source_order: int
+    source_path: Path
+    source_columns: list[str]
+    rows_processed: int
+    rows_skipped: int
+    shard_file_paths: list[Path]
+    rss_peak_mb: float | None
+
+
+@dataclass
+class ShardReduceResult:
+    shard_id: int
+    rows_read: int
+    rows_written: int
+    output_csv_path: Path
+    rss_peak_mb: float | None
 
 
 def _configure_csv_field_limit() -> None:
@@ -83,7 +134,6 @@ def _current_rss_mb() -> float | None:
     status_path = Path("/proc/self/status")
     if not status_path.exists():
         return None
-
     try:
         for line in status_path.read_text(encoding="utf-8", errors="ignore").splitlines():
             if line.startswith("VmRSS:"):
@@ -95,19 +145,18 @@ def _current_rss_mb() -> float | None:
     return None
 
 
-def _enforce_merge_memory_budget(*, context: str) -> None:
-    limit_mb = _read_env_int("REMO_MERGE_MAX_RSS_MB", 0, minimum=0)
-    if limit_mb <= 0:
+def _enforce_rss_budget(limit_mb: int | None, *, context: str) -> None:
+    if not limit_mb or limit_mb <= 0:
         return
-
     rss_mb = _current_rss_mb()
-    if rss_mb is None:
-        return
-
-    if rss_mb > limit_mb:
+    if rss_mb is not None and rss_mb > limit_mb:
         raise MemoryError(
             f"Merge memory budget exceeded during {context}: rss_mb={rss_mb:.1f} limit_mb={limit_mb}"
         )
+
+
+def _enforce_merge_memory_budget(*, context: str) -> None:
+    _enforce_rss_budget(_read_env_int("REMO_MERGE_MAX_RSS_MB", 0, minimum=0), context=context)
 
 
 def _touch_lock_file(lock_path: Path | None) -> None:
@@ -122,15 +171,13 @@ def _touch_lock_file(lock_path: Path | None) -> None:
 def _read_lock_pid(lock_path: Path) -> int | None:
     try:
         with lock_path.open("r", encoding="utf-8") as handle:
-            first_line = handle.readline().strip()
+            raw_value = handle.readline().strip()
     except OSError:
         return None
-
-    if not first_line:
+    if not raw_value:
         return None
-
     try:
-        return int(first_line)
+        return int(raw_value)
     except ValueError:
         return None
 
@@ -138,7 +185,6 @@ def _read_lock_pid(lock_path: Path) -> int | None:
 def _is_process_alive(pid: int | None) -> bool:
     if pid is None or pid <= 0:
         return False
-
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -160,14 +206,16 @@ def _infer_clean_dir(source_path: Path) -> Path | None:
         return source_path
     if source_path.name == MERGED_CATALOG_FILENAME and source_path.parent.exists():
         return source_path.parent
-    if source_path.parent.exists():
-        sibling_clean_files = [
-            path for path in source_path.parent.glob("*_clean.csv")
-            if path.is_file() and path.name != MERGED_CATALOG_FILENAME
-        ]
-        if sibling_clean_files:
-            return source_path.parent
+    if source_path.parent.exists() and any(source_path.parent.glob("*_clean.csv")):
+        return source_path.parent
     return None
+
+
+def _catalog_sources(clean_dir: Path, output_path: Path) -> list[Path]:
+    return sorted(
+        path for path in Path(clean_dir).glob("*_clean.csv")
+        if path.is_file() and path.resolve() != Path(output_path).resolve()
+    )
 
 
 def get_catalog_readiness(source_path: str | Path) -> CatalogReadiness:
@@ -176,28 +224,18 @@ def get_catalog_readiness(source_path: str | Path) -> CatalogReadiness:
     merged_path = get_merged_catalog_path(clean_dir) if clean_dir is not None else source_path
 
     if clean_dir is None:
-        if merged_path.exists():
-            readiness = CatalogReadiness(
-                source_path=source_path,
-                clean_dir=None,
-                merged_path=merged_path,
-                state="ready",
-                reason=None,
-                clean_sources_count=0,
-                latest_clean_mtime=None,
-                merged_mtime=merged_path.stat().st_mtime,
-            )
-        else:
-            readiness = CatalogReadiness(
-                source_path=source_path,
-                clean_dir=None,
-                merged_path=merged_path,
-                state="missing",
-                reason=f"Не найден файл БД: {merged_path}",
-                clean_sources_count=0,
-                latest_clean_mtime=None,
-                merged_mtime=None,
-            )
+        state = "ready" if merged_path.exists() else "missing"
+        reason = None if state == "ready" else f"Не найден файл БД: {merged_path}"
+        readiness = CatalogReadiness(
+            source_path=source_path,
+            clean_dir=None,
+            merged_path=merged_path,
+            state=state,
+            reason=reason,
+            clean_sources_count=0,
+            latest_clean_mtime=None,
+            merged_mtime=merged_path.stat().st_mtime if merged_path.exists() else None,
+        )
         logger.info(
             "ℹ️ Catalog readiness: source=%s state=%s clean_sources=%s merged=%s",
             readiness.source_path,
@@ -208,7 +246,6 @@ def get_catalog_readiness(source_path: str | Path) -> CatalogReadiness:
         return readiness
 
     clean_sources = _catalog_sources(clean_dir, merged_path)
-    clean_sources_count = len(clean_sources)
     if not clean_sources:
         readiness = CatalogReadiness(
             source_path=source_path,
@@ -221,12 +258,11 @@ def get_catalog_readiness(source_path: str | Path) -> CatalogReadiness:
             merged_mtime=merged_path.stat().st_mtime if merged_path.exists() else None,
         )
         logger.info(
-            "ℹ️ Catalog readiness: source=%s state=%s clean_sources=%s merged=%s reason=%s",
+            "ℹ️ Catalog readiness: source=%s state=%s clean_sources=%s merged=%s",
             readiness.source_path,
             readiness.state,
             readiness.clean_sources_count,
             readiness.merged_path,
-            readiness.reason,
         )
         return readiness
 
@@ -239,10 +275,7 @@ def get_catalog_readiness(source_path: str | Path) -> CatalogReadiness:
         merged_mtime = merged_path.stat().st_mtime
         if merged_mtime < latest_clean_mtime:
             state = "stale"
-            reason = (
-                "Итоговая БД устарела: есть более новые *_clean.csv, "
-                "требуется обновить БД"
-            )
+            reason = "Итоговая БД устарела: есть более новые *_clean.csv, требуется обновить БД"
         else:
             state = "ready"
             reason = None
@@ -253,7 +286,7 @@ def get_catalog_readiness(source_path: str | Path) -> CatalogReadiness:
         merged_path=merged_path,
         state=state,
         reason=reason,
-        clean_sources_count=clean_sources_count,
+        clean_sources_count=len(clean_sources),
         latest_clean_mtime=latest_clean_mtime,
         merged_mtime=merged_mtime,
     )
@@ -275,29 +308,15 @@ def refresh_merged_catalog(clean_dir: Path) -> Path:
         message = readiness.reason or f"В папке {clean_dir} нет файлов *_clean.csv"
         logger.error("❌ Merged DB rebuild failed: %s", message)
         raise FileNotFoundError(message)
-
     logger.info(
         "🔄 Merged DB rebuild start: clean_dir=%s output=%s clean_sources=%s",
         clean_dir,
         readiness.merged_path,
         readiness.clean_sources_count,
     )
-    try:
-        merged_path = build_merged_catalog(clean_dir, readiness.merged_path)
-    except Exception:
-        logger.exception("❌ Merged DB rebuild failed: clean_dir=%s", clean_dir)
-        raise
-
+    merged_path = build_merged_catalog(clean_dir, readiness.merged_path)
     logger.info("✅ Merged DB rebuild complete: %s", merged_path)
     return merged_path
-
-
-def _catalog_sources(clean_dir: Path, output_path: Path) -> list[Path]:
-    candidates = sorted(
-        path for path in clean_dir.glob("*_clean.csv")
-        if path.is_file() and path.resolve() != output_path.resolve()
-    )
-    return candidates
 
 
 def _build_dedupe_key(df: pd.DataFrame) -> pd.Series:
@@ -306,64 +325,19 @@ def _build_dedupe_key(df: pd.DataFrame) -> pd.Series:
     return article_key.where(article_key != "", name_key)
 
 
-def _warn_and_retry_bad_lines(path: Path, error: Exception, *, chunksize: int | None = None):
-    logger.warning(
-        "⚠️ Обнаружены битые строки в %s, повторное чтение с пропуском bad lines: %s",
-        path,
-        error,
-    )
-    kwargs = {
-        "sep": ";",
-        "encoding": "utf-8",
-        "engine": "python",
-        "on_bad_lines": "skip",
-    }
-    if chunksize is not None:
-        kwargs["chunksize"] = chunksize
-    return pd.read_csv(path, **kwargs)
-
-
-def _read_catalog_csv(path: Path) -> pd.DataFrame:
-    try:
-        return pd.read_csv(path, sep=";", encoding="utf-8")
-    except pd.errors.ParserError as error:
-        return _warn_and_retry_bad_lines(path, error)
-
-
-def _read_catalog_header(path: Path) -> pd.DataFrame:
-    try:
-        return pd.read_csv(path, sep=";", encoding="utf-8", nrows=0)
-    except pd.errors.ParserError as error:
-        logger.warning(
-            "⚠️ Обнаружены битые строки в %s, повторное чтение заголовка с пропуском bad lines: %s",
-            path,
-            error,
-        )
-        return pd.read_csv(
-            path,
-            sep=";",
-            encoding="utf-8",
-            engine="python",
-            on_bad_lines="skip",
-            nrows=0,
-        )
-
-
 def _read_catalog_columns(path: Path) -> list[str]:
-    with path.open("r", encoding="utf-8-sig", errors="replace", newline="") as handle:
-        reader = csv.reader(handle, delimiter=";")
-        header = next(reader, [])
-    return [column for column in header if column]
+    try:
+        with Path(path).open("r", encoding="utf-8-sig", errors="replace", newline="") as handle:
+            reader = csv.reader(handle, delimiter=";")
+            return [column for column in next(reader, []) if column]
+    except OSError:
+        return []
 
 
 def _has_numeric_value(value) -> bool:
-    if value is None:
-        return False
-
-    text = str(value).strip()
+    text = str(value or "").strip()
     if not text:
         return False
-
     normalized = text.replace("\xa0", "").replace(" ", "").replace(",", ".")
     try:
         float(normalized)
@@ -372,7 +346,37 @@ def _has_numeric_value(value) -> bool:
     return True
 
 
-def _build_upsert_record(row: dict[str, object], *, source_order: int, payload_columns: list[str]) -> tuple[str, int, int, int, str]:
+def _json_safe_value(value):
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    try:
+        if pd.isna(value):
+            return None
+    except TypeError:
+        pass
+    if hasattr(value, "item") and callable(value.item):
+        try:
+            value = value.item()
+        except Exception:
+            pass
+    if hasattr(value, "isoformat") and callable(value.isoformat):
+        try:
+            return value.isoformat()
+        except Exception:
+            pass
+    if isinstance(value, (bool, int, float)):
+        return value
+    return str(value)
+
+
+def _build_upsert_record(
+    row: dict[str, object],
+    *,
+    source_order: int,
+    payload_columns: list[str],
+) -> tuple[str, int, int, int, str]:
     article_value = str(row.get(CANONICAL_ARTICLE_COLUMN) or "").strip()
     name_value = str(row.get(CANONICAL_NAME_COLUMN) or "").strip()
     dedupe_key = article_value.lower() if article_value else _normalize_text(name_value)
@@ -386,70 +390,13 @@ def _build_upsert_record(row: dict[str, object], *, source_order: int, payload_c
     )
 
 
-def _iter_catalog_records(
-    path: Path,
-    *,
-    source_order: int,
-    payload_columns: list[str],
-) -> Iterator[tuple[int, tuple[str, int, int, int, str]]]:
-    with path.open("r", encoding="utf-8-sig", errors="replace", newline="") as handle:
-        reader = csv.DictReader(handle, delimiter=";")
-        if reader.fieldnames is None:
-            return
-
-        for line_number, raw_row in enumerate(reader, start=2):
-            if raw_row is None:
-                continue
-
-            extra_values = raw_row.pop(None, None)
-            if extra_values and any(str(value).strip() for value in extra_values):
-                logger.warning(
-                    "Skipping malformed merge row: file=%s line=%s extra_fields=%s",
-                    path,
-                    line_number,
-                    len(extra_values),
-                )
-                continue
-
-            row = dict(raw_row)
-            for column in payload_columns:
-                row.setdefault(column, "")
-            yield line_number, _build_upsert_record(row, source_order=source_order, payload_columns=payload_columns)
-
-
-def _iter_catalog_chunks(path: Path, *, chunksize: int = DEFAULT_MERGE_CHUNKSIZE) -> Iterator[pd.DataFrame]:
-    try:
-        yield from pd.read_csv(
-            path,
-            sep=";",
-            encoding="utf-8",
-            low_memory=False,
-            chunksize=chunksize,
-        )
-    except pd.errors.ParserError as error:
-        yield from _warn_and_retry_bad_lines(path, error, chunksize=chunksize)
-
-
-def _prepare_merge_frame(frame: pd.DataFrame, source_order: int) -> pd.DataFrame:
-    current = frame.copy()
-    for column in (CANONICAL_NAME_COLUMN, CANONICAL_ARTICLE_COLUMN, CANONICAL_PRICE_COLUMN):
-        if column not in current.columns:
-            current[column] = None
-
-    current["__source_order"] = source_order
-    current["__has_article"] = current[CANONICAL_ARTICLE_COLUMN].fillna("").astype(str).str.strip() != ""
-    current["__has_price"] = pd.to_numeric(current[CANONICAL_PRICE_COLUMN], errors="coerce").notna()
-    current["__dedupe_key"] = _build_dedupe_key(current)
-    return current
-
-
-def _sqlite_temp_path(output_path: Path) -> Path:
-    safe_stem = _sanitize_temp_stem(output_path.stem)
+def _sqlite_temp_path(stem: str) -> Path:
+    safe_stem = _sanitize_temp_stem(stem)
     return Path(tempfile.gettempdir()) / f"{safe_stem}_{os.getpid()}_{uuid.uuid4().hex}.merge.sqlite3"
 
 
 def _output_part_path(output_path: Path) -> Path:
-    return output_path.with_name(f"{output_path.name}.{os.getpid()}.{uuid.uuid4().hex}.part")
+    return Path(output_path).with_name(f"{Path(output_path).name}.{os.getpid()}.{uuid.uuid4().hex}.part")
 
 
 @contextmanager
@@ -459,9 +406,8 @@ def _merge_build_lock(
     timeout_seconds: int = DEFAULT_MERGE_LOCK_TIMEOUT_SECONDS,
     stale_after_seconds: int = DEFAULT_MERGE_LOCK_STALE_SECONDS,
 ):
-    lock_path = output_path.with_suffix(f"{output_path.suffix}.lock")
+    lock_path = Path(output_path).with_suffix(f"{Path(output_path).suffix}.lock")
     started_at = time.time()
-
     while True:
         try:
             fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
@@ -472,47 +418,28 @@ def _merge_build_lock(
         except FileExistsError:
             lock_pid = _read_lock_pid(lock_path)
             if lock_pid is not None and not _is_process_alive(lock_pid):
-                logger.warning(
-                    "Removing orphaned merge lock: %s pid=%s",
-                    lock_path,
-                    lock_pid,
-                )
+                logger.warning("Removing orphaned merge lock: %s pid=%s", lock_path, lock_pid)
                 try:
                     lock_path.unlink()
                 except FileNotFoundError:
                     pass
                 continue
-
             try:
                 age_seconds = max(0.0, time.time() - lock_path.stat().st_mtime)
             except FileNotFoundError:
                 continue
-
             if age_seconds > stale_after_seconds:
-                logger.warning(
-                    "🧹 Removing stale merge lock: %s age_seconds=%.1f",
-                    lock_path,
-                    age_seconds,
-                )
+                logger.warning("🧹 Removing stale merge lock: %s age_seconds=%.1f", lock_path, age_seconds)
                 try:
                     lock_path.unlink()
                 except FileNotFoundError:
                     pass
                 continue
-
             waited_seconds = max(0.0, time.time() - started_at)
             if waited_seconds > timeout_seconds:
-                raise TimeoutError(
-                    f"Не удалось дождаться merge lock {lock_path} за {timeout_seconds} секунд"
-                )
-
-            logger.info(
-                "⏳ Waiting for merge lock: %s waited_seconds=%.1f",
-                lock_path,
-                waited_seconds,
-            )
+                raise TimeoutError(f"Не удалось дождаться merge lock {lock_path} за {timeout_seconds} секунд")
+            logger.info("⏳ Waiting for merge lock: %s waited_seconds=%.1f", lock_path, waited_seconds)
             time.sleep(1.0)
-
     try:
         yield lock_path
     finally:
@@ -532,9 +459,7 @@ def _cleanup_sqlite_sidecars(db_path: Path) -> None:
 def _init_merge_db(db_path: Path) -> sqlite3.Connection:
     if db_path.exists():
         db_path.unlink()
-
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    logger.info("🗄️ Initializing merge temp DB: %s", db_path)
     connection = sqlite3.connect(db_path)
     connection.execute("PRAGMA journal_mode=DELETE")
     connection.execute("PRAGMA synchronous=OFF")
@@ -554,130 +479,13 @@ def _init_merge_db(db_path: Path) -> sqlite3.Connection:
     return connection
 
 
-def _json_safe_value(value):
-    if value is None:
-        return None
-
-    if isinstance(value, str):
-        return value
-
-    try:
-        if pd.isna(value):
-            return None
-    except TypeError:
-        pass
-
-    if hasattr(value, "item") and callable(value.item):
-        try:
-            value = value.item()
-        except Exception:
-            pass
-
-    if hasattr(value, "isoformat") and callable(value.isoformat):
-        try:
-            return value.isoformat()
-        except Exception:
-            pass
-
-    if isinstance(value, (bool, int, float)):
-        return value
-
-    return str(value)
-
-
-def _payload_from_row(row: pd.Series, columns: list[str]) -> str:
-    payload = {column: _json_safe_value(row[column]) for column in columns}
-    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-
-
-def _upsert_chunk_rows(
-    connection: sqlite3.Connection,
-    chunk: pd.DataFrame,
-    *,
-    source_order: int,
-    payload_columns: list[str],
-) -> None:
-    current = chunk.copy()
-    for column in (CANONICAL_NAME_COLUMN, CANONICAL_ARTICLE_COLUMN, CANONICAL_PRICE_COLUMN):
-        if column not in current.columns:
-            current[column] = None
-
-    dedupe_keys = _build_dedupe_key(current)
-    has_article = current[CANONICAL_ARTICLE_COLUMN].fillna("").astype(str).str.strip().ne("")
-    has_price = pd.to_numeric(current[CANONICAL_PRICE_COLUMN], errors="coerce").notna()
-
-    records = []
-    for row_number, (_, row) in enumerate(current.iterrows()):
-        records.append(
-            (
-                str(dedupe_keys.iloc[row_number]),
-                int(bool(has_article.iloc[row_number])),
-                int(bool(has_price.iloc[row_number])),
-                source_order,
-                _payload_from_row(row, payload_columns),
-            )
-        )
-
-    if not records:
-        return
-
-    connection.executemany(
-        """
-        INSERT INTO merged_catalog (dedupe_key, has_article, has_price, source_order, payload_json)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(dedupe_key) DO UPDATE SET
-            has_article = excluded.has_article,
-            has_price = excluded.has_price,
-            source_order = excluded.source_order,
-            payload_json = excluded.payload_json
-        WHERE
-            excluded.has_article > merged_catalog.has_article
-            OR (
-                excluded.has_article = merged_catalog.has_article
-                AND excluded.has_price > merged_catalog.has_price
-            )
-            OR (
-                excluded.has_article = merged_catalog.has_article
-                AND excluded.has_price = merged_catalog.has_price
-                AND excluded.source_order < merged_catalog.source_order
-            )
-        """,
-        records,
-    )
-    connection.commit()
-
-
 def _upsert_records_batch(
     connection: sqlite3.Connection,
     records: list[tuple[str, int, int, int, str]],
 ) -> None:
-    if not records:
-        return
-
-    connection.executemany(
-        """
-        INSERT INTO merged_catalog (dedupe_key, has_article, has_price, source_order, payload_json)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(dedupe_key) DO UPDATE SET
-            has_article = excluded.has_article,
-            has_price = excluded.has_price,
-            source_order = excluded.source_order,
-            payload_json = excluded.payload_json
-        WHERE
-            excluded.has_article > merged_catalog.has_article
-            OR (
-                excluded.has_article = merged_catalog.has_article
-                AND excluded.has_price > merged_catalog.has_price
-            )
-            OR (
-                excluded.has_article = merged_catalog.has_article
-                AND excluded.has_price = merged_catalog.has_price
-                AND excluded.source_order < merged_catalog.source_order
-            )
-        """,
-        records,
-    )
-    connection.commit()
+    if records:
+        connection.executemany(UPSERT_SQL, records)
+        connection.commit()
 
 
 def _write_merged_catalog_from_db(
@@ -689,20 +497,18 @@ def _write_merged_catalog_from_db(
     part_path = _output_part_path(output_path)
     if part_path.exists():
         part_path.unlink()
-
-    logger.info("📝 Writing merged catalog from temp DB: output=%s part=%s", output_path, part_path)
     try:
         with part_path.open("w", encoding="utf-8", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=columns, delimiter=";")
             writer.writeheader()
-            cursor = connection.execute("SELECT payload_json FROM merged_catalog ORDER BY dedupe_key")
-            for (payload_json,) in cursor:
+            for payload_json, in connection.execute("SELECT payload_json FROM merged_catalog ORDER BY dedupe_key"):
                 payload = json.loads(payload_json)
-                row = {}
-                for column in columns:
-                    value = payload.get(column, "")
-                    row[column] = "" if value is None else value
-                writer.writerow(row)
+                writer.writerow(
+                    {
+                        column: "" if payload.get(column) is None else payload.get(column, "")
+                        for column in columns
+                    }
+                )
         part_path.replace(output_path)
     except Exception:
         if part_path.exists():
@@ -713,22 +519,91 @@ def _write_merged_catalog_from_db(
 def merge_catalog_frames(frames: Iterable[pd.DataFrame]) -> pd.DataFrame:
     prepared_frames: list[pd.DataFrame] = []
     for source_order, frame in enumerate(frames):
-        prepared_frames.append(_prepare_merge_frame(frame, source_order))
-
+        current = frame.copy()
+        for column in (CANONICAL_NAME_COLUMN, CANONICAL_ARTICLE_COLUMN, CANONICAL_PRICE_COLUMN):
+            if column not in current.columns:
+                current[column] = None
+        current["__source_order"] = source_order
+        current["__has_article"] = current[CANONICAL_ARTICLE_COLUMN].fillna("").astype(str).str.strip() != ""
+        current["__has_price"] = pd.to_numeric(current[CANONICAL_PRICE_COLUMN], errors="coerce").notna()
+        current["__dedupe_key"] = _build_dedupe_key(current)
+        prepared_frames.append(current)
     if not prepared_frames:
         raise ValueError("Нет входных фреймов для объединения")
-
     merged = pd.concat(prepared_frames, ignore_index=True)
-
-    # При дублях предпочитаем записи с артикулом и валидной ценой,
-    # затем порядок источников (детерминированно по имени файла).
     merged = merged.sort_values(
         by=["__dedupe_key", "__has_article", "__has_price", "__source_order"],
         ascending=[True, False, False, True],
     )
-    deduped = merged.drop_duplicates(subset=["__dedupe_key"], keep="first")
+    return merged.drop_duplicates(subset=["__dedupe_key"], keep="first").drop(
+        columns=["__source_order", "__has_article", "__has_price", "__dedupe_key"]
+    )
 
-    return deduped.drop(columns=["__source_order", "__has_article", "__has_price", "__dedupe_key"])
+
+def _stream_source_into_db(
+    connection: sqlite3.Connection,
+    *,
+    source_path: Path,
+    source_order: int,
+    source_columns: list[str],
+    batch_size: int,
+    progress_rows: int,
+    lock_path: Path | None,
+    rss_limit_mb: int | None,
+) -> tuple[int, int, int]:
+    rows = 0
+    batches = 0
+    skipped = 0
+    next_progress = progress_rows
+    pending: list[tuple[str, int, int, int, str]] = []
+
+    with source_path.open("r", encoding="utf-8-sig", errors="replace", newline="") as handle:
+        reader = csv.DictReader(handle, delimiter=";")
+        if reader.fieldnames is None:
+            logger.warning("⚠️ Empty merge source header: %s", source_path)
+            return 0, 0, 0
+        for line_number, raw_row in enumerate(reader, start=2):
+            if raw_row is None:
+                continue
+            extra_values = raw_row.pop(None, None)
+            if extra_values and any(str(value).strip() for value in extra_values):
+                skipped += 1
+                if skipped <= 3:
+                    logger.warning(
+                        "⚠️ Skipping malformed merge row: file=%s line=%s extra_fields=%s",
+                        source_path,
+                        line_number,
+                        len(extra_values),
+                    )
+                continue
+            row = dict(raw_row)
+            for column in source_columns:
+                row.setdefault(column, "")
+            rows += 1
+            pending.append(_build_upsert_record(row, source_order=source_order, payload_columns=source_columns))
+            if len(pending) >= batch_size:
+                _upsert_records_batch(connection, pending)
+                pending.clear()
+                batches += 1
+                _touch_lock_file(lock_path)
+                _enforce_rss_budget(rss_limit_mb, context=f"merge source {source_path.name}")
+                if rows >= next_progress:
+                    rss_value = _current_rss_mb()
+                    logger.info(
+                        "📥 Merge source progress: file=%s rows=%s batches=%s rss_mb=%s",
+                        source_path.name,
+                        rows,
+                        batches,
+                        f"{rss_value:.1f}" if rss_value is not None else "n/a",
+                    )
+                    next_progress += progress_rows
+
+    if pending:
+        _upsert_records_batch(connection, pending)
+        batches += 1
+        _touch_lock_file(lock_path)
+        _enforce_rss_budget(rss_limit_mb, context=f"merge source {source_path.name} tail")
+    return rows, batches, skipped
 
 
 def _build_merged_catalog_streaming(clean_dir: Path, output_path: Path) -> Path:
@@ -736,23 +611,21 @@ def _build_merged_catalog_streaming(clean_dir: Path, output_path: Path) -> Path:
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     logger.info("🔗 Merge catalog start: clean_dir=%s output=%s", clean_dir, output_path)
-
     sources = _catalog_sources(clean_dir, output_path)
     if not sources:
         raise FileNotFoundError(f"В папке {clean_dir} не найдено файлов *_clean.csv")
     logger.info("🔗 Merge catalog sources: count=%s files=%s", len(sources), ", ".join(path.name for path in sources))
-
     latest_source_mtime = max(path.stat().st_mtime for path in sources)
     if output_path.exists() and output_path.stat().st_mtime >= latest_source_mtime:
         logger.info("♻️ Reusing up-to-date merged catalog: %s", output_path)
         return output_path
 
-    merge_batch_size = _read_env_int("REMO_MERGE_DB_BATCH_SIZE", DEFAULT_MERGE_DB_BATCH_SIZE)
-    merge_progress_rows = _read_env_int("REMO_MERGE_PROGRESS_ROWS", DEFAULT_MERGE_PROGRESS_ROWS)
+    batch_size = _read_env_int("REMO_MERGE_DB_BATCH_SIZE", DEFAULT_MERGE_DB_BATCH_SIZE)
+    progress_rows = _read_env_int("REMO_MERGE_PROGRESS_ROWS", DEFAULT_MERGE_PROGRESS_ROWS)
     logger.info(
         "🧠 Merge config: batch_size=%s progress_rows=%s memory_limit_mb=%s",
-        merge_batch_size,
-        merge_progress_rows,
+        batch_size,
+        progress_rows,
         os.getenv("REMO_MERGE_MAX_RSS_MB", "disabled"),
     )
 
@@ -760,128 +633,60 @@ def _build_merged_catalog_streaming(clean_dir: Path, output_path: Path) -> Path:
         if output_path.exists() and output_path.stat().st_mtime >= latest_source_mtime:
             logger.info("♻️ Merge completed by another worker while waiting: %s", output_path)
             return output_path
-
-        db_path = _sqlite_temp_path(output_path)
+        db_path = _sqlite_temp_path(output_path.stem)
         connection: sqlite3.Connection | None = None
         all_columns: list[str] = []
         seen_columns: set[str] = set()
+        total_rows = 0
         total_batches = 0
-        total_rows_read = 0
-
         try:
             connection = _init_merge_db(db_path)
             for source_order, source_path in enumerate(sources):
                 logger.info("📥 Merge source start: #%s file=%s", source_order + 1, source_path)
                 source_columns = _read_catalog_columns(source_path)
-                for required_column in (CANONICAL_NAME_COLUMN, CANONICAL_ARTICLE_COLUMN, CANONICAL_PRICE_COLUMN):
-                    if required_column not in source_columns:
-                        source_columns.append(required_column)
+                for required in (CANONICAL_NAME_COLUMN, CANONICAL_ARTICLE_COLUMN, CANONICAL_PRICE_COLUMN):
+                    if required not in source_columns:
+                        source_columns.append(required)
                 for column in source_columns:
-                    if column in seen_columns:
-                        continue
-                    seen_columns.add(column)
-                    all_columns.append(column)
-
-                source_batches = 0
-                source_rows = 0
-                skipped_rows = 0
-                next_progress_at = merge_progress_rows
-                pending_records: list[tuple[str, int, int, int, str]] = []
-
-                with source_path.open("r", encoding="utf-8-sig", errors="replace", newline="") as handle:
-                    reader = csv.DictReader(handle, delimiter=";")
-                    if reader.fieldnames is None:
-                        logger.warning("⚠️ Empty merge source header: %s", source_path)
-                        continue
-
-                    for line_number, raw_row in enumerate(reader, start=2):
-                        if raw_row is None:
-                            continue
-
-                        extra_values = raw_row.pop(None, None)
-                        if extra_values and any(str(value).strip() for value in extra_values):
-                            skipped_rows += 1
-                            if skipped_rows <= 3:
-                                logger.warning(
-                                    "⚠️ Skipping malformed merge row: file=%s line=%s extra_fields=%s",
-                                    source_path,
-                                    line_number,
-                                    len(extra_values),
-                                )
-                            continue
-
-                        row = dict(raw_row)
-                        for column in source_columns:
-                            row.setdefault(column, "")
-
-                        source_rows += 1
-                        total_rows_read += 1
-                        pending_records.append(
-                            _build_upsert_record(row, source_order=source_order, payload_columns=source_columns)
-                        )
-
-                        if len(pending_records) >= merge_batch_size:
-                            _upsert_records_batch(connection, pending_records)
-                            pending_records.clear()
-                            source_batches += 1
-                            total_batches += 1
-                            _touch_lock_file(lock_path)
-                            _enforce_merge_memory_budget(context=f"merge source {source_path.name}")
-                            if source_rows >= next_progress_at:
-                                rss_mb = _current_rss_mb()
-                                logger.info(
-                                    "📥 Merge source progress: file=%s rows=%s total_rows=%s batches=%s rss_mb=%s",
-                                    source_path.name,
-                                    source_rows,
-                                    total_rows_read,
-                                    source_batches,
-                                    f"{rss_mb:.1f}" if rss_mb is not None else "n/a",
-                                )
-                                next_progress_at += merge_progress_rows
-
-                if pending_records:
-                    _upsert_records_batch(connection, pending_records)
-                    pending_records.clear()
-                    source_batches += 1
-                    total_batches += 1
-                    _touch_lock_file(lock_path)
-                    _enforce_merge_memory_budget(context=f"merge source {source_path.name} tail")
-
-                if source_rows:
-                    rss_mb = _current_rss_mb()
-                    logger.info(
-                        "✅ Merge source complete: file=%s rows=%s columns=%s batches=%s skipped_rows=%s rss_mb=%s",
-                        source_path.name,
-                        source_rows,
-                        len(source_columns),
-                        source_batches,
-                        skipped_rows,
-                        f"{rss_mb:.1f}" if rss_mb is not None else "n/a",
-                    )
-                else:
-                    logger.info(
-                        "✅ Merge source complete: file=%s rows=%s columns=%s batches=%s skipped_rows=%s",
-                        source_path.name,
-                        source_rows,
-                        len(source_columns),
-                        source_batches,
-                        skipped_rows,
-                    )
-
+                    if column not in seen_columns:
+                        seen_columns.add(column)
+                        all_columns.append(column)
+                rows, batches, skipped = _stream_source_into_db(
+                    connection,
+                    source_path=source_path,
+                    source_order=source_order,
+                    source_columns=source_columns,
+                    batch_size=batch_size,
+                    progress_rows=progress_rows,
+                    lock_path=lock_path,
+                    rss_limit_mb=None,
+                )
+                total_rows += rows
+                total_batches += batches
+                rss_value = _current_rss_mb()
+                logger.info(
+                    "✅ Merge source complete: file=%s rows=%s columns=%s batches=%s skipped_rows=%s rss_mb=%s",
+                    source_path.name,
+                    rows,
+                    len(source_columns),
+                    batches,
+                    skipped,
+                    f"{rss_value:.1f}" if rss_value is not None else "n/a",
+                )
             _touch_lock_file(lock_path)
             _enforce_merge_memory_budget(context="final write")
             _write_merged_catalog_from_db(connection, output_path, columns=all_columns)
-            final_rows = connection.execute("SELECT COUNT(*) FROM merged_catalog").fetchone()[0]
-            rss_mb = _current_rss_mb()
+            final_rows = int(connection.execute("SELECT COUNT(*) FROM merged_catalog").fetchone()[0])
+            rss_value = _current_rss_mb()
             logger.info(
-                "✅ Merge catalog complete: output=%s rows=%s columns=%s total_rows_read=%s total_batches=%s size_bytes=%s rss_mb=%s",
+                "✅ Merge catalog complete: mode=streaming output=%s rows=%s columns=%s total_rows_read=%s total_batches=%s size_bytes=%s rss_mb=%s",
                 output_path,
                 final_rows,
                 len(all_columns),
-                total_rows_read,
+                total_rows,
                 total_batches,
                 output_path.stat().st_size,
-                f"{rss_mb:.1f}" if rss_mb is not None else "n/a",
+                f"{rss_value:.1f}" if rss_value is not None else "n/a",
             )
             return output_path
         finally:
@@ -890,99 +695,390 @@ def _build_merged_catalog_streaming(clean_dir: Path, output_path: Path) -> Path:
             _cleanup_sqlite_sidecars(db_path)
 
 
-def build_merged_catalog(clean_dir: Path, output_path: Path) -> Path:
-    return _build_merged_catalog_streaming(clean_dir, output_path)
+def _select_merge_mode() -> Literal["streaming", "sharded"]:
+    raw_value = str(os.getenv("REMO_MERGE_MODE", "streaming")).strip().lower()
+    mode = raw_value if raw_value in {"streaming", "sharded"} else "streaming"
+    if mode != raw_value:
+        logger.warning("Invalid merge mode %r, using streaming", raw_value)
+    logger.info("🧠 Merge mode selected: %s", mode)
+    return mode  # type: ignore[return-value]
 
+
+def _resolve_sharded_parallelism() -> tuple[int, int]:
+    workers = _read_env_int("REMO_SHARD_MERGE_WORKERS", DEFAULT_SHARD_MERGE_WORKERS)
+    default_shards = max(DEFAULT_SHARD_MERGE_SHARDS, workers * 4)
+    shards = _read_env_int("REMO_SHARD_MERGE_SHARDS", default_shards)
+    if shards < workers:
+        shards = workers
+    if shards > MAX_SHARD_MERGE_SHARDS:
+        shards = MAX_SHARD_MERGE_SHARDS
+    return workers, shards
+
+
+def _resolve_sharded_worker_limit_mb(workers: int) -> int | None:
+    explicit = _read_env_int("REMO_SHARD_MERGE_WORKER_MAX_RSS_MB", 0, minimum=0)
+    if explicit > 0:
+        return explicit
+    total = _read_env_int("REMO_MERGE_MAX_RSS_MB", 0, minimum=0)
+    if total <= 0:
+        return None
+    return max(512, (total * 3) // (4 * max(1, workers)))
+
+
+def _calc_shard_id(dedupe_key: str, shard_count: int) -> int:
+    digest = hashlib.md5(dedupe_key.encode("utf-8"), usedforsecurity=False).hexdigest()
+    return int(digest[:8], 16) % max(1, shard_count)
+
+
+def _cleanup_sharded_workspace(work_dir: Path) -> None:
+    if work_dir.exists():
+        shutil.rmtree(work_dir, ignore_errors=True)
+
+
+def _partition_source_to_shards(
+    source_path: Path,
+    source_order: int,
+    shard_count: int,
+    work_dir: Path,
+    progress_rows: int,
+    worker_rss_limit_mb: int | None,
+    open_file_limit: int = DEFAULT_SHARD_MERGE_OPEN_FILES,
+) -> PartitionSourceResult:
+    source_path = Path(source_path)
+    partition_dir = Path(work_dir) / "partition"
+    partition_dir.mkdir(parents=True, exist_ok=True)
+    source_columns = _read_catalog_columns(source_path)
+    for required in (CANONICAL_NAME_COLUMN, CANONICAL_ARTICLE_COLUMN, CANONICAL_PRICE_COLUMN):
+        if required not in source_columns:
+            source_columns.append(required)
+
+    rows = 0
+    skipped = 0
+    next_progress = progress_rows
+    shard_paths: dict[int, Path] = {}
+    handles: OrderedDict[int, object] = OrderedDict()
+    rss_peak = _current_rss_mb()
+
+    def get_handle(shard_id: int):
+        handle = handles.get(shard_id)
+        if handle is not None:
+            handles.move_to_end(shard_id)
+            return handle
+        if len(handles) >= max(1, open_file_limit):
+            _, old_handle = handles.popitem(last=False)
+            old_handle.close()
+        target = partition_dir / f"source_{source_order:03d}_shard_{shard_id:03d}.jsonl"
+        shard_paths[shard_id] = target
+        handle = target.open("a", encoding="utf-8", newline="")
+        handles[shard_id] = handle
+        return handle
+
+    try:
+        with source_path.open("r", encoding="utf-8-sig", errors="replace", newline="") as handle:
+            reader = csv.DictReader(handle, delimiter=";")
+            if reader.fieldnames is None:
+                return PartitionSourceResult(source_order, source_path, source_columns, 0, 0, [], rss_peak)
+            for line_number, raw_row in enumerate(reader, start=2):
+                if raw_row is None:
+                    continue
+                extra_values = raw_row.pop(None, None)
+                if extra_values and any(str(value).strip() for value in extra_values):
+                    skipped += 1
+                    if skipped <= 3:
+                        logger.warning("⚠️ Skipping malformed partition row: file=%s line=%s extra_fields=%s", source_path, line_number, len(extra_values))
+                    continue
+                row = dict(raw_row)
+                for column in source_columns:
+                    row.setdefault(column, "")
+                record = _build_upsert_record(row, source_order=source_order, payload_columns=source_columns)
+                shard_id = _calc_shard_id(record[0], shard_count)
+                shard_handle = get_handle(shard_id)
+                shard_handle.write(json.dumps({"dedupe_key": record[0], "has_article": record[1], "has_price": record[2], "source_order": record[3], "payload_json": record[4]}, ensure_ascii=False, separators=(",", ":")))
+                shard_handle.write("\n")
+                rows += 1
+                if rows >= next_progress:
+                    _enforce_rss_budget(worker_rss_limit_mb, context=f"partition source {source_path.name}")
+                    rss_value = _current_rss_mb()
+                    if rss_value is not None:
+                        rss_peak = max(rss_peak or rss_value, rss_value)
+                    logger.info("📥 Partition source progress: file=%s rows=%s rss_mb=%s", source_path.name, rows, f"{rss_value:.1f}" if rss_value is not None else "n/a")
+                    next_progress += progress_rows
+    finally:
+        for file_handle in handles.values():
+            file_handle.close()
+
+    _enforce_rss_budget(worker_rss_limit_mb, context=f"partition source {source_path.name} tail")
+    logger.info("✅ Partition source complete: file=%s rows=%s skipped=%s", source_path.name, rows, skipped)
+    return PartitionSourceResult(source_order, source_path, source_columns, rows, skipped, [shard_paths[key] for key in sorted(shard_paths)], rss_peak)
+
+
+def _reduce_single_shard(
+    shard_id: int,
+    spool_paths: list[Path],
+    all_columns: list[str],
+    reduce_dir: Path,
+    db_batch_size: int,
+    progress_rows: int,
+    worker_rss_limit_mb: int | None,
+) -> ShardReduceResult:
+    reduce_dir = Path(reduce_dir)
+    reduce_dir.mkdir(parents=True, exist_ok=True)
+    db_path = reduce_dir / f"shard_{shard_id:03d}.sqlite3"
+    output_csv_path = reduce_dir / f"shard_{shard_id:03d}.csv"
+    connection: sqlite3.Connection | None = None
+    rows_read = 0
+    next_progress = progress_rows
+    rss_peak = _current_rss_mb()
+    pending: list[tuple[str, int, int, int, str]] = []
+    logger.info("🧠 Reduce shard start: shard=%s files=%s", shard_id, len(spool_paths))
+    try:
+        connection = _init_merge_db(db_path)
+        for spool_path in sorted(Path(path) for path in spool_paths):
+            with spool_path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    payload = json.loads(line)
+                    pending.append((str(payload["dedupe_key"]), int(payload["has_article"]), int(payload["has_price"]), int(payload["source_order"]), str(payload["payload_json"])))
+                    rows_read += 1
+                    if len(pending) >= db_batch_size:
+                        _upsert_records_batch(connection, pending)
+                        pending.clear()
+                        _enforce_rss_budget(worker_rss_limit_mb, context=f"reduce shard {shard_id}")
+                    if rows_read >= next_progress:
+                        rss_value = _current_rss_mb()
+                        if rss_value is not None:
+                            rss_peak = max(rss_peak or rss_value, rss_value)
+                        logger.info("📦 Reduce shard progress: shard=%s rows=%s rss_mb=%s", shard_id, rows_read, f"{rss_value:.1f}" if rss_value is not None else "n/a")
+                        next_progress += progress_rows
+        if pending:
+            _upsert_records_batch(connection, pending)
+            _enforce_rss_budget(worker_rss_limit_mb, context=f"reduce shard {shard_id} tail")
+        _write_merged_catalog_from_db(connection, output_csv_path, columns=all_columns)
+        rows_written = int(connection.execute("SELECT COUNT(*) FROM merged_catalog").fetchone()[0])
+        logger.info("✅ Reduce shard complete: shard=%s rows_read=%s rows_written=%s", shard_id, rows_read, rows_written)
+        return ShardReduceResult(shard_id, rows_read, rows_written, output_csv_path, rss_peak)
+    finally:
+        if connection is not None:
+            connection.close()
+        _cleanup_sqlite_sidecars(db_path)
+
+
+def _finalize_sharded_outputs(
+    *,
+    output_path: Path,
+    all_columns: list[str],
+    reduce_results: dict[int, ShardReduceResult],
+    shard_count: int,
+    lock_path: Path | None,
+) -> tuple[Path, int]:
+    part_path = _output_part_path(output_path)
+    if part_path.exists():
+        part_path.unlink()
+    final_rows = 0
+    logger.info("🧩 Sharded merge finalize start: output=%s shards=%s", output_path, shard_count)
+    try:
+        with part_path.open("w", encoding="utf-8", newline="") as output_handle:
+            writer = csv.writer(output_handle, delimiter=";")
+            writer.writerow(all_columns)
+            for shard_id in range(shard_count):
+                result = reduce_results.get(shard_id)
+                if result is None or not result.output_csv_path.exists():
+                    continue
+                with result.output_csv_path.open("r", encoding="utf-8", newline="") as shard_handle:
+                    reader = csv.reader(shard_handle, delimiter=";")
+                    next(reader, None)
+                    for row in reader:
+                        writer.writerow(row)
+                        final_rows += 1
+                if shard_id % 4 == 0:
+                    _touch_lock_file(lock_path)
+                    _enforce_merge_memory_budget(context="sharded finalize")
+        part_path.replace(output_path)
+    except Exception:
+        if part_path.exists():
+            part_path.unlink()
+        raise
+    logger.info("✅ Sharded merge finalize complete: output=%s rows=%s size_bytes=%s", output_path, final_rows, output_path.stat().st_size)
+    return output_path, final_rows
+
+
+def _collect_executor_results(futures: dict, *, phase_name: str, timeout_seconds: int, lock_path: Path | None) -> list:
+    pending = set(futures)
+    results = []
+    started_at = time.time()
+    try:
+        while pending:
+            if time.time() - started_at > timeout_seconds:
+                raise TimeoutError(f"{phase_name} exceeded timeout of {timeout_seconds} seconds")
+            done, pending = wait(pending, timeout=1.0, return_when=FIRST_COMPLETED)
+            _touch_lock_file(lock_path)
+            _enforce_merge_memory_budget(context=f"{phase_name} parent")
+            for future in done:
+                results.append(future.result())
+        return results
+    except Exception:
+        for future in pending:
+            future.cancel()
+        raise
+
+
+def _run_partition_phase(
+    *,
+    sources: list[Path],
+    work_dir: Path,
+    shard_count: int,
+    workers: int,
+    progress_rows: int,
+    worker_rss_limit_mb: int | None,
+    phase_timeout_seconds: int,
+    lock_path: Path | None,
+) -> list[PartitionSourceResult]:
+    logger.info("🧩 Sharded merge partition start: sources=%s workers=%s", len(sources), workers)
+    if workers <= 1:
+        results = []
+        for source_order, source_path in enumerate(sources):
+            results.append(_partition_source_to_shards(source_path, source_order, shard_count, work_dir, progress_rows, worker_rss_limit_mb))
+            _touch_lock_file(lock_path)
+            _enforce_merge_memory_budget(context="partition parent")
+        return results
+    ctx = multiprocessing.get_context("spawn")
+    with ProcessPoolExecutor(max_workers=workers, mp_context=ctx) as executor:
+        futures = {
+            executor.submit(_partition_source_to_shards, source_path, source_order, shard_count, work_dir, progress_rows, worker_rss_limit_mb): source_path
+            for source_order, source_path in enumerate(sources)
+        }
+        return _collect_executor_results(futures, phase_name="partition", timeout_seconds=phase_timeout_seconds, lock_path=lock_path)
+
+
+def _run_reduce_phase(
+    *,
+    shard_inputs: dict[int, list[Path]],
+    all_columns: list[str],
+    reduce_dir: Path,
+    workers: int,
+    batch_size: int,
+    progress_rows: int,
+    worker_rss_limit_mb: int | None,
+    phase_timeout_seconds: int,
+    lock_path: Path | None,
+) -> list[ShardReduceResult]:
+    logger.info("🧩 Sharded merge reduce start: shards=%s workers=%s", len(shard_inputs), workers)
+    items = sorted(shard_inputs.items())
+    if workers <= 1:
+        results = []
+        for shard_id, spool_paths in items:
+            results.append(_reduce_single_shard(shard_id, spool_paths, all_columns, reduce_dir, batch_size, progress_rows, worker_rss_limit_mb))
+            _touch_lock_file(lock_path)
+            _enforce_merge_memory_budget(context="reduce parent")
+        return results
+    ctx = multiprocessing.get_context("spawn")
+    with ProcessPoolExecutor(max_workers=workers, mp_context=ctx) as executor:
+        futures = {
+            executor.submit(_reduce_single_shard, shard_id, spool_paths, all_columns, reduce_dir, batch_size, progress_rows, worker_rss_limit_mb): shard_id
+            for shard_id, spool_paths in items
+        }
+        return _collect_executor_results(futures, phase_name="reduce", timeout_seconds=phase_timeout_seconds, lock_path=lock_path)
+
+
+def _build_merged_catalog_sharded(clean_dir: Path, output_path: Path) -> Path:
     clean_dir = Path(clean_dir)
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     logger.info("🔗 Merge catalog start: clean_dir=%s output=%s", clean_dir, output_path)
-
     sources = _catalog_sources(clean_dir, output_path)
     if not sources:
         raise FileNotFoundError(f"В папке {clean_dir} не найдено файлов *_clean.csv")
     logger.info("🔗 Merge catalog sources: count=%s files=%s", len(sources), ", ".join(path.name for path in sources))
-
     latest_source_mtime = max(path.stat().st_mtime for path in sources)
     if output_path.exists() and output_path.stat().st_mtime >= latest_source_mtime:
         logger.info("♻️ Reusing up-to-date merged catalog: %s", output_path)
         return output_path
 
-    merge_batch_size = _read_env_int("REMO_MERGE_DB_BATCH_SIZE", DEFAULT_MERGE_DB_BATCH_SIZE)
-    merge_progress_rows = _read_env_int("REMO_MERGE_PROGRESS_ROWS", DEFAULT_MERGE_PROGRESS_ROWS)
+    configured_workers, shard_count = _resolve_sharded_parallelism()
+    partition_workers = min(configured_workers, len(sources))
+    reduce_workers = min(configured_workers, shard_count)
+    worker_rss_limit_mb = _resolve_sharded_worker_limit_mb(configured_workers)
+    phase_timeout_seconds = _read_env_int("REMO_SHARD_MERGE_PHASE_TIMEOUT_SECONDS", DEFAULT_SHARD_MERGE_PHASE_TIMEOUT_SECONDS)
+    progress_rows = _read_env_int("REMO_SHARD_MERGE_PROGRESS_ROWS", DEFAULT_SHARD_MERGE_PROGRESS_ROWS)
+    batch_size = _read_env_int("REMO_MERGE_DB_BATCH_SIZE", DEFAULT_MERGE_DB_BATCH_SIZE)
+    logger.info(
+        "🧠 Sharded merge config: workers=%s shards=%s worker_limit_mb=%s phase_timeout_seconds=%s progress_rows=%s batch_size=%s",
+        configured_workers,
+        shard_count,
+        worker_rss_limit_mb if worker_rss_limit_mb is not None else "disabled",
+        phase_timeout_seconds,
+        progress_rows,
+        batch_size,
+    )
 
     with _merge_build_lock(output_path) as lock_path:
         if output_path.exists() and output_path.stat().st_mtime >= latest_source_mtime:
             logger.info("♻️ Merge completed by another worker while waiting: %s", output_path)
             return output_path
-
-        db_path = _sqlite_temp_path(output_path)
-        connection: sqlite3.Connection | None = None
-        all_columns: list[str] = []
-        seen_columns: set[str] = set()
-        total_batches = 0
-        total_rows_read = 0
-
+        work_dir = Path(tempfile.gettempdir()) / f"remo_merge_{_sanitize_temp_stem(output_path.stem)}_{os.getpid()}_{uuid.uuid4().hex}"
+        reduce_dir = work_dir / "reduce"
+        work_dir.mkdir(parents=True, exist_ok=True)
+        reduce_dir.mkdir(parents=True, exist_ok=True)
         try:
-            connection = _init_merge_db(db_path)
-            for source_order, source_path in enumerate(sources):
-                logger.info("📥 Merge source start: #%s file=%s", source_order + 1, source_path)
-                source_columns = _read_catalog_columns(source_path)
-                for required_column in (CANONICAL_NAME_COLUMN, CANONICAL_ARTICLE_COLUMN, CANONICAL_PRICE_COLUMN):
-                    if required_column not in source_columns:
-                        source_columns.append(required_column)
-                for column in source_columns:
-                    if column in seen_columns:
-                        continue
-                    seen_columns.add(column)
-                    all_columns.append(column)
-
-                source_batches = 0
-                source_rows = 0
-                for chunk in _iter_catalog_chunks(source_path, chunksize=DEFAULT_MERGE_CHUNKSIZE):
-                    source_chunks += 1
-                    total_chunks += 1
-                    source_rows += len(chunk)
-                    total_rows_read += len(chunk)
-                    payload_columns = list(chunk.columns)
-                    for required_column in (CANONICAL_NAME_COLUMN, CANONICAL_ARTICLE_COLUMN, CANONICAL_PRICE_COLUMN):
-                        if required_column not in payload_columns:
-                            payload_columns.append(required_column)
-                    _upsert_chunk_rows(
-                        connection,
-                        chunk,
-                        source_order=source_order,
-                        payload_columns=payload_columns,
-                    )
-                    if source_chunks == 1 or source_chunks % 10 == 0:
-                        logger.info(
-                            "📥 Merge source progress: file=%s chunks=%s rows=%s total_rows=%s",
-                            source_path.name,
-                            source_chunks,
-                            source_rows,
-                            total_rows_read,
-                        )
-                logger.info(
-                    "✅ Merge source complete: file=%s chunks=%s rows=%s columns=%s",
-                    source_path.name,
-                    source_chunks,
-                    source_rows,
-                    len(source_columns),
-                )
-
-            _write_merged_catalog_from_db(connection, output_path, columns=all_columns)
-            final_rows = connection.execute("SELECT COUNT(*) FROM merged_catalog").fetchone()[0]
+            partition_results = _run_partition_phase(
+                sources=sources,
+                work_dir=work_dir,
+                shard_count=shard_count,
+                workers=partition_workers,
+                progress_rows=progress_rows,
+                worker_rss_limit_mb=worker_rss_limit_mb,
+                phase_timeout_seconds=phase_timeout_seconds,
+                lock_path=lock_path,
+            )
+            all_columns: list[str] = []
+            seen_columns: set[str] = set()
+            shard_inputs: dict[int, list[Path]] = {}
+            for result in sorted(partition_results, key=lambda item: item.source_order):
+                for column in result.source_columns:
+                    if column not in seen_columns:
+                        seen_columns.add(column)
+                        all_columns.append(column)
+                for shard_file in result.shard_file_paths:
+                    match = re.search(r"_shard_(\d+)\.jsonl$", shard_file.name)
+                    if match:
+                        shard_inputs.setdefault(int(match.group(1)), []).append(shard_file)
+            reduce_results = _run_reduce_phase(
+                shard_inputs=shard_inputs,
+                all_columns=all_columns,
+                reduce_dir=reduce_dir,
+                workers=reduce_workers,
+                batch_size=batch_size,
+                progress_rows=progress_rows,
+                worker_rss_limit_mb=worker_rss_limit_mb,
+                phase_timeout_seconds=phase_timeout_seconds,
+                lock_path=lock_path,
+            )
+            reduce_map = {result.shard_id: result for result in reduce_results}
+            _, final_rows = _finalize_sharded_outputs(output_path=output_path, all_columns=all_columns, reduce_results=reduce_map, shard_count=shard_count, lock_path=lock_path)
             logger.info(
-                "✅ Merge catalog complete: output=%s rows=%s columns=%s total_rows_read=%s total_chunks=%s size_bytes=%s",
+                "✅ Merge catalog complete: mode=sharded output=%s partition_sources=%s partition_rows=%s reduce_shards=%s reduced_rows=%s final_rows=%s size_bytes=%s rss_mb=%s",
                 output_path,
+                len(partition_results),
+                sum(item.rows_processed for item in partition_results),
+                len(reduce_results),
+                sum(item.rows_read for item in reduce_results),
                 final_rows,
-                len(all_columns),
-                total_rows_read,
-                total_chunks,
                 output_path.stat().st_size,
+                f"{_current_rss_mb():.1f}" if _current_rss_mb() is not None else "n/a",
             )
             return output_path
         finally:
-            if connection is not None:
-                connection.close()
-            _cleanup_sqlite_sidecars(db_path)
+            _cleanup_sharded_workspace(work_dir)
+
+
+def build_merged_catalog(clean_dir: Path, output_path: Path) -> Path:
+    mode = _select_merge_mode()
+    if mode == "streaming":
+        return _build_merged_catalog_streaming(clean_dir, output_path)
+    try:
+        return _build_merged_catalog_sharded(clean_dir, output_path)
+    except FileNotFoundError:
+        raise
+    except (BrokenProcessPool, MemoryError, OSError, RuntimeError, TimeoutError, sqlite3.OperationalError) as error:
+        logger.warning("❌ Sharded merge failed: %s", error, exc_info=True)
+        logger.info("↩️ Falling back to streaming merge")
+        return _build_merged_catalog_streaming(clean_dir, output_path)
