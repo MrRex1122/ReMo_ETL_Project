@@ -148,6 +148,10 @@ class CatalogMergeTests(unittest.TestCase):
         with patch.dict(os.environ, {"REMO_MERGE_MODE": "broken-value"}, clear=False):
             self.assertEqual(_select_merge_mode(), "streaming")
 
+    def test_select_merge_mode_defaults_to_sharded_when_env_missing(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(_select_merge_mode(), "sharded")
+
     def test_resolve_sharded_parallelism_clamps_invalid_values(self):
         with patch.dict(
             os.environ,

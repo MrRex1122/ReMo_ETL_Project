@@ -696,7 +696,7 @@ def _build_merged_catalog_streaming(clean_dir: Path, output_path: Path) -> Path:
 
 
 def _select_merge_mode() -> Literal["streaming", "sharded"]:
-    raw_value = str(os.getenv("REMO_MERGE_MODE", "streaming")).strip().lower()
+    raw_value = str(os.getenv("REMO_MERGE_MODE", "sharded")).strip().lower()
     mode = raw_value if raw_value in {"streaming", "sharded"} else "streaming"
     if mode != raw_value:
         logger.warning("Invalid merge mode %r, using streaming", raw_value)
