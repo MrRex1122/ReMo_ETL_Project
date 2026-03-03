@@ -16,6 +16,19 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import pandas as pd
 
+from catalog_search import (
+    SEARCH_CATALOG_FILENAME,
+    clean_text_value as shared_clean_text_value,
+    classify_item_type as shared_classify_item_type,
+    derive_branch_from_text as shared_derive_branch_from_text,
+    extract_item_markers as shared_extract_item_markers,
+    get_search_catalog_readiness,
+    normalize_branch_path as shared_normalize_branch_path,
+    normalize_catalog_branch_from_row as shared_normalize_catalog_branch_from_row,
+    normalize_query_terms as shared_normalize_query_terms,
+    normalize_text as shared_normalize_text,
+    tokenize as shared_tokenize,
+)
 from catalog_merge import get_catalog_readiness
 from catalog_schema import (
     CANONICAL_ARTICLE_COLUMN,
@@ -257,6 +270,28 @@ class ReMoMatcher:
 
     def _resolve_catalog_csv_path(self, db_csv_path: str) -> str:
         source_path = Path(str(db_csv_path))
+        search_readiness = get_search_catalog_readiness(source_path)
+        if source_path.is_dir() or source_path.name == SEARCH_CATALOG_FILENAME:
+            if search_readiness.state == "ready":
+                logger.info("📄 Matcher using prepared search catalog: %s", search_readiness.search_path)
+                return str(search_readiness.search_path)
+            merged_readiness = get_catalog_readiness(source_path)
+            if merged_readiness.state == "ready":
+                logger.info(
+                    "📄 Matcher falling back to merged catalog: %s reason=%s",
+                    merged_readiness.merged_path,
+                    search_readiness.reason or "search catalog is not ready",
+                )
+                return str(merged_readiness.merged_path)
+            if merged_readiness.state == "missing":
+                raise FileNotFoundError(
+                    merged_readiness.reason or f"Merged catalog not prepared: {merged_readiness.merged_path}"
+                )
+            if merged_readiness.state == "stale":
+                raise RuntimeError(
+                    merged_readiness.reason or f"Merged catalog is stale: {merged_readiness.merged_path}"
+                )
+            raise RuntimeError(merged_readiness.reason or f"Catalog is not ready: {source_path}")
         readiness = get_catalog_readiness(source_path)
         if readiness.state == "ready":
             logger.info("📄 Matcher using prepared merged catalog: %s", readiness.merged_path)
@@ -319,12 +354,7 @@ class ReMoMatcher:
 
     @staticmethod
     def _clean_text_value(value: object) -> str:
-        if pd.isna(value):
-            return ""
-        text = str(value).strip()
-        if text.lower() in {"nan", "none", "<na>"}:
-            return ""
-        return text
+        return shared_clean_text_value(value)
 
     @staticmethod
     def _parse_price_value(value: object) -> Optional[float]:
@@ -342,49 +372,20 @@ class ReMoMatcher:
             return None
 
     def _normalize_query_terms(self, text: str) -> str:
-        normalized = str(text or "").lower()
-        replacements = dict(TERM_NORMALIZATION_ALIASES)
-        replacements.update(getattr(self, "taxonomy_rules", {}).get("synonyms", {}))
-        for source, target in replacements.items():
-            normalized = normalized.replace(source, target)
-        return normalized.replace("ё", "е")
+        return shared_normalize_query_terms(text, synonyms=getattr(self, "taxonomy_rules", {}).get("synonyms", {}))
 
     def _normalize_text(self, text: str) -> str:
-        normalized = self._normalize_query_terms(text)
-        normalized = re.sub(r"[^\w\dа-я]+", " ", normalized, flags=re.IGNORECASE)
-        return " ".join(normalized.split())
+        return shared_normalize_text(text, synonyms=getattr(self, "taxonomy_rules", {}).get("synonyms", {}))
 
     def _tokenize(self, text: str) -> List[str]:
-        normalized = self._normalize_text(text)
-        tokens = re.findall(r"[a-zа-я0-9]+", normalized, flags=re.IGNORECASE)
-        return [token for token in tokens if len(token) >= 2 and token not in GROUP_TOKEN_STOPWORDS]
+        return shared_tokenize(
+            text,
+            synonyms=getattr(self, "taxonomy_rules", {}).get("synonyms", {}),
+            stopwords=GROUP_TOKEN_STOPWORDS,
+        )
 
     def _classify_item_type(self, text: str) -> str:
-        normalized = self._normalize_query_terms(text)
-        if "патч корд" in normalized:
-            return "patch_cord"
-        bulk_markers = ("витая пара", "utp", "ftp", "f utp", "u utp", "бухта", "305м", "500м")
-        if any(marker in normalized for marker in bulk_markers):
-            return "bulk_twisted_pair"
-        if "коаксиал" in normalized or "rg " in normalized or "75 ом" in normalized or "50 ом" in normalized:
-            return "coax"
-        if "pdu" in normalized or "блок розеток" in normalized:
-            return "pdu"
-        if "шкаф" in normalized or "стойк" in normalized:
-            return "rack"
-        if "патч панел" in normalized:
-            return "patch_panel"
-        if "кабель" in normalized:
-            return "cable"
-        if "провод" in normalized:
-            return "wire"
-        if "автомат" in normalized:
-            return "breaker"
-        if "розетк" in normalized:
-            return "socket"
-        if "датчик" in normalized:
-            return "sensor"
-        return "other"
+        return shared_classify_item_type(text, synonyms=getattr(self, "taxonomy_rules", {}).get("synonyms", {}))
 
     def _is_disallowed_category_substitution(self, query: str, candidate_name: str) -> bool:
         query_type = self._classify_item_type(query)
@@ -431,99 +432,17 @@ class ReMoMatcher:
         conn.close()
 
     def _normalize_branch_path(self, segments: Iterable[str]) -> str:
-        cleaned = []
-        for segment in segments:
-            text = self._clean_text_value(segment)
-            if not text:
-                continue
-            text = text.replace("|", " ").replace("/", " ").replace("\\", " ")
-            text = re.sub(r"\s+", " ", text).strip().lower()
-            if text:
-                cleaned.append(text)
-        return BRANCH_PATH_SEPARATOR.join(cleaned)
+        return shared_normalize_branch_path(segments)
 
     def _derive_branch_from_text(self, *texts: str) -> str:
-        merged = self._normalize_text(" ".join(filter(None, texts)))
-        if not merged:
-            return "прочее"
-
-        ranked_rules = sorted(
-            getattr(self, "taxonomy_rules", {}).get("keyword_routes", []),
-            key=lambda item: float(item.get("weight", 1.0)),
-            reverse=True,
+        return shared_derive_branch_from_text(
+            *texts,
+            keyword_routes=getattr(self, "taxonomy_rules", {}).get("keyword_routes", []),
+            synonyms=getattr(self, "taxonomy_rules", {}).get("synonyms", {}),
         )
-        for rule in ranked_rules:
-            patterns = [self._normalize_text(item) for item in rule.get("patterns", [])]
-            if any(pattern and pattern in merged for pattern in patterns):
-                return self._normalize_branch_path(rule.get("path", []))
-
-        entity_type = self._classify_item_type(merged)
-        if entity_type == "pdu":
-            if "zero u" in merged:
-                return "телеком > питание > pdu > zero u"
-            return "телеком > питание > pdu"
-        if entity_type == "patch_panel":
-            return "телеком > коммутация > патч панели"
-        if entity_type == "patch_cord":
-            return "телеком > кабели > патч корды"
-        if entity_type == "rack":
-            return "телеком > шкафы"
-        if entity_type == "sensor":
-            return "автоматика > датчики"
-        if entity_type == "breaker":
-            return "электрика > автоматы"
-        if entity_type == "socket":
-            return "электрика > розетки"
-        if entity_type in {"cable", "bulk_twisted_pair", "coax"}:
-            if "cat6" in merged:
-                return "телеком > кабели > витая пара > cat6"
-            if "cat5e" in merged:
-                return "телеком > кабели > витая пара > cat5e"
-            if "силов" in merged:
-                return "электрика > кабели > силовые"
-            return "электрика > кабели"
-        if entity_type == "wire":
-            return "электрика > провода"
-        if "светильник" in merged:
-            return "свет > светильники"
-        return "прочее"
 
     def _normalize_catalog_branch(self, row: pd.Series | Dict[str, Any]) -> str:
-        class_code = self._clean_text_value(row.get("Код класса"))
-        class_name = self._clean_text_value(row.get("Название класса"))
-        item_type = self._clean_text_value(row.get("Тип изделия"))
-        cable_exec = self._clean_text_value(row.get("Тип исполнения кабельного изделия"))
-        name = self._clean_text_value(row.get(CANONICAL_NAME_COLUMN))
-
-        rules = getattr(self, "taxonomy_rules", {})
-        class_code_map = {
-            str(key).strip().lower(): self._normalize_branch_path(value)
-            for key, value in rules.get("class_code_map", {}).items()
-        }
-        class_name_map = {
-            self._normalize_text(key): self._normalize_branch_path(value)
-            for key, value in rules.get("class_name_map", {}).items()
-        }
-
-        if class_code and class_code.lower() in class_code_map:
-            return class_code_map[class_code.lower()]
-
-        normalized_class_name = self._normalize_text(class_name)
-        if normalized_class_name and normalized_class_name in class_name_map:
-            return class_name_map[normalized_class_name]
-
-        derived = self._derive_branch_from_text(class_name, item_type, cable_exec, name)
-        if derived != "прочее":
-            return derived
-
-        extra_segments: List[str] = []
-        if class_name:
-            extra_segments.append(class_name)
-        elif item_type:
-            extra_segments.append(item_type)
-        elif name:
-            extra_segments.append(name)
-        return self._normalize_branch_path(extra_segments) or "прочее"
+        return shared_normalize_catalog_branch_from_row(row, taxonomy_rules=getattr(self, "taxonomy_rules", {}))
 
     def _build_branch_index(self) -> None:
         self.branch_index = defaultdict(list)
@@ -588,9 +507,52 @@ class ReMoMatcher:
 
             article = self._clean_text_value(row.get(CANONICAL_ARTICLE_COLUMN))
             price = self._parse_price_value(row.get(CANONICAL_PRICE_COLUMN))
-            normalized_name = self._normalize_text(name)
-            tokens = sorted(set(self._tokenize(normalized_name)))
-            branch_path = self._normalize_catalog_branch(row)
+            item_type = self._clean_text_value(row.get("Тип изделия"))
+            class_name = self._clean_text_value(row.get("Название класса"))
+            combined_text = " ".join(filter(None, [name, item_type, class_name]))
+            normalized_name = self._clean_text_value(row.get("search_normalized_name")) or self._normalize_text(name)
+
+            tokens: List[str] = []
+            precomputed_tokens_raw = self._clean_text_value(row.get("search_tokens_json"))
+            if precomputed_tokens_raw:
+                try:
+                    loaded_tokens = json.loads(precomputed_tokens_raw)
+                    if isinstance(loaded_tokens, list):
+                        tokens = sorted(
+                            {
+                                self._clean_text_value(token)
+                                for token in loaded_tokens
+                                if self._clean_text_value(token)
+                            }
+                        )
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    tokens = []
+            if not tokens:
+                tokens = sorted(set(self._tokenize(combined_text or normalized_name)))
+
+            branch_path = self._clean_text_value(row.get("search_branch_path")) or self._normalize_catalog_branch(row)
+            branch_leaf = self._clean_text_value(row.get("search_branch_leaf")) or branch_path.split(BRANCH_PATH_SEPARATOR)[-1]
+            entity_type = self._clean_text_value(row.get("search_entity_type")) or self._classify_item_type(combined_text)
+
+            item_markers: Dict[str, Any] = {}
+            precomputed_markers_raw = self._clean_text_value(row.get("search_item_markers_json"))
+            if precomputed_markers_raw:
+                try:
+                    loaded_markers = json.loads(precomputed_markers_raw)
+                    if isinstance(loaded_markers, dict):
+                        item_markers = {
+                            self._clean_text_value(key): self._clean_text_value(value)
+                            for key, value in loaded_markers.items()
+                            if self._clean_text_value(key)
+                        }
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    item_markers = {}
+            if not item_markers:
+                item_markers = shared_extract_item_markers(
+                    combined_text,
+                    attribute_patterns=getattr(self, "taxonomy_rules", {}).get("attribute_patterns", {}),
+                    synonyms=getattr(self, "taxonomy_rules", {}).get("synonyms", {}),
+                )
 
             item = {
                 "name": name,
@@ -601,24 +563,14 @@ class ReMoMatcher:
                 "row_idx": int(idx),
                 "tokens": tokens,
                 "branch_path": branch_path,
-                "branch_leaf": branch_path.split(BRANCH_PATH_SEPARATOR)[-1],
-                "class_name": self._clean_text_value(row.get("Название класса")),
+                "branch_leaf": branch_leaf,
+                "class_name": class_name,
                 "class_code": self._clean_text_value(row.get("Код класса")),
-                "item_type": self._clean_text_value(row.get("Тип изделия")),
+                "item_type": item_type,
                 "cable_execution": self._clean_text_value(row.get("Тип исполнения кабельного изделия")),
                 "manufacturer": self._clean_text_value(row.get("Производитель")),
-                "entity_type": self._classify_item_type(
-                    " ".join(
-                        filter(
-                            None,
-                            [
-                                name,
-                                self._clean_text_value(row.get("Тип изделия")),
-                                self._clean_text_value(row.get("Название класса")),
-                            ],
-                        ),
-                    ),
-                ),
+                "entity_type": entity_type,
+                "item_markers": item_markers,
             }
 
             self.catalog_dict.setdefault(item["name_lc"], item)

@@ -16,6 +16,7 @@ import logging
 import io
 import json
 from cloudflare_r2_export import upload_file_to_r2
+from catalog_search import get_search_catalog_readiness, refresh_search_catalog
 from config import get_catalog_csv_path, get_upload_dir, get_matcher_cache_db_path
 from catalog_merge import get_catalog_readiness, get_merged_catalog_path, refresh_merged_catalog
 from catalog_snapshot import prepare_catalog_duplicate_report, prepare_catalog_snapshot
@@ -128,6 +129,21 @@ def _catalog_source_path() -> Path:
     if clean_dir.exists():
         return get_merged_catalog_path(clean_dir)
     return get_catalog_csv_path(st.session_state.get('db_csv_path'))
+
+
+def _matcher_catalog_source_path() -> Path:
+    """Выбрать источник для matcher: свежий search CSV или fallback на merged."""
+    merged_path = _catalog_source_path()
+    search_readiness = get_search_catalog_readiness(merged_path)
+    if search_readiness.state == "ready":
+        logger.info("📄 Matcher using prepared search catalog: %s", search_readiness.search_path)
+        return search_readiness.search_path
+    logger.info(
+        "📄 Matcher falling back to merged catalog: %s reason=%s",
+        search_readiness.merged_path,
+        search_readiness.reason or "search catalog is not ready",
+    )
+    return search_readiness.merged_path
 
 
 
@@ -273,7 +289,7 @@ def _safe_matcher_mode_select(current_mode: str, mode_options: list[str]) -> str
 
 def get_matcher() -> ReMoMatcher:
     """Получить или инициализировать экземпляр matcher"""
-    db_csv = str(_catalog_source_path())
+    db_csv = str(_matcher_catalog_source_path())
     settings_signature = (
         int(st.session_state.get('matcher_parallel_requests', 1)),
         int(st.session_state.get('matcher_catalog_sample_items', 500)),
@@ -287,7 +303,6 @@ def get_matcher() -> ReMoMatcher:
 
     if needs_reinit:
         logger.info("🔄 Инициализация ReMoMatcher...")
-        logger.info("📄 Matcher using prepared merged catalog: %s", db_csv)
         api_key = _get_gemini_api_key()
         
         if not api_key:
@@ -501,6 +516,12 @@ def _reset_catalog_runtime_state() -> None:
     st.session_state.catalog_snapshot_drive_csv_name = None
     st.session_state.catalog_snapshot_r2_csv_url = None
     st.session_state.catalog_snapshot_r2_csv_key = None
+
+
+def _reset_matcher_runtime_state() -> None:
+    st.session_state.matcher = None
+    st.session_state.matcher_db_csv = None
+    st.session_state.matcher_settings_signature = None
 
 
 def _rebuild_merged_catalog_from_clean(clean_dir: Path) -> Path:
@@ -738,6 +759,7 @@ def main():
 
         catalog_path = _catalog_source_path()
         catalog_readiness = get_catalog_readiness(catalog_path)
+        search_readiness = get_search_catalog_readiness(catalog_path)
         if catalog_readiness.state != "ready" and st.session_state.catalog_snapshot_bundle is not None:
             st.session_state.catalog_snapshot_bundle = None
             st.session_state.catalog_snapshot_xlsx_status = "idle"
@@ -777,6 +799,23 @@ def main():
             ).isoformat(timespec="seconds")
             st.caption(f"Последнее обновление merged БД: {merged_updated_at}")
 
+        st.caption("Поисковая БД для matcher")
+        st.info(
+            "Поисковая БД используется matcher для быстрого сопоставления. "
+            "Если она не собрана или устарела, matcher будет работать на полной merged БД."
+        )
+        st.code(str(search_readiness.search_path))
+        st.write(
+            f"Состояние поисковой БД: **{readiness_labels.get(search_readiness.state, search_readiness.state)}**"
+        )
+        if search_readiness.reason:
+            st.caption(search_readiness.reason)
+        if search_readiness.search_path.exists():
+            search_updated_at = datetime.fromtimestamp(
+                search_readiness.search_path.stat().st_mtime
+            ).isoformat(timespec="seconds")
+            st.caption(f"Последнее обновление поисковой БД: {search_updated_at}")
+
         if st.button("🔄 Обновить БД"):
             if catalog_readiness.clean_dir is None or catalog_readiness.clean_sources_count == 0:
                 st.error(catalog_readiness.reason or "❌ Нет clean-файлов для пересборки БД")
@@ -788,6 +827,19 @@ def main():
                 except Exception as e:
                     logger.error(f"❌ Ошибка обновления итоговой БД: {e}", exc_info=True)
                     st.error(f"❌ Не удалось обновить итоговую БД: {e}")
+
+        if st.button("🪶 Обновить поисковую БД"):
+            if catalog_readiness.state != "ready" or catalog_readiness.clean_dir is None:
+                st.error("❌ Сначала соберите итоговую БД через `🔄 Обновить БД`")
+            else:
+                try:
+                    logger.info("🪶 Search catalog rebuild requested: clean_dir=%s", catalog_readiness.clean_dir)
+                    search_path = refresh_search_catalog(catalog_readiness.clean_dir)
+                    _reset_matcher_runtime_state()
+                    st.success(f"✓ Поисковая БД обновлена: {search_path.name}")
+                except Exception as e:
+                    logger.error("❌ Search catalog rebuild failed: %s", e, exc_info=True)
+                    st.error(f"❌ Не удалось обновить поисковую БД: {e}")
 
         if st.button("♻️ Сбросить состояние БД"):
             _reset_catalog_runtime_state()
