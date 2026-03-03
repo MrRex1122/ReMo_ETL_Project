@@ -101,6 +101,15 @@ def prune_stale_snapshot_exports(
         candidate.unlink()
         removed_paths.append(candidate)
 
+    if removed_paths:
+        logger.info(
+            "🧹 Snapshot export cleanup removed %s stale file(s): %s",
+            len(removed_paths),
+            ", ".join(str(path.name) for path in removed_paths),
+        )
+    else:
+        logger.info("🧹 Snapshot export cleanup found no stale files in %s", export_dir)
+
     return removed_paths
 
 
@@ -111,6 +120,7 @@ def _xlsx_part_path(target_xlsx: Path) -> Path:
 def get_public_export_dir(public_dir: Path | None = None) -> Path:
     target_dir = Path(public_dir) if public_dir is not None else PUBLIC_STATIC_DIR
     target_dir.mkdir(parents=True, exist_ok=True)
+    logger.info("📁 Snapshot public export dir ready: %s", target_dir)
     return target_dir
 
 
@@ -131,11 +141,18 @@ def stage_public_export(
     part_path = final_path.with_suffix(f"{final_path.suffix}.part")
 
     if final_path.exists():
+        logger.info("♻️ Reusing existing public export: %s -> %s", source_path, final_path)
         return final_path, build_public_export_url(final_path)
 
     if part_path.exists():
         part_path.unlink()
 
+    logger.info(
+        "📤 Staging public export: source=%s target=%s add_utf8_bom=%s",
+        source_path,
+        final_path,
+        add_utf8_bom,
+    )
     try:
         with source_path.open("rb") as src, part_path.open("wb") as dst:
             if add_utf8_bom:
@@ -146,6 +163,13 @@ def stage_public_export(
         if part_path.exists():
             part_path.unlink()
         raise
+
+    logger.info(
+        "✅ Public export ready: %s (%s bytes) url=%s",
+        final_path,
+        final_path.stat().st_size,
+        build_public_export_url(final_path),
+    )
 
     return final_path, build_public_export_url(final_path)
 
@@ -171,6 +195,12 @@ def build_duplicate_report_from_csv(
     chunksize: int = DEFAULT_DUPLICATE_CHUNKSIZE,
 ) -> tuple[dict[str, int], Path | None]:
     source_csv = Path(source_csv)
+    logger.info(
+        "🧮 Duplicate report start: source=%s duplicate_csv=%s chunksize=%s",
+        source_csv,
+        duplicate_csv_path,
+        chunksize,
+    )
     article_counts: Counter[str] = Counter()
     name_counts: Counter[str] = Counter()
     rows_total = 0
@@ -182,13 +212,21 @@ def build_duplicate_report_from_csv(
         "low_memory": False,
     }
 
-    for chunk in pd.read_csv(source_csv, **read_kwargs):
+    for pass1_idx, chunk in enumerate(pd.read_csv(source_csv, **read_kwargs), start=1):
         rows_total += len(chunk)
         article_keys = _article_key_series(chunk)
         article_counts.update(article_keys[article_keys.ne("")].tolist())
 
         name_keys = _name_key_series(chunk)
         name_counts.update(name_keys[name_keys.ne("")].tolist())
+        if pass1_idx == 1 or pass1_idx % 10 == 0:
+            logger.info(
+                "🧮 Duplicate report pass1 progress: chunk=%s rows_total=%s unique_articles=%s unique_names=%s",
+                pass1_idx,
+                rows_total,
+                len(article_counts),
+                len(name_counts),
+            )
 
     duplicate_csv_path = Path(duplicate_csv_path) if duplicate_csv_path is not None else None
     duplicate_part_path = None
@@ -204,7 +242,7 @@ def build_duplicate_report_from_csv(
     wrote_duplicate_header = False
 
     try:
-        for chunk in pd.read_csv(source_csv, **read_kwargs):
+        for pass2_idx, chunk in enumerate(pd.read_csv(source_csv, **read_kwargs), start=1):
             article_keys = _article_key_series(chunk)
             name_keys = _name_key_series(chunk)
 
@@ -239,6 +277,14 @@ def build_duplicate_report_from_csv(
                 header=not wrote_duplicate_header,
             )
             wrote_duplicate_header = True
+            if pass2_idx == 1 or pass2_idx % 10 == 0:
+                logger.info(
+                    "🧮 Duplicate report pass2 progress: chunk=%s duplicates_total=%s by_article=%s by_name=%s",
+                    pass2_idx,
+                    duplicates_total,
+                    duplicates_by_article,
+                    duplicates_by_name,
+                )
     except Exception:
         if duplicate_part_path is not None and duplicate_part_path.exists():
             duplicate_part_path.unlink()
@@ -260,6 +306,14 @@ def build_duplicate_report_from_csv(
         "duplicates_by_article": duplicates_by_article,
         "duplicates_by_name": duplicates_by_name,
     }
+    logger.info(
+        "✅ Duplicate report complete: rows=%s duplicates=%s by_article=%s by_name=%s duplicate_csv=%s",
+        rows_total,
+        duplicates_total,
+        duplicates_by_article,
+        duplicates_by_name,
+        final_duplicate_path,
+    )
     return stats, final_duplicate_path
 
 
@@ -268,6 +322,7 @@ def build_xlsx_from_csv_streaming(source_csv: Path, target_xlsx: Path) -> None:
     target_xlsx = Path(target_xlsx)
     target_xlsx.parent.mkdir(parents=True, exist_ok=True)
     part_path = _xlsx_part_path(target_xlsx)
+    logger.info("📗 XLSX build start: source=%s target=%s", source_csv, target_xlsx)
 
     workbook = Workbook(write_only=True)
     worksheet = workbook.create_sheet(title="Catalog")
@@ -275,10 +330,13 @@ def build_xlsx_from_csv_streaming(source_csv: Path, target_xlsx: Path) -> None:
     try:
         with source_csv.open("r", encoding="utf-8-sig", newline="") as src:
             reader = csv.reader(src, delimiter=";")
-            for row in reader:
+            for row_number, row in enumerate(reader, start=1):
                 worksheet.append(row)
+                if row_number == 1 or row_number % 50000 == 0:
+                    logger.info("📗 XLSX build progress: rows_written=%s target=%s", row_number, target_xlsx)
         workbook.save(part_path)
         part_path.replace(target_xlsx)
+        logger.info("✅ XLSX build complete: %s (%s bytes)", target_xlsx, target_xlsx.stat().st_size)
     finally:
         workbook.close()
 
@@ -311,7 +369,9 @@ def get_snapshot_xlsx_status(
 
 def _build_snapshot_xlsx_worker(source_csv: Path, xlsx_path: Path) -> None:
     try:
+        logger.info("🧵 XLSX worker started: source=%s target=%s", source_csv, xlsx_path)
         build_xlsx_from_csv_streaming(source_csv, xlsx_path)
+        logger.info("🧵 XLSX worker finished successfully: %s", xlsx_path)
     except Exception:
         part_path = _xlsx_part_path(xlsx_path)
         if not part_path.exists():
@@ -325,11 +385,19 @@ def start_snapshot_xlsx_build(
     xlsx_path: Path | None,
 ) -> tuple[str, str | None]:
     if xlsx_path is None:
+        logger.info("ℹ️ XLSX build skipped: xlsx_path is None for source=%s", source_csv)
         return "idle", None
 
     source_csv = Path(source_csv)
     xlsx_path = Path(xlsx_path)
     current_status, started_at = get_snapshot_xlsx_status(source_csv, xlsx_path)
+    logger.info(
+        "🧪 XLSX build request: source=%s target=%s current_status=%s started_at=%s",
+        source_csv,
+        xlsx_path,
+        current_status,
+        started_at,
+    )
     if current_status in {"ready", "building"}:
         return current_status, started_at
 
@@ -346,6 +414,7 @@ def start_snapshot_xlsx_build(
         name="catalog-snapshot-xlsx",
     )
     worker.start()
+    logger.info("🧵 XLSX build thread launched: %s", worker.name)
 
     return get_snapshot_xlsx_status(source_csv, xlsx_path)
 
@@ -360,6 +429,12 @@ def make_snapshot_bundle(
     resolved_csv_path = Path(resolved_csv_path)
     export_dir = get_public_export_dir(public_dir)
     export_base = build_snapshot_export_basename(resolved_csv_path)
+    logger.info(
+        "📦 Building snapshot bundle: resolved_csv=%s export_dir=%s export_base=%s",
+        resolved_csv_path,
+        export_dir,
+        export_base,
+    )
 
     public_csv_path, public_csv_url = stage_public_export(
         resolved_csv_path,
@@ -386,6 +461,14 @@ def make_snapshot_bundle(
         resolved_csv_path,
         keep_paths,
         public_dir=export_dir,
+    )
+
+    logger.info(
+        "✅ Snapshot bundle ready: public_csv=%s duplicate_csv=%s xlsx=%s xlsx_status=%s",
+        public_csv_path,
+        duplicate_csv_path,
+        xlsx_path,
+        xlsx_status,
     )
 
     return CatalogSnapshotBundle(

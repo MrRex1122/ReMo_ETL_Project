@@ -644,8 +644,15 @@ def main():
         st.caption("Проверка входной БД (после merge и до matcher)")
         if st.button("📥 Подготовить выгрузку входной БД"):
             try:
+                source_path = _catalog_source_path()
+                logger.info(
+                    "🖱️ Snapshot export button pressed: source=%s merge_all_sources=%s current_bundle=%s",
+                    source_path,
+                    True,
+                    st.session_state.catalog_snapshot_bundle is not None,
+                )
                 snapshot_bundle = prepare_catalog_snapshot(
-                    str(_catalog_source_path()),
+                    str(source_path),
                     merge_all_sources=True,
                 )
                 st.session_state.catalog_snapshot_bundle = snapshot_bundle
@@ -654,6 +661,13 @@ def main():
                     str(snapshot_bundle.xlsx_path) if snapshot_bundle.xlsx_path is not None else None
                 )
                 st.session_state.catalog_snapshot_xlsx_url = snapshot_bundle.public_xlsx_url
+                logger.info(
+                    "✅ Snapshot export prepared in UI: resolved_csv=%s public_csv=%s duplicate_csv=%s xlsx_status=%s",
+                    snapshot_bundle.resolved_csv_path,
+                    snapshot_bundle.public_csv_path,
+                    snapshot_bundle.duplicate_csv_path,
+                    snapshot_bundle.xlsx_status,
+                )
                 st.success(f"✓ БД подготовлена: {snapshot_bundle.resolved_csv_path}")
             except Exception as e:
                 logger.error(f"❌ Ошибка подготовки выгрузки БД: {e}", exc_info=True)
@@ -704,6 +718,12 @@ def main():
 
             if st.button("🧮 Подготовить Excel-файл"):
                 try:
+                    logger.info(
+                        "🖱️ Snapshot XLSX button pressed: source=%s target=%s current_status=%s",
+                        bundle.resolved_csv_path,
+                        bundle.xlsx_path,
+                        bundle.xlsx_status,
+                    )
                     xlsx_status, xlsx_started_at = start_snapshot_xlsx_build(
                         bundle.resolved_csv_path,
                         bundle.xlsx_path,
@@ -720,6 +740,13 @@ def main():
                         str(bundle.xlsx_path) if bundle.xlsx_path is not None else None
                     )
                     st.session_state.catalog_snapshot_xlsx_url = bundle.public_xlsx_url
+                    logger.info(
+                        "✅ Snapshot XLSX request handled: source=%s target=%s new_status=%s started_at=%s",
+                        bundle.resolved_csv_path,
+                        bundle.xlsx_path,
+                        xlsx_status,
+                        xlsx_started_at,
+                    )
                     if xlsx_status == "ready":
                         st.success("✓ Excel-файл уже готов")
                     else:

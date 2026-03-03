@@ -287,22 +287,28 @@ def build_merged_catalog(clean_dir: Path, output_path: Path) -> Path:
     clean_dir = Path(clean_dir)
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    logger.info("🔗 Merge catalog start: clean_dir=%s output=%s", clean_dir, output_path)
 
     sources = _catalog_sources(clean_dir, output_path)
     if not sources:
         raise FileNotFoundError(f"В папке {clean_dir} не найдено файлов *_clean.csv")
+    logger.info("🔗 Merge catalog sources: count=%s files=%s", len(sources), ", ".join(path.name for path in sources))
 
     latest_source_mtime = max(path.stat().st_mtime for path in sources)
     if output_path.exists() and output_path.stat().st_mtime >= latest_source_mtime:
+        logger.info("♻️ Reusing up-to-date merged catalog: %s", output_path)
         return output_path
 
     db_path = _sqlite_temp_path(output_path)
     connection = _init_merge_db(db_path)
     all_columns: list[str] = []
     seen_columns: set[str] = set()
+    total_chunks = 0
+    total_rows_read = 0
 
     try:
         for source_order, source_path in enumerate(sources):
+            logger.info("📥 Merge source start: #%s file=%s", source_order + 1, source_path)
             header_df = _read_catalog_header(source_path)
             source_columns = list(header_df.columns)
             for required_column in (CANONICAL_NAME_COLUMN, CANONICAL_ARTICLE_COLUMN, CANONICAL_PRICE_COLUMN):
@@ -314,7 +320,13 @@ def build_merged_catalog(clean_dir: Path, output_path: Path) -> Path:
                 seen_columns.add(column)
                 all_columns.append(column)
 
+            source_chunks = 0
+            source_rows = 0
             for chunk in _iter_catalog_chunks(source_path, chunksize=DEFAULT_MERGE_CHUNKSIZE):
+                source_chunks += 1
+                total_chunks += 1
+                source_rows += len(chunk)
+                total_rows_read += len(chunk)
                 payload_columns = list(chunk.columns)
                 for required_column in (CANONICAL_NAME_COLUMN, CANONICAL_ARTICLE_COLUMN, CANONICAL_PRICE_COLUMN):
                     if required_column not in payload_columns:
@@ -325,8 +337,33 @@ def build_merged_catalog(clean_dir: Path, output_path: Path) -> Path:
                     source_order=source_order,
                     payload_columns=payload_columns,
                 )
+                if source_chunks == 1 or source_chunks % 10 == 0:
+                    logger.info(
+                        "📥 Merge source progress: file=%s chunks=%s rows=%s total_rows=%s",
+                        source_path.name,
+                        source_chunks,
+                        source_rows,
+                        total_rows_read,
+                    )
+            logger.info(
+                "✅ Merge source complete: file=%s chunks=%s rows=%s columns=%s",
+                source_path.name,
+                source_chunks,
+                source_rows,
+                len(source_columns),
+            )
 
         _write_merged_catalog_from_db(connection, output_path, columns=all_columns)
+        final_rows = connection.execute("SELECT COUNT(*) FROM merged_catalog").fetchone()[0]
+        logger.info(
+            "✅ Merge catalog complete: output=%s rows=%s columns=%s total_rows_read=%s total_chunks=%s size_bytes=%s",
+            output_path,
+            final_rows,
+            len(all_columns),
+            total_rows_read,
+            total_chunks,
+            output_path.stat().st_size,
+        )
         return output_path
     finally:
         connection.close()
