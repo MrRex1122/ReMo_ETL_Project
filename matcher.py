@@ -16,7 +16,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import pandas as pd
 
-from catalog_merge import build_merged_catalog
+from catalog_merge import get_catalog_readiness
 from catalog_schema import (
     CANONICAL_ARTICLE_COLUMN,
     CANONICAL_NAME_COLUMN,
@@ -257,12 +257,19 @@ class ReMoMatcher:
 
     def _resolve_catalog_csv_path(self, db_csv_path: str) -> str:
         source_path = Path(str(db_csv_path))
-        if source_path.is_dir():
-            merged_path = source_path / "price_clean_merged.csv"
-            resolved = build_merged_catalog(source_path, merged_path)
-            logger.info("Merged catalog prepared: %s", resolved)
-            return str(resolved)
-        return str(source_path)
+        readiness = get_catalog_readiness(source_path)
+        if readiness.state == "ready":
+            logger.info("📄 Matcher using prepared merged catalog: %s", readiness.merged_path)
+            return str(readiness.merged_path)
+        if readiness.state == "missing":
+            raise FileNotFoundError(
+                readiness.reason or f"Merged catalog not prepared: {readiness.merged_path}"
+            )
+        if readiness.state == "stale":
+            raise RuntimeError(
+                readiness.reason or f"Merged catalog is stale: {readiness.merged_path}"
+            )
+        raise RuntimeError(readiness.reason or f"Catalog is not ready: {source_path}")
 
     def _sanitize_match_mode(self, value: str | None) -> str:
         mode = str(value or "").strip().lower()

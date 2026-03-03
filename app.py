@@ -16,7 +16,8 @@ import logging
 import io
 import json
 from config import get_catalog_csv_path, get_upload_dir, get_matcher_cache_db_path
-from catalog_snapshot import prepare_catalog_snapshot
+from catalog_merge import get_catalog_readiness, get_merged_catalog_path, refresh_merged_catalog
+from catalog_snapshot import prepare_catalog_duplicate_report, prepare_catalog_snapshot
 from google_drive_sync import sync_drive_folder_csvs
 from etl_pipeline import PriceETL
 from main import convert_csv
@@ -79,7 +80,7 @@ if 'stats' not in st.session_state:
 if 'corrections' not in st.session_state:
     st.session_state.corrections = {}
 if 'db_csv_path' not in st.session_state:
-    st.session_state.db_csv_path = str(get_upload_dir() / 'clean')
+    st.session_state.db_csv_path = str(get_merged_catalog_path(get_upload_dir() / "clean"))
 if 'matcher_db_csv' not in st.session_state:
     st.session_state.matcher_db_csv = None
 if 'matcher_parallel_requests' not in st.session_state:
@@ -111,7 +112,7 @@ def _catalog_source_path() -> Path:
     """Вернуть актуальный источник каталога для matcher и выгрузки."""
     clean_dir = get_upload_dir() / "clean"
     if clean_dir.exists():
-        return clean_dir
+        return get_merged_catalog_path(clean_dir)
     return get_catalog_csv_path(st.session_state.get('db_csv_path'))
 
 
@@ -159,13 +160,9 @@ def _validate_runtime_readiness(db_csv: str) -> list[str]:
     if not api_key:
         issues.append("Не задан GEMINI_API_KEY")
 
-    source_path = Path(db_csv)
-    if source_path.is_dir():
-        clean_files = list(source_path.glob('*_clean.csv'))
-        if not clean_files:
-            issues.append(f"В папке нет файлов *_clean.csv: {db_csv}")
-    elif not source_path.exists():
-        issues.append(f"Не найден каталог price_clean.csv: {db_csv}")
+    readiness = get_catalog_readiness(db_csv)
+    if readiness.state != "ready":
+        issues.append(readiness.reason or f"БД не готова: {readiness.state}")
 
     return issues
 
@@ -206,6 +203,7 @@ def get_matcher() -> ReMoMatcher:
 
     if needs_reinit:
         logger.info("🔄 Инициализация ReMoMatcher...")
+        logger.info("📄 Matcher using prepared merged catalog: %s", db_csv)
         api_key = _get_gemini_api_key()
         
         if not api_key:
@@ -230,7 +228,7 @@ def get_matcher() -> ReMoMatcher:
             st.info(
                 "Для Railway задайте путь к каталогу через переменную окружения "
                 "`REMO_DB_CSV` (или `REMO_UPLOAD_DIR`) и убедитесь, что файл "
-                "`price_clean.csv` существует в контейнере."
+                "`price_clean_merged.csv` существует в контейнере."
             )
             st.stop()
         
@@ -344,15 +342,14 @@ def sync_catalogs_from_google_drive(folder_url_or_id: str, service_account_json:
 
     saved_paths: list[Path] = []
     total_files = len(downloaded_raw_paths)
+    converted_dir = storage_dir / "converted"
+    clean_dir = storage_dir / "clean"
+    converted_dir.mkdir(parents=True, exist_ok=True)
+    clean_dir.mkdir(parents=True, exist_ok=True)
     for idx, raw_path in enumerate(downloaded_raw_paths, start=1):
         source_name = Path(raw_path.name).name
         source_stem = Path(source_name).stem
         logger.info("🧩 Постобработка файла %s/%s: %s", idx, total_files, source_name)
-
-        converted_dir = storage_dir / "converted"
-        clean_dir = storage_dir / "clean"
-        converted_dir.mkdir(parents=True, exist_ok=True)
-        clean_dir.mkdir(parents=True, exist_ok=True)
 
         converted_path = converted_dir / f"{source_stem}_converted.csv"
         clean_path = clean_dir / f"{source_stem}_clean.csv"
@@ -363,6 +360,7 @@ def sync_catalogs_from_google_drive(folder_url_or_id: str, service_account_json:
         saved_paths.append(clean_path)
         logger.info("✅ ETL завершен: %s", clean_path)
 
+    _rebuild_merged_catalog_from_clean(clean_dir)
     logger.info("✅ Синхронизация и постобработка завершены. Файлов: %s", len(saved_paths))
     return saved_paths
 
@@ -407,6 +405,23 @@ def _prune_orphan_files(directory: Path, pattern: str, keep_paths: set[Path]) ->
     return removed
 
 
+def _reset_catalog_runtime_state() -> None:
+    st.session_state.matcher = None
+    st.session_state.matcher_db_csv = None
+    st.session_state.matcher_settings_signature = None
+    st.session_state.catalog_snapshot_bundle = None
+    st.session_state.catalog_snapshot_xlsx_status = "idle"
+    st.session_state.catalog_snapshot_xlsx_path = None
+    st.session_state.catalog_snapshot_xlsx_url = None
+
+
+def _rebuild_merged_catalog_from_clean(clean_dir: Path) -> Path:
+    clean_dir = Path(clean_dir)
+    merged_path = refresh_merged_catalog(clean_dir)
+    logger.info("📦 Prepared merged DB after ETL/update: %s", merged_path)
+    return merged_path
+
+
 def process_raw_catalogs_with_etl() -> list[Path]:
     """Обработать уже скачанные raw CSV в отдельный этап ETL."""
     storage_dir = get_upload_dir()
@@ -446,6 +461,8 @@ def process_raw_catalogs_with_etl() -> list[Path]:
         logger.info("🧹 Удалены устаревшие converted-файлы: %s", len(removed_converted))
     if removed_clean:
         logger.info("🧹 Удалены устаревшие clean-файлы: %s", len(removed_clean))
+
+    _rebuild_merged_catalog_from_clean(clean_dir)
 
     logger.info("✅ Этап 2 завершен: ETL обработан для %s файлов", len(saved_paths))
     return saved_paths
@@ -562,16 +579,27 @@ def main():
         )
 
         if catalog_upload and st.button("💾 Сохранить каталоги", key="save_catalogs_btn"):
+            saved_clean_paths: list[Path] = []
             for uploaded_catalog in catalog_upload:
                 try:
                     saved_path = save_uploaded_catalog(uploaded_catalog, run_etl=run_etl_before_save)
+                    if run_etl_before_save and saved_path.parent.name == "clean":
+                        saved_clean_paths.append(saved_path)
                     st.success(f"✓ Сохранен каталог: {saved_path.name}")
                 except Exception as e:
                     logger.error(f"❌ Ошибка сохранения каталога: {e}", exc_info=True)
                     st.error(f"❌ Не удалось сохранить {uploaded_catalog.name}: {e}")
 
-            st.session_state.matcher = None
-            st.session_state.matcher_db_csv = None
+            if run_etl_before_save and saved_clean_paths:
+                try:
+                    merged_path = _rebuild_merged_catalog_from_clean(get_upload_dir() / "clean")
+                    _reset_catalog_runtime_state()
+                    st.success(f"✓ Итоговая БД обновлена: {merged_path.name}")
+                except Exception as e:
+                    logger.error("❌ Каталоги сохранены, но итоговая БД не обновлена: %s", e, exc_info=True)
+                    st.error(f"❌ Каталоги сохранены, но итоговая БД не обновлена: {e}")
+            else:
+                _reset_catalog_runtime_state()
 
         st.caption("Синхронизация Google Drive в 2 этапа: скачать → отдельно ETL")
         if st.button("☁️ Выгрузить файлы из Google Drive", key="sync_drive_catalogs_btn"):
@@ -598,9 +626,7 @@ def main():
                         if len(saved_paths) > 20:
                             st.write(f"... и еще {len(saved_paths) - 20}")
 
-                        st.session_state.matcher = None
-                        st.session_state.matcher_db_csv = None
-                        st.session_state.matcher_settings_signature = None
+                        _reset_catalog_runtime_state()
                 except Exception as e:
                     logger.error(f"❌ Ошибка синхронизации из Google Drive: {e}", exc_info=True)
                     st.error(f"❌ Не удалось синхронизировать каталоги из Google Drive: {e}")
@@ -617,61 +643,94 @@ def main():
                         st.write(f"- {path.name}")
                     if len(clean_paths) > 20:
                         st.write(f"... и еще {len(clean_paths) - 20}")
-                    st.session_state.matcher = None
-                    st.session_state.matcher_db_csv = None
-                    st.session_state.matcher_settings_signature = None
+                    _reset_catalog_runtime_state()
             except Exception as e:
                 logger.error(f"❌ Ошибка этапа ETL для raw CSV: {e}", exc_info=True)
                 st.error(f"❌ Не удалось выполнить ETL для raw CSV: {e}")
 
-        st.caption("Источник каталога выбирается автоматически")
-        st.info(
-            "Используется только объединенный каталог без дублей: "
-            "из всех *_clean.csv в папке `clean` формируется `price_clean_merged.csv`."
-        )
-        st.code(str(_catalog_source_path()))
-        
-        if st.button("🔄 Перезагрузить БД"):
-            st.session_state.matcher = None
-            st.session_state.matcher_db_csv = None
-            st.session_state.matcher_settings_signature = None
+        catalog_path = _catalog_source_path()
+        catalog_readiness = get_catalog_readiness(catalog_path)
+        if catalog_readiness.state != "ready" and st.session_state.catalog_snapshot_bundle is not None:
             st.session_state.catalog_snapshot_bundle = None
             st.session_state.catalog_snapshot_xlsx_status = "idle"
             st.session_state.catalog_snapshot_xlsx_path = None
             st.session_state.catalog_snapshot_xlsx_url = None
-            st.success("✓ БД перезагружена")
+        readiness_labels = {
+            "ready": "Готова",
+            "missing": "Не собрана",
+            "stale": "Устарела",
+            "invalid": "Некорректна",
+        }
+        st.caption("Используется заранее подготовленная merged БД")
+        st.info(
+            "Основной источник для matcher и выгрузки: `clean/price_clean_merged.csv`. "
+            "Пересборка выполняется после ETL или вручную через `🔄 Обновить БД`."
+        )
+        st.code(str(catalog_readiness.merged_path))
+        st.write(
+            f"Состояние БД: **{readiness_labels.get(catalog_readiness.state, catalog_readiness.state)}** "
+            f"(clean-файлов: {catalog_readiness.clean_sources_count})"
+        )
+        if catalog_readiness.reason:
+            st.caption(catalog_readiness.reason)
+        if catalog_readiness.merged_path.exists():
+            merged_updated_at = datetime.fromtimestamp(
+                catalog_readiness.merged_path.stat().st_mtime
+            ).isoformat(timespec="seconds")
+            st.caption(f"Последнее обновление merged БД: {merged_updated_at}")
 
-        st.caption("Проверка входной БД (после merge и до matcher)")
-        if st.button("📥 Подготовить выгрузку входной БД"):
-            try:
-                source_path = _catalog_source_path()
-                logger.info(
-                    "🖱️ Snapshot export button pressed: source=%s merge_all_sources=%s current_bundle=%s",
-                    source_path,
-                    True,
-                    st.session_state.catalog_snapshot_bundle is not None,
+        if st.button("🔄 Обновить БД"):
+            if catalog_readiness.clean_dir is None or catalog_readiness.clean_sources_count == 0:
+                st.error(catalog_readiness.reason or "❌ Нет clean-файлов для пересборки БД")
+            else:
+                try:
+                    merged_path = _rebuild_merged_catalog_from_clean(catalog_readiness.clean_dir)
+                    _reset_catalog_runtime_state()
+                    st.success(f"✓ БД обновлена: {merged_path.name}")
+                except Exception as e:
+                    logger.error(f"❌ Ошибка обновления итоговой БД: {e}", exc_info=True)
+                    st.error(f"❌ Не удалось обновить итоговую БД: {e}")
+
+        if st.button("♻️ Сбросить состояние БД"):
+            _reset_catalog_runtime_state()
+            st.success("✓ Состояние БД сброшено")
+
+        st.caption("Выгрузка готовой входной БД")
+        if st.button("📥 Подготовить ссылку на выгрузку БД (CSV)"):
+            if catalog_readiness.state != "ready":
+                st.error(
+                    f"❌ {catalog_readiness.reason or 'Итоговая БД не готова'}. "
+                    "Нажмите `🔄 Обновить БД`."
                 )
-                snapshot_bundle = prepare_catalog_snapshot(
-                    str(source_path),
-                    merge_all_sources=True,
-                )
-                st.session_state.catalog_snapshot_bundle = snapshot_bundle
-                st.session_state.catalog_snapshot_xlsx_status = snapshot_bundle.xlsx_status
-                st.session_state.catalog_snapshot_xlsx_path = (
-                    str(snapshot_bundle.xlsx_path) if snapshot_bundle.xlsx_path is not None else None
-                )
-                st.session_state.catalog_snapshot_xlsx_url = snapshot_bundle.public_xlsx_url
-                logger.info(
-                    "✅ Snapshot export prepared in UI: resolved_csv=%s public_csv=%s duplicate_csv=%s xlsx_status=%s",
-                    snapshot_bundle.resolved_csv_path,
-                    snapshot_bundle.public_csv_path,
-                    snapshot_bundle.duplicate_csv_path,
-                    snapshot_bundle.xlsx_status,
-                )
-                st.success(f"✓ БД подготовлена: {snapshot_bundle.resolved_csv_path}")
-            except Exception as e:
-                logger.error(f"❌ Ошибка подготовки выгрузки БД: {e}", exc_info=True)
-                st.error(f"❌ Не удалось подготовить БД: {e}")
+            else:
+                try:
+                    source_path = _catalog_source_path()
+                    logger.info(
+                        "🖱️ CSV export link button pressed: source=%s current_bundle=%s",
+                        source_path,
+                        st.session_state.catalog_snapshot_bundle is not None,
+                    )
+                    logger.info("📄 Using prepared merged catalog: %s", source_path)
+                    snapshot_bundle = prepare_catalog_snapshot(
+                        str(source_path),
+                        merge_all_sources=False,
+                    )
+                    st.session_state.catalog_snapshot_bundle = snapshot_bundle
+                    st.session_state.catalog_snapshot_xlsx_status = snapshot_bundle.xlsx_status
+                    st.session_state.catalog_snapshot_xlsx_path = (
+                        str(snapshot_bundle.xlsx_path) if snapshot_bundle.xlsx_path is not None else None
+                    )
+                    st.session_state.catalog_snapshot_xlsx_url = snapshot_bundle.public_xlsx_url
+                    logger.info(
+                        "✅ CSV export link prepared in UI: resolved_csv=%s public_csv=%s xlsx_status=%s",
+                        snapshot_bundle.resolved_csv_path,
+                        snapshot_bundle.public_csv_path,
+                        snapshot_bundle.xlsx_status,
+                    )
+                    st.success(f"✓ Ссылка на БД готова: {snapshot_bundle.resolved_csv_path}")
+                except Exception as e:
+                    logger.error(f"❌ Ошибка подготовки выгрузки БД: {e}", exc_info=True)
+                    st.error(f"❌ Не удалось подготовить ссылку на БД: {e}")
 
         if st.session_state.catalog_snapshot_bundle is not None:
             bundle = st.session_state.catalog_snapshot_bundle
@@ -692,16 +751,14 @@ def main():
             )
             st.session_state.catalog_snapshot_xlsx_url = bundle.public_xlsx_url
 
-            stats = bundle.duplicate_stats or {}
             size_mb = bundle.resolved_csv_size_bytes / (1024 * 1024)
             st.write(f"Активный источник: `{bundle.resolved_csv_path}`")
             st.write(f"Размер CSV: **{size_mb:.2f} MB**")
-            st.write(f"Строк всего: **{stats.get('rows_total', 0)}**")
-            st.write(
-                f"Дублей: **{stats.get('duplicates_total', 0)}** "
-                f"(артикул: {stats.get('duplicates_by_article', 0)}, "
-                f"наименование: {stats.get('duplicates_by_name', 0)})"
-            )
+            if bundle.resolved_csv_path.exists():
+                source_updated_at = datetime.fromtimestamp(
+                    bundle.resolved_csv_path.stat().st_mtime
+                ).isoformat(timespec="seconds")
+                st.caption(f"Файл обновлен: {source_updated_at}")
 
             st.link_button(
                 "⬇️ Скачать входную БД (CSV)",
@@ -709,14 +766,32 @@ def main():
                 use_container_width=True,
             )
 
-            if bundle.public_duplicate_csv_url:
-                st.link_button(
-                    "⬇️ Скачать только дубли (CSV)",
-                    bundle.public_duplicate_csv_url,
-                    use_container_width=True,
-                )
+            if st.button("🧮 Проверить дубли БД"):
+                try:
+                    logger.info("🖱️ Duplicate report button pressed: source=%s", bundle.resolved_csv_path)
+                    bundle = prepare_catalog_duplicate_report(bundle)
+                    st.session_state.catalog_snapshot_bundle = bundle
+                    st.success("✓ Проверка дублей завершена")
+                except Exception as e:
+                    logger.error(f"❌ Ошибка проверки дублей БД: {e}", exc_info=True)
+                    st.error(f"❌ Не удалось проверить дубли БД: {e}")
 
-            if st.button("🧮 Подготовить Excel-файл"):
+            stats = bundle.duplicate_stats or {}
+            if stats:
+                st.write(f"Строк всего: **{stats.get('rows_total', 0)}**")
+                st.write(
+                    f"Дублей: **{stats.get('duplicates_total', 0)}** "
+                    f"(артикул: {stats.get('duplicates_by_article', 0)}, "
+                    f"наименование: {stats.get('duplicates_by_name', 0)})"
+                )
+                if bundle.public_duplicate_csv_url:
+                    st.link_button(
+                        "⬇️ Скачать только дубли (CSV)",
+                        bundle.public_duplicate_csv_url,
+                        use_container_width=True,
+                    )
+
+            if st.button("📗 Подготовить Excel-файл"):
                 try:
                     logger.info(
                         "🖱️ Snapshot XLSX button pressed: source=%s target=%s current_status=%s",

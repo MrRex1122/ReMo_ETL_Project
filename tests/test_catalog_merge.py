@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,6 +10,8 @@ from catalog_merge import (
     CANONICAL_NAME_COLUMN,
     CANONICAL_PRICE_COLUMN,
     build_merged_catalog,
+    get_catalog_readiness,
+    refresh_merged_catalog,
     merge_catalog_frames,
 )
 
@@ -89,6 +92,34 @@ class CatalogMergeTests(unittest.TestCase):
             self.assertIn(extra_column, merged_df.columns)
             self.assertEqual(float(merged_df.iloc[0][CANONICAL_PRICE_COLUMN]), 150.0)
             self.assertEqual(merged_df.iloc[0][extra_column], "PDU")
+
+    def test_get_catalog_readiness_reports_missing_stale_and_ready(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            clean_file = root / "price14_clean.csv"
+            clean_file.write_text(
+                "Наименование;Артикул;Цена розничная\nКабель;A-1;100\n",
+                encoding="utf-8",
+            )
+
+            missing = get_catalog_readiness(root)
+            self.assertEqual(missing.state, "missing")
+
+            merged_path = refresh_merged_catalog(root)
+            ready = get_catalog_readiness(root)
+            self.assertEqual(ready.state, "ready")
+            self.assertEqual(ready.merged_path, merged_path)
+
+            stale_time = merged_path.stat().st_mtime + 10
+            os.utime(clean_file, (stale_time, stale_time))
+            stale = get_catalog_readiness(root)
+            self.assertEqual(stale.state, "stale")
+
+    def test_get_catalog_readiness_reports_invalid_when_no_clean_sources(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            readiness = get_catalog_readiness(root)
+            self.assertEqual(readiness.state, "invalid")
 
 
 if __name__ == "__main__":

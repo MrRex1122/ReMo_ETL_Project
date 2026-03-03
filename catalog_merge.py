@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 import csv
+from dataclasses import dataclass
 import json
 import logging
 import os
@@ -12,7 +13,7 @@ import re
 import sqlite3
 import tempfile
 import time
-from typing import Iterable, Iterator
+from typing import Iterable, Iterator, Literal
 import uuid
 
 import pandas as pd
@@ -22,9 +23,22 @@ logger = logging.getLogger(__name__)
 CANONICAL_NAME_COLUMN = "Наименование"
 CANONICAL_ARTICLE_COLUMN = "Артикул"
 CANONICAL_PRICE_COLUMN = "Цена розничная"
+MERGED_CATALOG_FILENAME = "price_clean_merged.csv"
 DEFAULT_MERGE_CHUNKSIZE = 50000
 DEFAULT_MERGE_LOCK_TIMEOUT_SECONDS = 10 * 60
 DEFAULT_MERGE_LOCK_STALE_SECONDS = 30 * 60
+
+
+@dataclass
+class CatalogReadiness:
+    source_path: Path
+    clean_dir: Path | None
+    merged_path: Path
+    state: Literal["ready", "missing", "stale", "invalid"]
+    reason: str | None
+    clean_sources_count: int
+    latest_clean_mtime: float | None
+    merged_mtime: float | None
 
 
 def _normalize_text(text: str) -> str:
@@ -37,6 +51,148 @@ def _sanitize_temp_stem(value: str) -> str:
     sanitized = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value or "").strip())
     sanitized = sanitized.strip("._")
     return sanitized or "catalog_merge"
+
+
+def get_merged_catalog_path(clean_dir: Path) -> Path:
+    return Path(clean_dir) / MERGED_CATALOG_FILENAME
+
+
+def _infer_clean_dir(source_path: Path) -> Path | None:
+    source_path = Path(source_path)
+    if source_path.is_dir():
+        return source_path
+    if source_path.name == MERGED_CATALOG_FILENAME and source_path.parent.exists():
+        return source_path.parent
+    if source_path.parent.exists():
+        sibling_clean_files = [
+            path for path in source_path.parent.glob("*_clean.csv")
+            if path.is_file() and path.name != MERGED_CATALOG_FILENAME
+        ]
+        if sibling_clean_files:
+            return source_path.parent
+    return None
+
+
+def get_catalog_readiness(source_path: str | Path) -> CatalogReadiness:
+    source_path = Path(str(source_path))
+    clean_dir = _infer_clean_dir(source_path)
+    merged_path = get_merged_catalog_path(clean_dir) if clean_dir is not None else source_path
+
+    if clean_dir is None:
+        if merged_path.exists():
+            readiness = CatalogReadiness(
+                source_path=source_path,
+                clean_dir=None,
+                merged_path=merged_path,
+                state="ready",
+                reason=None,
+                clean_sources_count=0,
+                latest_clean_mtime=None,
+                merged_mtime=merged_path.stat().st_mtime,
+            )
+        else:
+            readiness = CatalogReadiness(
+                source_path=source_path,
+                clean_dir=None,
+                merged_path=merged_path,
+                state="missing",
+                reason=f"Не найден файл БД: {merged_path}",
+                clean_sources_count=0,
+                latest_clean_mtime=None,
+                merged_mtime=None,
+            )
+        logger.info(
+            "ℹ️ Catalog readiness: source=%s state=%s clean_sources=%s merged=%s",
+            readiness.source_path,
+            readiness.state,
+            readiness.clean_sources_count,
+            readiness.merged_path,
+        )
+        return readiness
+
+    clean_sources = _catalog_sources(clean_dir, merged_path)
+    clean_sources_count = len(clean_sources)
+    if not clean_sources:
+        readiness = CatalogReadiness(
+            source_path=source_path,
+            clean_dir=clean_dir,
+            merged_path=merged_path,
+            state="invalid",
+            reason=f"В папке {clean_dir} нет файлов *_clean.csv",
+            clean_sources_count=0,
+            latest_clean_mtime=None,
+            merged_mtime=merged_path.stat().st_mtime if merged_path.exists() else None,
+        )
+        logger.info(
+            "ℹ️ Catalog readiness: source=%s state=%s clean_sources=%s merged=%s reason=%s",
+            readiness.source_path,
+            readiness.state,
+            readiness.clean_sources_count,
+            readiness.merged_path,
+            readiness.reason,
+        )
+        return readiness
+
+    latest_clean_mtime = max(path.stat().st_mtime for path in clean_sources)
+    if not merged_path.exists():
+        state = "missing"
+        reason = f"Итоговая БД не собрана: отсутствует {merged_path.name}"
+        merged_mtime = None
+    else:
+        merged_mtime = merged_path.stat().st_mtime
+        if merged_mtime < latest_clean_mtime:
+            state = "stale"
+            reason = (
+                "Итоговая БД устарела: есть более новые *_clean.csv, "
+                "требуется обновить БД"
+            )
+        else:
+            state = "ready"
+            reason = None
+
+    readiness = CatalogReadiness(
+        source_path=source_path,
+        clean_dir=clean_dir,
+        merged_path=merged_path,
+        state=state,
+        reason=reason,
+        clean_sources_count=clean_sources_count,
+        latest_clean_mtime=latest_clean_mtime,
+        merged_mtime=merged_mtime,
+    )
+    logger.info(
+        "ℹ️ Catalog readiness: source=%s state=%s clean_sources=%s merged=%s",
+        readiness.source_path,
+        readiness.state,
+        readiness.clean_sources_count,
+        readiness.merged_path,
+    )
+    return readiness
+
+
+def refresh_merged_catalog(clean_dir: Path) -> Path:
+    clean_dir = Path(clean_dir)
+    logger.info("🔄 Merged DB rebuild requested: clean_dir=%s", clean_dir)
+    readiness = get_catalog_readiness(clean_dir)
+    if readiness.clean_dir is None or readiness.clean_sources_count == 0:
+        message = readiness.reason or f"В папке {clean_dir} нет файлов *_clean.csv"
+        logger.error("❌ Merged DB rebuild failed: %s", message)
+        raise FileNotFoundError(message)
+
+    logger.info(
+        "🔄 Merged DB rebuild start: clean_dir=%s output=%s clean_sources=%s",
+        clean_dir,
+        readiness.merged_path,
+        readiness.clean_sources_count,
+    )
+    try:
+        merged_path = build_merged_catalog(clean_dir, readiness.merged_path)
+    except Exception:
+        logger.exception("❌ Merged DB rebuild failed: clean_dir=%s", clean_dir)
+        raise
+
+    logger.info("✅ Merged DB rebuild complete: %s", merged_path)
+    return merged_path
 
 
 def _catalog_sources(clean_dir: Path, output_path: Path) -> list[Path]:

@@ -197,3 +197,139 @@ def test_process_raw_catalogs_with_etl_removes_stale_converted_for_chunked_file(
     app.process_raw_catalogs_with_etl()
 
     assert not stale_converted.exists()
+
+
+def test_process_raw_catalogs_with_etl_rebuilds_merged_once_after_pruning(monkeypatch, tmp_path):
+    storage = tmp_path / "storage"
+    raw_dir = storage / "raw"
+    converted_dir = storage / "converted"
+    clean_dir = storage / "clean"
+    raw_dir.mkdir(parents=True)
+    converted_dir.mkdir(parents=True)
+    clean_dir.mkdir(parents=True)
+
+    (raw_dir / "a.csv").write_text("x", encoding="utf-8")
+    (converted_dir / "stale_converted.csv").write_text("stale", encoding="utf-8")
+    (clean_dir / "stale_clean.csv").write_text("stale", encoding="utf-8")
+
+    monkeypatch.setattr(app, "get_upload_dir", lambda: storage)
+
+    def fake_convert_csv(src, dst):
+        Path(dst).write_text("converted", encoding="utf-8")
+        return Path(dst)
+
+    monkeypatch.setattr(app, "convert_csv", fake_convert_csv)
+
+    class FakePriceETL:
+        def __init__(self, inp, out):
+            self.out = Path(out)
+
+        def run(self):
+            self.out.write_text("clean", encoding="utf-8")
+            return self
+
+    monkeypatch.setattr(app, "PriceETL", FakePriceETL)
+
+    rebuild_calls = []
+
+    def fake_refresh(clean_path):
+        clean_path = Path(clean_path)
+        rebuild_calls.append(
+            {
+                "clean_dir": clean_path,
+                "clean_files": sorted(path.name for path in clean_path.glob("*_clean.csv")),
+            }
+        )
+        merged_path = clean_path / "price_clean_merged.csv"
+        merged_path.write_text("merged", encoding="utf-8")
+        return merged_path
+
+    monkeypatch.setattr(app, "refresh_merged_catalog", fake_refresh)
+
+    result = app.process_raw_catalogs_with_etl()
+
+    assert [p.name for p in result] == ["a_clean.csv"]
+    assert rebuild_calls == [
+        {
+            "clean_dir": clean_dir,
+            "clean_files": ["a_clean.csv"],
+        }
+    ]
+
+
+def test_sync_catalogs_from_google_drive_rebuilds_merged_once_after_batch_etl(monkeypatch, tmp_path):
+    storage = tmp_path / "storage"
+    raw_dir = storage / "raw"
+    raw_dir.mkdir(parents=True)
+
+    downloaded = [
+        raw_dir / "a.csv",
+        raw_dir / "b.csv",
+    ]
+    for path in downloaded:
+        path.write_text("raw", encoding="utf-8")
+
+    monkeypatch.setattr(app, "get_upload_dir", lambda: storage)
+    monkeypatch.setattr(app, "sync_drive_folder_csvs", lambda **kwargs: downloaded)
+
+    convert_calls = []
+
+    def fake_convert_csv(src, dst):
+        convert_calls.append((Path(src).name, Path(dst).name))
+        Path(dst).parent.mkdir(parents=True, exist_ok=True)
+        Path(dst).write_text("converted", encoding="utf-8")
+        return Path(dst)
+
+    monkeypatch.setattr(app, "convert_csv", fake_convert_csv)
+
+    etl_calls = []
+
+    class FakePriceETL:
+        def __init__(self, inp, out):
+            etl_calls.append((Path(inp).name, Path(out).name))
+            self.out = Path(out)
+
+        def run(self):
+            self.out.parent.mkdir(parents=True, exist_ok=True)
+            self.out.write_text("clean", encoding="utf-8")
+            return self
+
+    monkeypatch.setattr(app, "PriceETL", FakePriceETL)
+
+    rebuild_calls = []
+
+    def fake_refresh(clean_path):
+        clean_path = Path(clean_path)
+        rebuild_calls.append(
+            {
+                "clean_dir": clean_path,
+                "clean_files": sorted(path.name for path in clean_path.glob("*_clean.csv")),
+            }
+        )
+        merged_path = clean_path / "price_clean_merged.csv"
+        merged_path.write_text("merged", encoding="utf-8")
+        return merged_path
+
+    monkeypatch.setattr(app, "refresh_merged_catalog", fake_refresh)
+
+    result = app.sync_catalogs_from_google_drive(
+        folder_url_or_id="folder-id",
+        service_account_json='{"client_email": "demo@example.com"}',
+        run_etl=True,
+    )
+
+    assert [p.name for p in result] == ["a_clean.csv", "b_clean.csv"]
+    assert convert_calls == [
+        ("a.csv", "a_converted.csv"),
+        ("b.csv", "b_converted.csv"),
+    ]
+    assert etl_calls == [
+        ("a_converted.csv", "a_clean.csv"),
+        ("b_converted.csv", "b_clean.csv"),
+    ]
+    assert rebuild_calls == [
+        {
+            "clean_dir": storage / "clean",
+            "clean_files": ["a_clean.csv", "b_clean.csv"],
+        }
+    ]
