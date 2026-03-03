@@ -15,6 +15,7 @@ import sqlite3
 import logging
 import io
 import json
+from cloudflare_r2_export import upload_file_to_r2
 from config import get_catalog_csv_path, get_upload_dir, get_matcher_cache_db_path
 from catalog_merge import get_catalog_readiness, get_merged_catalog_path, refresh_merged_catalog
 from catalog_snapshot import prepare_catalog_duplicate_report, prepare_catalog_snapshot
@@ -113,6 +114,10 @@ if 'catalog_snapshot_drive_csv_url' not in st.session_state:
     st.session_state.catalog_snapshot_drive_csv_url = None
 if 'catalog_snapshot_drive_csv_name' not in st.session_state:
     st.session_state.catalog_snapshot_drive_csv_name = None
+if 'catalog_snapshot_r2_csv_url' not in st.session_state:
+    st.session_state.catalog_snapshot_r2_csv_url = None
+if 'catalog_snapshot_r2_csv_key' not in st.session_state:
+    st.session_state.catalog_snapshot_r2_csv_key = None
 
 
 
@@ -202,6 +207,34 @@ def _get_drive_export_config() -> tuple[str | None, str | None]:
     )
 
     return folder, service_account_json
+
+
+def _get_cloudflare_r2_export_config() -> tuple[str | None, str | None, str | None, str | None, str | None]:
+    """Получить конфиг Cloudflare R2 для выгрузки больших артефактов."""
+    account_id = None
+    bucket = None
+    access_key_id = None
+    secret_access_key = None
+    public_base_url = None
+
+    try:
+        account_id = st.secrets.get("CLOUDFLARE_R2_ACCOUNT_ID")
+        bucket = st.secrets.get("CLOUDFLARE_R2_BUCKET")
+        access_key_id = st.secrets.get("CLOUDFLARE_R2_ACCESS_KEY_ID")
+        secret_access_key = st.secrets.get("CLOUDFLARE_R2_SECRET_ACCESS_KEY")
+        public_base_url = st.secrets.get("CLOUDFLARE_R2_PUBLIC_BASE_URL")
+    except StreamlitSecretNotFoundError:
+        pass
+    except Exception as e:
+        logger.warning(f"⚠️ Не удалось прочитать Cloudflare R2 secrets: {e}")
+
+    account_id = account_id or os.getenv("CLOUDFLARE_R2_ACCOUNT_ID")
+    bucket = bucket or os.getenv("CLOUDFLARE_R2_BUCKET")
+    access_key_id = access_key_id or os.getenv("CLOUDFLARE_R2_ACCESS_KEY_ID")
+    secret_access_key = secret_access_key or os.getenv("CLOUDFLARE_R2_SECRET_ACCESS_KEY")
+    public_base_url = public_base_url or os.getenv("CLOUDFLARE_R2_PUBLIC_BASE_URL")
+
+    return account_id, bucket, access_key_id, secret_access_key, public_base_url
 
 def _validate_runtime_readiness(db_csv: str) -> list[str]:
     """Проверить готовность приложения к обработке перед запуском matcher."""
@@ -466,6 +499,8 @@ def _reset_catalog_runtime_state() -> None:
     st.session_state.catalog_snapshot_xlsx_url = None
     st.session_state.catalog_snapshot_drive_csv_url = None
     st.session_state.catalog_snapshot_drive_csv_name = None
+    st.session_state.catalog_snapshot_r2_csv_url = None
+    st.session_state.catalog_snapshot_r2_csv_key = None
 
 
 def _rebuild_merged_catalog_from_clean(clean_dir: Path) -> Path:
@@ -710,9 +745,14 @@ def main():
             st.session_state.catalog_snapshot_xlsx_url = None
             st.session_state.catalog_snapshot_drive_csv_url = None
             st.session_state.catalog_snapshot_drive_csv_name = None
+            st.session_state.catalog_snapshot_r2_csv_url = None
+            st.session_state.catalog_snapshot_r2_csv_key = None
         elif catalog_readiness.state != "ready" and st.session_state.catalog_snapshot_drive_csv_url is not None:
             st.session_state.catalog_snapshot_drive_csv_url = None
             st.session_state.catalog_snapshot_drive_csv_name = None
+        elif catalog_readiness.state != "ready" and st.session_state.catalog_snapshot_r2_csv_url is not None:
+            st.session_state.catalog_snapshot_r2_csv_url = None
+            st.session_state.catalog_snapshot_r2_csv_key = None
         readiness_labels = {
             "ready": "Готова",
             "missing": "Не собрана",
@@ -781,6 +821,8 @@ def main():
                     st.session_state.catalog_snapshot_xlsx_url = snapshot_bundle.public_xlsx_url
                     st.session_state.catalog_snapshot_drive_csv_url = None
                     st.session_state.catalog_snapshot_drive_csv_name = None
+                    st.session_state.catalog_snapshot_r2_csv_url = None
+                    st.session_state.catalog_snapshot_r2_csv_key = None
                     logger.info(
                         "✅ CSV export link prepared in UI: resolved_csv=%s public_csv=%s xlsx_status=%s",
                         snapshot_bundle.resolved_csv_path,
@@ -791,6 +833,61 @@ def main():
                 except Exception as e:
                     logger.error(f"❌ Ошибка подготовки выгрузки БД: {e}", exc_info=True)
                     st.error(f"❌ Не удалось подготовить ссылку на БД: {e}")
+
+        if st.button("☁️ Выгрузить БД в Cloudflare R2 (CSV)"):
+            if catalog_readiness.state != "ready":
+                st.error(
+                    f"❌ {catalog_readiness.reason or 'Итоговая БД не готова'}. "
+                    "Нажмите `🔄 Обновить БД`."
+                )
+            else:
+                account_id, bucket, access_key_id, secret_access_key, public_base_url = _get_cloudflare_r2_export_config()
+                if not account_id or not bucket or not access_key_id or not secret_access_key:
+                    st.error(
+                        "❌ Не настроен Cloudflare R2 export. "
+                        "Задайте CLOUDFLARE_R2_ACCOUNT_ID, CLOUDFLARE_R2_BUCKET, "
+                        "CLOUDFLARE_R2_ACCESS_KEY_ID и CLOUDFLARE_R2_SECRET_ACCESS_KEY."
+                    )
+                else:
+                    try:
+                        source_path = _catalog_source_path()
+                        export_name = f"{build_snapshot_export_basename(source_path)}{source_path.suffix or '.csv'}"
+                        object_key = f"catalog-exports/{export_name}"
+                        logger.info(
+                            "🖱️ Cloudflare R2 export button pressed: source=%s bucket=%s key=%s",
+                            source_path,
+                            bucket,
+                            object_key,
+                        )
+                        upload_result = upload_file_to_r2(
+                            source_path=source_path,
+                            account_id=account_id,
+                            bucket=bucket,
+                            access_key_id=access_key_id,
+                            secret_access_key=secret_access_key,
+                            object_key=object_key,
+                            public_base_url=public_base_url,
+                        )
+                        st.session_state.catalog_snapshot_r2_csv_url = upload_result.download_url
+                        st.session_state.catalog_snapshot_r2_csv_key = upload_result.object_key
+                        logger.info(
+                            "✅ Cloudflare R2 export link prepared in UI: bucket=%s key=%s",
+                            upload_result.bucket,
+                            upload_result.object_key,
+                        )
+                        st.success(f"✓ Файл выгружен в Cloudflare R2: {upload_result.object_key}")
+                    except Exception as e:
+                        logger.error(f"❌ Ошибка выгрузки БД в Cloudflare R2: {e}", exc_info=True)
+                        st.error(f"❌ Не удалось выгрузить БД в Cloudflare R2: {e}")
+
+        if st.session_state.catalog_snapshot_r2_csv_url:
+            if st.session_state.catalog_snapshot_r2_csv_key:
+                st.caption(f"Объект в Cloudflare R2: {st.session_state.catalog_snapshot_r2_csv_key}")
+            st.link_button(
+                "☁️ Открыть входную БД в Cloudflare R2",
+                st.session_state.catalog_snapshot_r2_csv_url,
+                use_container_width=True,
+            )
 
         if st.button("☁️ Выгрузить БД в Google Drive (CSV)"):
             if catalog_readiness.state != "ready":
