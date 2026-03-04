@@ -9,12 +9,13 @@ import pandas as pd
 import os
 from matcher import ReMoMatcher, MISSING_POSITION_TEXT
 from pathlib import Path
-import tempfile
 from datetime import datetime
 import sqlite3
 import logging
 import io
 import json
+import threading
+from typing import Any
 from cloudflare_r2_export import upload_file_to_r2
 from catalog_search import get_search_catalog_readiness, refresh_search_catalog
 from config import (
@@ -32,6 +33,26 @@ from catalog_snapshot import prepare_catalog_duplicate_report, prepare_catalog_s
 from google_drive_sync import sync_drive_folder_csvs, upload_file_to_drive
 from etl_pipeline import PriceETL
 from main import convert_csv
+from processing_runs import (
+    build_run_artifacts,
+    create_processing_run,
+    get_latest_active_processing_run,
+    get_preferred_run_for_restore,
+    get_processing_run,
+    has_processing_run_draft,
+    list_processing_runs,
+    load_processing_run_dataframe,
+    load_processing_run_stats,
+    mark_processing_run_completed,
+    mark_processing_run_failed,
+    mark_processing_run_started,
+    mark_stale_running_runs_as_interrupted,
+    register_processing_run_thread,
+    save_processing_run_draft,
+    unregister_processing_run_thread,
+    write_processing_run_error,
+    write_processing_run_result,
+)
 from snapshot_export import (
     build_public_export_url,
     build_snapshot_export_basename,
@@ -119,6 +140,18 @@ if 'show_results' not in st.session_state:
     st.session_state.show_results = False
 if 'show_corrections' not in st.session_state:
     st.session_state.show_corrections = False
+if 'active_run_id' not in st.session_state:
+    st.session_state.active_run_id = None
+if 'active_run_status' not in st.session_state:
+    st.session_state.active_run_status = None
+if 'active_run_loaded_at' not in st.session_state:
+    st.session_state.active_run_loaded_at = None
+if 'active_run_mode' not in st.session_state:
+    st.session_state.active_run_mode = "view"
+if 'last_run_restore_attempted' not in st.session_state:
+    st.session_state.last_run_restore_attempted = False
+if 'processing_thread_started_run_id' not in st.session_state:
+    st.session_state.processing_thread_started_run_id = None
 
 if 'catalog_snapshot_bundle' not in st.session_state:
     st.session_state.catalog_snapshot_bundle = None
@@ -304,17 +337,65 @@ def _safe_matcher_mode_select(current_mode: str, mode_options: list[str]) -> str
         st.warning("⚠️ Не удалось отрисовать selector режима matcher, применён fallback.")
         return fallback_mode
 
+def _current_matcher_runtime_settings() -> dict[str, Any]:
+    return {
+        "parallel_requests": int(st.session_state.get('matcher_parallel_requests', 1)),
+        "match_mode": str(st.session_state.get('matcher_mode', 'exact')),
+        "gemini_shortlist_limit": int(
+            st.session_state.get('matcher_gemini_shortlist_limit', get_matcher_gemini_shortlist_limit())
+        ),
+        "gemini_chunk_size": int(
+            st.session_state.get('matcher_gemini_chunk_size', get_matcher_gemini_chunk_size())
+        ),
+        "gemini_max_chunks": int(
+            st.session_state.get('matcher_gemini_max_chunks', get_matcher_gemini_max_chunks())
+        ),
+        "local_recall_pool": int(
+            st.session_state.get('matcher_local_recall_pool', get_matcher_local_recall_pool())
+        ),
+        "skip_weak_shortlist": bool(
+            st.session_state.get('matcher_skip_weak_shortlist', get_matcher_skip_weak_shortlist())
+        ),
+    }
+
+
+def _create_matcher_instance(db_csv: str, settings: dict[str, Any]) -> ReMoMatcher:
+    api_key = _get_gemini_api_key()
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY не установлен")
+    if not Path(db_csv).exists():
+        raise FileNotFoundError(f"Файл не найден: {db_csv}")
+    return ReMoMatcher(
+        api_key,
+        db_csv,
+        parallel_requests=int(settings.get("parallel_requests", 1)),
+        match_mode=str(settings.get("match_mode", "exact")),
+        gemini_shortlist_limit=int(settings.get("gemini_shortlist_limit", get_matcher_gemini_shortlist_limit())),
+        gemini_chunk_size=int(settings.get("gemini_chunk_size", get_matcher_gemini_chunk_size())),
+        gemini_max_chunks=int(settings.get("gemini_max_chunks", get_matcher_gemini_max_chunks())),
+        local_recall_pool=int(settings.get("local_recall_pool", get_matcher_local_recall_pool())),
+        skip_weak_shortlist=bool(settings.get("skip_weak_shortlist", get_matcher_skip_weak_shortlist())),
+    )
+
+
+def _resolve_catalog_source_for_run() -> tuple[Path, str]:
+    catalog_path = _matcher_catalog_source_path()
+    source_kind = "search" if catalog_path.name == "price_clean_search.csv" else "merged"
+    return catalog_path, source_kind
+
+
 def get_matcher() -> ReMoMatcher:
     """Получить или инициализировать экземпляр matcher"""
     db_csv = str(_matcher_catalog_source_path())
+    runtime_settings = _current_matcher_runtime_settings()
     settings_signature = (
-        int(st.session_state.get('matcher_parallel_requests', 1)),
-        str(st.session_state.get('matcher_mode', 'exact')),
-        int(st.session_state.get('matcher_gemini_shortlist_limit', get_matcher_gemini_shortlist_limit())),
-        int(st.session_state.get('matcher_gemini_chunk_size', get_matcher_gemini_chunk_size())),
-        int(st.session_state.get('matcher_gemini_max_chunks', get_matcher_gemini_max_chunks())),
-        int(st.session_state.get('matcher_local_recall_pool', get_matcher_local_recall_pool())),
-        bool(st.session_state.get('matcher_skip_weak_shortlist', get_matcher_skip_weak_shortlist())),
+        runtime_settings["parallel_requests"],
+        runtime_settings["match_mode"],
+        runtime_settings["gemini_shortlist_limit"],
+        runtime_settings["gemini_chunk_size"],
+        runtime_settings["gemini_max_chunks"],
+        runtime_settings["local_recall_pool"],
+        runtime_settings["skip_weak_shortlist"],
     )
     needs_reinit = (
         st.session_state.matcher is None
@@ -324,57 +405,9 @@ def get_matcher() -> ReMoMatcher:
 
     if needs_reinit:
         logger.info("🔄 Инициализация ReMoMatcher...")
-        api_key = _get_gemini_api_key()
-        
-        if not api_key:
-            logger.error("❌ GEMINI_API_KEY не установлен")
-            st.error("❌ GEMINI_API_KEY не установлен!")
-            st.info("""
-            **Как установить:**
-            1. Создайте файл `.streamlit/secrets.toml` в папке проекта:
-            ```
-            GEMINI_API_KEY = "ваш_ключ"
-            ```
-            2. Или установите переменную окружения:
-            ```bash
-            export GEMINI_API_KEY="ваш_ключ"
-            ```
-            """)
-            st.stop()
-        
-        if not Path(db_csv).exists():
-            logger.error(f"❌ Файл не найден: {db_csv}")
-            st.error(f"❌ Файл не найден: {db_csv}")
-            st.info(
-                "Для Railway задайте путь к каталогу через переменную окружения "
-                "`REMO_DB_CSV` (или `REMO_UPLOAD_DIR`) и убедитесь, что файл "
-                "`price_clean_merged.csv` существует в контейнере."
-            )
-            st.stop()
-        
         with st.spinner("⏳ Инициализация ReMo Matcher..."):
             try:
-                st.session_state.matcher = ReMoMatcher(
-                    api_key,
-                    db_csv,
-                    parallel_requests=int(st.session_state.get('matcher_parallel_requests', 1)),
-                    match_mode=str(st.session_state.get('matcher_mode', 'exact')),
-                    gemini_shortlist_limit=int(
-                        st.session_state.get('matcher_gemini_shortlist_limit', get_matcher_gemini_shortlist_limit())
-                    ),
-                    gemini_chunk_size=int(
-                        st.session_state.get('matcher_gemini_chunk_size', get_matcher_gemini_chunk_size())
-                    ),
-                    gemini_max_chunks=int(
-                        st.session_state.get('matcher_gemini_max_chunks', get_matcher_gemini_max_chunks())
-                    ),
-                    local_recall_pool=int(
-                        st.session_state.get('matcher_local_recall_pool', get_matcher_local_recall_pool())
-                    ),
-                    skip_weak_shortlist=bool(
-                        st.session_state.get('matcher_skip_weak_shortlist', get_matcher_skip_weak_shortlist())
-                    ),
-                )
+                st.session_state.matcher = _create_matcher_instance(db_csv, runtime_settings)
                 st.session_state.matcher_db_csv = db_csv
                 st.session_state.matcher_settings_signature = settings_signature
                 logger.info("✓ ReMoMatcher успешно инициализирован")
@@ -386,34 +419,79 @@ def get_matcher() -> ReMoMatcher:
     return st.session_state.matcher
 
 
-def process_uploaded_file(uploaded_file) -> tuple:
-    """Обработать загруженный файл"""
-    
-    logger.info(f"📄 Обработка файла: {uploaded_file.name}")
-    matcher = get_matcher()
-    
-    # Сохранить временный файл
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
-        tmp.write(uploaded_file.getbuffer())
-        tmp_path = tmp.name
-        logger.info(f"📝 Временный файл сохранен: {tmp_path}")
-    
+def _run_processing_job(run_id: str, matcher_settings: dict[str, Any]) -> None:
     try:
-        with st.spinner("🔍 Обработка файла (это может занять время)..."):
-            logger.info("⏳ Начало обработки файла в matcher.process_excel()")
-            df_result, stats = matcher.process_excel(tmp_path)
-        
-        st.session_state.df_processed = df_result
-        st.session_state.stats = stats
-        logger.info(f"✓ Файл успешно обработан. Результат: {stats}")
-        
-        return df_result, stats
-    except Exception as e:
-        logger.error(f"❌ Ошибка при обработке файла: {e}", exc_info=True)
-        raise
+        run = get_processing_run(run_id)
+        if run is None:
+            raise RuntimeError(f"Run not found: {run_id}")
+
+        mark_processing_run_started(run_id)
+        logger.info("🚀 Processing run started in background: %s", run_id)
+
+        matcher = _create_matcher_instance(str(run.catalog_source_path), matcher_settings)
+        artifacts = build_run_artifacts(run_id)
+        logger.info("⏳ Background run %s: processing %s", run_id, run.input_file_path)
+        df_result, stats = matcher.process_excel(str(run.input_file_path), output_path=str(artifacts.result_xlsx_path))
+
+        write_processing_run_result(run_id, df_result, stats)
+        rows_total = int(stats.get("total", len(df_result)))
+        found_count = int(stats.get("found", 0))
+        missing_count = int(stats.get("not_found", 0))
+        requires_review_count = int(
+            (df_result.get("Требует проверки", pd.Series(dtype=object)).fillna("").astype(str).str.lower() == "да").sum()
+        )
+        mark_processing_run_completed(
+            run_id,
+            result_csv_path=artifacts.result_csv_path,
+            stats_json_path=artifacts.stats_json_path,
+            rows_total=rows_total,
+            found_count=found_count,
+            missing_count=missing_count,
+            requires_review_count=requires_review_count,
+        )
+        logger.info("✅ Processing run completed: %s", run_id)
+    except Exception as exc:
+        logger.error("❌ Processing run failed: %s", run_id, exc_info=True)
+        error_text = str(exc)
+        try:
+            write_processing_run_error(run_id, error_text)
+        except Exception:
+            logger.exception("Failed to write run error file: %s", run_id)
+        mark_processing_run_failed(run_id, error_text)
     finally:
-        os.unlink(tmp_path)
-        logger.info(f"🗑️ Временный файл удален")
+        unregister_processing_run_thread(run_id)
+
+
+def _start_processing_run(uploaded_file) -> str:
+    logger.info("📄 Обработка файла: %s", uploaded_file.name)
+    catalog_source_path, source_kind = _resolve_catalog_source_for_run()
+    run = create_processing_run(
+        input_filename=uploaded_file.name,
+        catalog_source_path=catalog_source_path,
+        catalog_source_kind=source_kind,
+    )
+    artifacts = build_run_artifacts(run.run_id)
+    with open(artifacts.input_path, 'wb') as fh:
+        fh.write(uploaded_file.getbuffer())
+
+    matcher_settings = _current_matcher_runtime_settings()
+    worker = threading.Thread(
+        target=_run_processing_job,
+        args=(run.run_id, matcher_settings),
+        daemon=True,
+        name=f"processing-run-{run.run_id}",
+    )
+    register_processing_run_thread(run.run_id, worker)
+    worker.start()
+    st.session_state.active_run_id = run.run_id
+    st.session_state.active_run_status = "queued"
+    st.session_state.active_run_loaded_at = None
+    st.session_state.active_run_mode = "view"
+    st.session_state.processing_thread_started_run_id = run.run_id
+    st.session_state.df_processed = None
+    st.session_state.stats = None
+    logger.info("🧵 Background processing thread started: run_id=%s source=%s", run.run_id, source_kind)
+    return run.run_id
 
 
 def save_uploaded_catalog(uploaded_catalog, run_etl: bool = False) -> Path:
@@ -566,6 +644,60 @@ def _rebuild_merged_catalog_from_clean(clean_dir: Path) -> Path:
     return merged_path
 
 
+def _clear_loaded_run_cache() -> None:
+    st.session_state.df_processed = None
+    st.session_state.stats = None
+    st.session_state.active_run_loaded_at = None
+
+
+def _restore_active_run_state() -> None:
+    interrupted_count = mark_stale_running_runs_as_interrupted()
+    if interrupted_count:
+        logger.info("🧹 Interrupted stale processing runs after startup: %s", interrupted_count)
+
+    active_run_id = st.session_state.get("active_run_id")
+    active_run = get_processing_run(active_run_id) if active_run_id else None
+    if active_run is None:
+        preferred_run = get_preferred_run_for_restore()
+        st.session_state.last_run_restore_attempted = True
+        if preferred_run is not None:
+            st.session_state.active_run_id = preferred_run.run_id
+            st.session_state.active_run_status = preferred_run.status
+        else:
+            st.session_state.active_run_id = None
+            st.session_state.active_run_status = None
+            _clear_loaded_run_cache()
+        return
+
+    st.session_state.active_run_status = active_run.status
+
+
+def _get_active_or_preferred_run() -> Any:
+    active_run_id = st.session_state.get("active_run_id")
+    if active_run_id:
+        return get_processing_run(active_run_id)
+    return get_preferred_run_for_restore()
+
+
+def _load_run_results_into_session(run) -> tuple[pd.DataFrame, dict[str, Any]]:
+    df = load_processing_run_dataframe(run, prefer_draft=True)
+    stats = load_processing_run_stats(run)
+    st.session_state.df_processed = df
+    st.session_state.stats = stats
+    st.session_state.active_run_id = run.run_id
+    st.session_state.active_run_status = run.status
+    st.session_state.active_run_loaded_at = run.updated_at
+    return df, stats
+
+
+def _dataframes_equal_for_persistence(left: pd.DataFrame, right: pd.DataFrame) -> bool:
+    if list(left.columns) != list(right.columns) or len(left.index) != len(right.index):
+        return False
+    left_norm = left.fillna("").astype(str)
+    right_norm = right.fillna("").astype(str)
+    return left_norm.equals(right_norm)
+
+
 def process_raw_catalogs_with_etl() -> list[Path]:
     """Обработать уже скачанные raw CSV в отдельный этап ETL."""
     storage_dir = get_upload_dir()
@@ -675,6 +807,7 @@ def show_corrections_table(df):
         st.info(f"📌 Найдено {len(df_view)} позиций без сопоставления")
     else:
         df_view = df.copy()
+    original_index = df_view.index.copy()
     
     # Редактируемая таблица
     st.write("**Отредактируйте результаты в таблице ниже:**")
@@ -685,8 +818,11 @@ def show_corrections_table(df):
         disabled=['Наименование оборудования, материалов и кабелей'],  # Закрыть от редактирования
         num_rows="fixed"
     )
-    
-    return edited_df
+
+    updated_df = df.copy()
+    edited_df.index = original_index
+    updated_df.loc[original_index] = edited_df
+    return updated_df
 
 
 # ============ MAIN UI ============
@@ -698,7 +834,8 @@ def main():
     if build_sha:
         st.caption(f"Build: `{build_sha[:8]}`")
         logger.info("🚢 Build commit: %s", build_sha)
-    
+
+    _restore_active_run_state()
     # Боковая панель
     with st.sidebar:
         st.header("⚙️ Настройки")
@@ -1244,6 +1381,51 @@ def main():
     
     with tab1:
         st.header("Загрузка файла КП")
+
+        run_for_display = _get_active_or_preferred_run()
+        if run_for_display is not None:
+            status_labels = {
+                "queued": "В очереди",
+                "running": "Выполняется",
+                "completed": "Завершен",
+                "failed": "Ошибка",
+                "interrupted": "Прерван",
+            }
+            st.subheader("Текущий прогон")
+            st.write(f"**ID:** `{run_for_display.run_id}`")
+            st.write(f"**Файл:** {run_for_display.input_filename}")
+            st.write(f"**Статус:** {status_labels.get(run_for_display.status, run_for_display.status)}")
+            st.write(f"**Источник каталога:** {run_for_display.catalog_source_kind}")
+            st.write(f"**Создан:** {run_for_display.created_at}")
+            if run_for_display.started_at:
+                st.write(f"**Старт:** {run_for_display.started_at}")
+            st.write(f"**Обновлен:** {run_for_display.updated_at}")
+            if run_for_display.status == "completed":
+                st.caption(
+                    "Статистика: "
+                    f"всего={run_for_display.rows_total or 0}, "
+                    f"найдено={run_for_display.found_count or 0}, "
+                    f"не найдено={run_for_display.missing_count or 0}, "
+                    f"требуют проверки={run_for_display.requires_review_count or 0}"
+                )
+            elif run_for_display.error_text:
+                st.warning(run_for_display.error_text)
+
+            status_col1, status_col2, status_col3 = st.columns(3)
+            with status_col1:
+                if st.button("🔄 Обновить статус", key="refresh_active_run_status"):
+                    st.rerun()
+            with status_col2:
+                if st.button("📌 Открыть этот прогон в результатах", key="open_active_run_results"):
+                    st.session_state.active_run_id = run_for_display.run_id
+                    st.session_state.active_run_status = run_for_display.status
+                    st.info("Перейдите на вкладку «Результаты», чтобы открыть этот прогон.")
+            with status_col3:
+                if st.button("🧹 Сбросить выбор", key="clear_active_run_selection"):
+                    st.session_state.active_run_id = None
+                    st.session_state.active_run_status = None
+                    _clear_loaded_run_cache()
+                    st.success("Выбор активного прогона очищен")
         
         uploaded_file = st.file_uploader(
             "Выберите Excel файл коммерческого предложения",
@@ -1271,212 +1453,259 @@ def main():
 
             if process_button:
                 logger.info("🔘 Пользователь нажал кнопку 'Начать обработку'")
-                st.session_state.processing = True
-                try:
-                    df_result, stats = process_uploaded_file(uploaded_file)
-
-                    # Успешно
-                    st.markdown('<div class="success-box">✅ Обработка завершена успешно!</div>',
-                               unsafe_allow_html=True)
-                    logger.info("✅ Обработка успешно завершена")
-
-                    show_statistics(stats)
-
-                    # Опции после обработки
-                    col1, col2, col3 = st.columns(3)
-
-                    with col1:
-                        if st.button("📋 Просмотреть результаты"):
-                            logger.info("📋 Пользователь открыл результаты")
-                            st.session_state.show_results = True
-                            st.session_state.show_corrections = False
-                            st.rerun()
-
-                    with col2:
-                        if st.button("✏️ Коррекция"):
-                            logger.info("✏️ Пользователь открыл коррекцию")
-                            st.session_state.show_results = True
-                            st.session_state.show_corrections = True
-                            st.rerun()
-
-                    with col3:
-                        output_filename = f"{uploaded_file.name.split('.')[0]}_matched_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-                        csv_data = df_result.to_csv(index=False, sep=';', encoding='utf-8')
-                        st.download_button(
-                            "💾 Скачать результат",
-                            csv_data,
-                            output_filename,
-                            "text/csv",
-                            key="download_csv"
+                active_run = get_latest_active_processing_run()
+                if active_run is not None:
+                    st.error("❌ Уже выполняется обработка. Дождитесь завершения текущего прогона.")
+                else:
+                    try:
+                        run_id = _start_processing_run(uploaded_file)
+                        st.markdown(
+                            '<div class="success-box">✅ Прогон запущен в фоне. '
+                            'Страница может быть обновлена без потери результата.</div>',
+                            unsafe_allow_html=True,
                         )
-                        logger.info(f"💾 Кнопка скачивания готова: {output_filename}")
-
-                except Exception as e:
-                    logger.error(f"❌ Ошибка при обработке: {e}", exc_info=True)
-                    st.markdown(f'<div class="error-box">❌ Ошибка: {str(e)}</div>',
-                               unsafe_allow_html=True)
-                    st.error(str(e))
-                finally:
-                    st.session_state.processing = False
+                        st.info(f"ID нового прогона: `{run_id}`")
+                        logger.info("✅ Processing run created from UI: %s", run_id)
+                    except Exception as e:
+                        logger.error(f"❌ Ошибка при запуске фоновой обработки: {e}", exc_info=True)
+                        st.markdown(
+                            f'<div class="error-box">❌ Ошибка запуска обработки: {str(e)}</div>',
+                            unsafe_allow_html=True,
+                        )
+                        st.error(str(e))
     
     with tab2:
         st.header("📋 Результаты обработки")
-        
-        if st.session_state.df_processed is not None:
-            df = st.session_state.df_processed
-            stats = st.session_state.stats
-
-            show_statistics(stats)
-
-            st.divider()
-
-            default_mode = "Коррекция" if st.session_state.get('show_corrections') else "Просмотр"
-            mode = st.radio("Режим", ["Просмотр", "Коррекция"], index=1 if default_mode == "Коррекция" else 0, horizontal=True)
-
-            if mode == "Коррекция":
-                edited_df = show_corrections_table(df)
-                if st.button("💾 Сохранить правки", key="save_corrections"):
-                    st.session_state.df_processed = edited_df.copy()
-                    st.session_state.show_corrections = False
-                    st.success("✓ Правки сохранены")
-                    st.rerun()
-
-            # Фильтры
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                show_filter = st.selectbox(
-                    "Фильтр",
-                    ["Все", "Найдены", "Не найдены", "С ошибками"]
-                )
-            
-            with col2:
-                sort_by = st.selectbox("Сортировать по", ["По порядку", "Названию", "Цене"])
-            
-            with col3:
-                page_size = st.slider("Строк на странице", 5, 50, 20)
-            
-            # Применить фильтр
-            missing_mask = (
-                df['Найденная номенклатура'].isna()
-                | (df['Найденная номенклатура'].astype(str).str.strip() == '')
-                | (df['Найденная номенклатура'].astype(str).str.strip() == MISSING_POSITION_TEXT)
+        run = _get_active_or_preferred_run()
+        if run is None:
+            st.info("📤 Загрузите файл и запустите обработку. Последних прогонов пока нет.")
+        elif run.status in ("queued", "running"):
+            st.info(
+                f"⏳ Прогон `{run.run_id}` еще выполняется "
+                f"({run.status}). Обновите страницу позже или нажмите «Обновить статус» на вкладке «Загрузка»."
             )
-            error_mask = (
-                df['Ошибка сопоставления'].notna()
-                & (df['Ошибка сопоставления'].astype(str).str.strip() != '')
-            ) if 'Ошибка сопоставления' in df.columns else pd.Series(False, index=df.index)
-
-            if show_filter == "Найдены":
-                df_view = df[~missing_mask]
-            elif show_filter == "Не найдены":
-                df_view = df[missing_mask]
-            elif show_filter == "С ошибками":
-                df_view = df[error_mask]
-            else:
-                df_view = df
-            
-            # Применить сортировку
-            if sort_by == "Названию":
-                df_view = df_view.sort_values(by=df.columns[1], na_position='last')
-            elif sort_by == "Цене":
-                df_view = df_view.sort_values(by='Цена', ascending=False, na_position='last')
-            
-            st.info(f"📌 Отображено {len(df_view)} из {len(df)} записей")
-            
-            # Таблица с пагинацией
-            total_pages = (len(df_view) + page_size - 1) // page_size
-            max_pages = max(1, total_pages)
-            if max_pages > 1:
-                page = st.slider("Страница", 1, max_pages, 1)
-            else:
-                page = 1
-                st.caption("Страница 1 из 1")
-
-            start_idx = (page - 1) * page_size
-            end_idx = start_idx + page_size
-
-            st.dataframe(_prepare_df_for_display(df_view.iloc[start_idx:end_idx]), width="stretch")
-
-            if max_pages > 1:
-                st.markdown(f"Страница {page} из {max_pages}")
-            
-            # Скачать
-            st.divider()
-            
-            output_format = st.radio("Формат для скачивания", ["Excel", "CSV"])
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                if output_format == "Excel":
-                    try:
-                        excel_buffer = io.BytesIO()
-                        df.to_excel(excel_buffer, index=False, engine='openpyxl')
-                        excel_buffer.seek(0)
-                        st.download_button(
-                            "📥 Скачать Excel",
-                            excel_buffer.getvalue(),
-                            f"result_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                            "application/vnd.ms-excel"
-                        )
-                        logger.info("✓ Excel успешно сгенерирован для скачивания")
-                    except Exception as e:
-                        st.error(f"❌ Ошибка при сохранении Excel: {str(e)}")
-                        logger.error(f"Ошибка Excel: {e}", exc_info=True)
-            
-            with col2:
-                csv_data = df.to_csv(index=False, sep=';', encoding='utf-8')
-                st.download_button(
-                    "📥 Скачать CSV",
-                    csv_data,
-                    f"result_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    "text/csv"
-                )
+        elif run.status in ("failed", "interrupted"):
+            st.error(
+                f"❌ Прогон `{run.run_id}` не завершен: "
+                f"{run.error_text or 'подробности отсутствуют'}"
+            )
         else:
-            st.info("📤 Загрузите файл и обработайте его сначала")
+            try:
+                if (
+                    st.session_state.df_processed is None
+                    or st.session_state.get("active_run_id") != run.run_id
+                    or st.session_state.get("active_run_loaded_at") != run.updated_at
+                ):
+                    df, stats = _load_run_results_into_session(run)
+                else:
+                    df = st.session_state.df_processed
+                    stats = st.session_state.stats
+            except Exception as e:
+                logger.error("❌ Не удалось загрузить результаты прогона %s: %s", run.run_id, e, exc_info=True)
+                st.error(f"❌ Не удалось загрузить результаты прогона `{run.run_id}`: {e}")
+                df = None
+                stats = None
+
+            if df is not None and stats is not None:
+                st.caption(f"Открыт прогон: `{run.run_id}`")
+                if has_processing_run_draft(run):
+                    st.info("📝 Для этого прогона есть автосохраненный черновик правок.")
+                show_statistics(stats)
+
+                st.divider()
+
+                default_mode = "Коррекция" if st.session_state.get("active_run_mode") == "correction" else "Просмотр"
+                mode = st.radio(
+                    "Режим",
+                    ["Просмотр", "Коррекция"],
+                    index=1 if default_mode == "Коррекция" else 0,
+                    horizontal=True,
+                )
+                st.session_state.active_run_mode = "correction" if mode == "Коррекция" else "view"
+
+                if mode == "Коррекция":
+                    edited_df = show_corrections_table(df)
+                    if not _dataframes_equal_for_persistence(edited_df, df):
+                        save_processing_run_draft(run.run_id, edited_df)
+                        st.session_state.df_processed = edited_df.copy()
+                        df = edited_df
+                        run = get_processing_run(run.run_id) or run
+                        st.session_state.active_run_loaded_at = run.updated_at
+                        st.caption(f"Черновик правок автосохранен: {run.updated_at}")
+                    if st.button("💾 Сохранить правки", key="save_corrections"):
+                        save_processing_run_draft(run.run_id, df)
+                        run = get_processing_run(run.run_id) or run
+                        st.session_state.active_run_loaded_at = run.updated_at
+                        st.success("✓ Правки сохранены")
+
+                col1, col2, col3 = st.columns(3)
+
+                with col1:
+                    show_filter = st.selectbox(
+                        "Фильтр",
+                        ["Все", "Найдены", "Не найдены", "С ошибками"]
+                    )
+
+                with col2:
+                    sort_by = st.selectbox("Сортировать по", ["По порядку", "Названию", "Цене"])
+
+                with col3:
+                    page_size = st.slider("Строк на странице", 5, 50, 20)
+
+                missing_mask = (
+                    df['Найденная номенклатура'].isna()
+                    | (df['Найденная номенклатура'].astype(str).str.strip() == '')
+                    | (df['Найденная номенклатура'].astype(str).str.strip() == MISSING_POSITION_TEXT)
+                )
+                error_mask = (
+                    df['Ошибка сопоставления'].notna()
+                    & (df['Ошибка сопоставления'].astype(str).str.strip() != '')
+                ) if 'Ошибка сопоставления' in df.columns else pd.Series(False, index=df.index)
+
+                if show_filter == "Найдены":
+                    df_view = df[~missing_mask]
+                elif show_filter == "Не найдены":
+                    df_view = df[missing_mask]
+                elif show_filter == "С ошибками":
+                    df_view = df[error_mask]
+                else:
+                    df_view = df
+
+                if sort_by == "Названию":
+                    df_view = df_view.sort_values(by=df.columns[1], na_position='last')
+                elif sort_by == "Цене":
+                    df_view = df_view.sort_values(by='Цена', ascending=False, na_position='last')
+
+                st.info(f"📌 Отображено {len(df_view)} из {len(df)} записей")
+
+                total_pages = (len(df_view) + page_size - 1) // page_size
+                max_pages = max(1, total_pages)
+                if max_pages > 1:
+                    page = st.slider("Страница", 1, max_pages, 1)
+                else:
+                    page = 1
+                    st.caption("Страница 1 из 1")
+
+                start_idx = (page - 1) * page_size
+                end_idx = start_idx + page_size
+
+                st.dataframe(_prepare_df_for_display(df_view.iloc[start_idx:end_idx]), width="stretch")
+
+                if max_pages > 1:
+                    st.markdown(f"Страница {page} из {max_pages}")
+
+                st.divider()
+
+                output_format = st.radio("Формат для скачивания", ["Excel", "CSV"])
+
+                download_col1, download_col2 = st.columns(2)
+
+                with download_col1:
+                    if output_format == "Excel":
+                        try:
+                            excel_buffer = io.BytesIO()
+                            df.to_excel(excel_buffer, index=False, engine='openpyxl')
+                            excel_buffer.seek(0)
+                            st.download_button(
+                                "📥 Скачать Excel",
+                                excel_buffer.getvalue(),
+                                f"result_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                                "application/vnd.ms-excel"
+                            )
+                            logger.info("✓ Excel успешно сгенерирован для скачивания")
+                        except Exception as e:
+                            st.error(f"❌ Ошибка при сохранении Excel: {str(e)}")
+                            logger.error(f"Ошибка Excel: {e}", exc_info=True)
+
+                with download_col2:
+                    csv_data = df.to_csv(index=False, sep=';', encoding='utf-8')
+                    st.download_button(
+                        "📥 Скачать CSV",
+                        csv_data,
+                        f"result_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        "text/csv"
+                    )
     
     with tab3:
         st.header("📊 История обработок")
-        
+        st.subheader("История прогонов")
+        try:
+            runs = list_processing_runs(limit=20)
+            if runs:
+                runs_df = pd.DataFrame(
+                    [
+                        {
+                            "run_id": run.run_id,
+                            "created_at": run.created_at,
+                            "input_filename": run.input_filename,
+                            "status": run.status,
+                            "catalog_source_kind": run.catalog_source_kind,
+                            "rows_total": run.rows_total,
+                            "found_count": run.found_count,
+                            "missing_count": run.missing_count,
+                            "requires_review_count": run.requires_review_count,
+                        }
+                        for run in runs
+                    ]
+                )
+                st.dataframe(_prepare_df_for_display(runs_df), width="stretch")
+
+                run_options = {f"{run.created_at} | {run.status} | {run.input_filename}": run.run_id for run in runs}
+                selected_run_label = st.selectbox(
+                    "Выберите прогон",
+                    list(run_options.keys()),
+                    key="history_run_selector",
+                )
+                if st.button("📌 Открыть выбранный прогон", key="open_history_run"):
+                    selected_run_id = run_options[selected_run_label]
+                    selected_run = get_processing_run(selected_run_id)
+                    if selected_run is None:
+                        st.error("❌ Выбранный прогон больше недоступен")
+                    else:
+                        st.session_state.active_run_id = selected_run.run_id
+                        st.session_state.active_run_status = selected_run.status
+                        _clear_loaded_run_cache()
+                        st.success(f"✓ Выбран прогон `{selected_run.run_id}`. Перейдите на вкладку «Результаты».")
+            else:
+                st.info("📭 История прогонов пока пуста")
+        except Exception as e:
+            st.warning(f"⚠️ Не удалось загрузить историю прогонов: {e}")
+
+        st.divider()
+        st.subheader("История подтверждений")
+
         try:
             conn = sqlite3.connect(str(get_matcher_cache_db_path()))
             _ensure_history_table_exists(conn)
-            
-            # История результатов
+
             df_history = pd.read_sql_query(
                 "SELECT * FROM match_history ORDER BY created_at DESC LIMIT 100",
                 conn
             )
-            
+
             if not df_history.empty:
-                st.subheader(f"Последние {len(df_history)} операций")
-                
-                # Статистика
                 col1, col2, col3 = st.columns(3)
-                
+
                 with col1:
                     approved_count = df_history['user_approved'].sum()
                     st.metric("✅ Одобрено", approved_count)
-                
+
                 with col2:
                     rejected_count = len(df_history) - approved_count
                     st.metric("❌ Отклонено", rejected_count)
-                
+
                 with col3:
                     success_rate = (approved_count / len(df_history) * 100) if len(df_history) > 0 else 0
                     st.metric("📊 Одобрено %", f"{success_rate:.1f}%")
-                
+
                 st.divider()
-                
-                # Таблица истории
                 st.dataframe(_prepare_df_for_display(df_history), width="stretch")
             else:
-                st.info("📭 История пуста")
-            
+                st.info("📭 История подтверждений пуста")
+
             conn.close()
         except Exception as e:
-            st.warning(f"⚠️ Не удалось загрузить историю: {e}")
+            st.warning(f"⚠️ Не удалось загрузить историю подтверждений: {e}")
 
 
 if __name__ == "__main__":
