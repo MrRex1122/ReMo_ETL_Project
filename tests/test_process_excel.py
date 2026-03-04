@@ -74,10 +74,20 @@ class ProcessExcelExistingColumnsTests(unittest.TestCase):
         for col in ("Цена", "Найденная номенклатура", "Артикул"):
             self.assertEqual(list(result_df.columns).count(col), 1)
 
+        for col in (
+            "Совместимость решения",
+            "Причина несовместимости",
+            "Gemini shortlist",
+            "Gemini visible candidates",
+            "Gemini truncated",
+        ):
+            self.assertIn(col, result_df.columns)
+
         self.assertEqual(stats["total"], 2)
         self.assertEqual(stats["found"], 1)
         self.assertEqual(stats["not_found"], 1)
         self.assertEqual(stats["errors"], 0)
+        self.assertIn("gemini_rows_total", stats)
 
     def test_process_excel_overwrites_existing_result_cells(self):
         df = pd.DataFrame(

@@ -38,7 +38,27 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertNotIn("Лишняя колонка", built.columns)
             self.assertEqual(len(built), 1)
             self.assertEqual(built.loc[0, "Артикул"], "PDU-1")
-            self.assertEqual(built.loc[0, "search_entity_type"], "pdu")
+            self.assertEqual(built.loc[0, "search_entity_type"], "pdu_basic")
+
+    def test_build_search_catalog_extracts_richer_markers(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Оптический патч-корд LC-LC duplex OS2 2м;OPT-2;900;Коммутация;CLS-2;Патч-корд;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            built = pd.read_csv(build_search_catalog_from_merged(merged_path), sep=";", encoding="utf-8")
+            markers = built.loc[0, "search_item_markers_json"]
+
+            self.assertIn("connector_pair", markers)
+            self.assertIn("fiber_mode", markers)
+            self.assertIn("duplex", markers)
 
     def test_search_catalog_readiness_tracks_missing_ready_and_stale_states(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

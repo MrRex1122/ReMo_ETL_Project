@@ -167,8 +167,63 @@ def tokenize(
     return [token for token in tokens if len(token) >= 2 and token not in blocked]
 
 
+def _detect_connector_pair(normalized: str) -> str:
+    connector_patterns = (
+        ("c13-c14", (r"\bc13\b", r"\bc14\b")),
+        ("c19-c20", (r"\bc19\b", r"\bc20\b")),
+        ("lc-lc", (r"\blc\b", r"\blc\b")),
+        ("sc-sc", (r"\bsc\b", r"\bsc\b")),
+        ("lc-sc", (r"\blc\b", r"\bsc\b")),
+        ("rj45-rj45", (r"\brj[\s-]?45\b", r"\brj[\s-]?45\b")),
+    )
+    for value, patterns in connector_patterns:
+        if all(re.search(pattern, normalized, flags=re.IGNORECASE) for pattern in patterns):
+            return value
+    return ""
+
+
 def classify_item_type(text: str, synonyms: Mapping[str, str] | None = None) -> str:
     normalized = normalize_query_terms(text, synonyms=synonyms)
+    if (
+        "ats" in normalized
+        or "sts" in normalized
+        or ("статическ" in normalized and "переключател" in normalized)
+    ):
+        return "ats_sts"
+    if ("температур" in normalized or "влажност" in normalized) and "датчик" in normalized:
+        if "влажност" in normalized:
+            return "temperature_humidity_sensor"
+        return "temperature_sensor"
+    if "геркон" in normalized or "магнитоконтакт" in normalized:
+        return "reed_sensor"
+    if "pdu" in normalized or "блок розеток" in normalized:
+        if "meter" in normalized or "измерител" in normalized:
+            return "pdu_metered"
+        return "pdu_basic"
+    if any(marker in normalized for marker in ("оптическ", "волокон")) and (
+        "патч корд" in normalized or "patch cord" in normalized
+    ):
+        return "optical_patch_cord"
+    if "keystone" in normalized or "кейстоун" in normalized:
+        return "keystone_module"
+    if "коннектор" in normalized and re.search(r"\brj[\s-]?45\b", normalized, flags=re.IGNORECASE):
+        return "rj45_connector"
+    if "розетк" in normalized and re.search(r"\brj[\s-]?45\b", normalized, flags=re.IGNORECASE):
+        return "rj45_outlet"
+    if "лючок" in normalized or ("напольн" in normalized and "короб" in normalized):
+        return "floor_box"
+    if "щеточ" in normalized:
+        return "rack_brush_panel"
+    if "заглуш" in normalized:
+        return "rack_blank_panel"
+    if "полк" in normalized:
+        return "rack_shelf"
+    if "рельс" in normalized or "rail" in normalized or "направляющ" in normalized:
+        return "rack_rail"
+    if "заземл" in normalized and "шин" in normalized:
+        return "ground_bar"
+    if any(marker in normalized for marker in ("iec320", "c13", "c14", "c19", "c20")):
+        return "iec_power_cable"
     if "патч корд" in normalized:
         return "patch_cord"
     bulk_markers = ("витая пара", "utp", "ftp", "f utp", "u utp", "бухта", "305м", "500м")
@@ -176,8 +231,6 @@ def classify_item_type(text: str, synonyms: Mapping[str, str] | None = None) -> 
         return "bulk_twisted_pair"
     if "коаксиал" in normalized or "rg " in normalized or "75 ом" in normalized or "50 ом" in normalized:
         return "coax"
-    if "pdu" in normalized or "блок розеток" in normalized:
-        return "pdu"
     if "шкаф" in normalized or "стойк" in normalized:
         return "rack"
     if "патч панел" in normalized:
@@ -215,23 +268,35 @@ def derive_branch_from_text(
             return normalize_branch_path(rule.get("path", []))
 
     entity_type = classify_item_type(merged, synonyms=synonyms)
-    if entity_type == "pdu":
+    if entity_type in {"pdu", "pdu_basic", "pdu_metered"}:
         if "zero u" in merged:
             return "телеком > питание > pdu > zero u"
         return "телеком > питание > pdu"
+    if entity_type == "ats_sts":
+        return "телеком > питание > ats"
     if entity_type == "patch_panel":
         return "телеком > коммутация > патч панели"
+    if entity_type == "optical_patch_cord":
+        return "телеком > кабели > оптические патч корды"
     if entity_type == "patch_cord":
         return "телеком > кабели > патч корды"
+    if entity_type in {"keystone_module", "rj45_connector", "rj45_outlet"}:
+        return "телеком > коммутация > модули"
     if entity_type == "rack":
         return "телеком > шкафы"
-    if entity_type == "sensor":
+    if entity_type in {"temperature_sensor", "temperature_humidity_sensor", "reed_sensor", "sensor"}:
         return "автоматика > датчики"
+    if entity_type in {"rack_blank_panel", "rack_brush_panel", "rack_shelf", "rack_rail"}:
+        return "телеком > аксессуары > шкафные аксессуары"
+    if entity_type == "floor_box":
+        return "телеком > аксессуары > лючки"
+    if entity_type == "ground_bar":
+        return "телеком > аксессуары > заземление"
     if entity_type == "breaker":
         return "электрика > автоматы"
     if entity_type == "socket":
         return "электрика > розетки"
-    if entity_type in {"cable", "bulk_twisted_pair", "coax"}:
+    if entity_type in {"cable", "bulk_twisted_pair", "coax", "iec_power_cable"}:
         if "cat6" in merged:
             return "телеком > кабели > витая пара > cat6"
         if "cat5e" in merged:
@@ -318,6 +383,44 @@ def extract_item_markers(
                 markers[feature_name] = str(value).lower()
                 break
 
+    category_match = re.search(r"\b(cat\s*6a|cat\s*6|cat\s*5e)\b", normalized, flags=re.IGNORECASE)
+    if category_match:
+        markers["category"] = category_match.group(1).replace(" ", "").lower()
+
+    rack_unit_match = re.search(r"\b(\d{1,2})\s*u\b", normalized, flags=re.IGNORECASE)
+    if rack_unit_match:
+        markers["rack_unit"] = rack_unit_match.group(1)
+
+    connector_pair = _detect_connector_pair(normalized)
+    if connector_pair:
+        markers["connector_pair"] = connector_pair
+
+    fiber_mode_match = re.search(r"\b(os2|om1|om2|om3|om4)\b", normalized, flags=re.IGNORECASE)
+    if fiber_mode_match:
+        markers["fiber_mode"] = fiber_mode_match.group(1).lower()
+
+    if "duplex" in normalized:
+        markers["duplex"] = "yes"
+
+    if ("температур" in normalized or "влажност" in normalized) and "датчик" in normalized:
+        markers["sensor_kind"] = "temperature_humidity" if "влажност" in normalized else "temperature"
+    elif "геркон" in normalized or "магнитоконтакт" in normalized:
+        markers["sensor_kind"] = "reed"
+
+    if "полк" in normalized:
+        markers["mount_kind"] = "shelf"
+    elif "рельс" in normalized or "rail" in normalized or "направляющ" in normalized:
+        markers["mount_kind"] = "rail"
+    elif "щеточ" in normalized:
+        markers["mount_kind"] = "brush_panel"
+    elif "заглуш" in normalized:
+        markers["mount_kind"] = "blank_panel"
+
+    if "лючок" in normalized or ("напольн" in normalized and "короб" in normalized):
+        markers["installation_kind"] = "floor_box"
+    elif re.search(r"\brj[\s-]?45\b", normalized, flags=re.IGNORECASE) and "розетк" in normalized:
+        markers["installation_kind"] = "outlet_module"
+
     length_match = re.search(r"(\d+(?:[.,]\d+)?)\s*м\b", normalized)
     if length_match:
         markers["length_m"] = length_match.group(1).replace(",", ".")
@@ -328,10 +431,12 @@ def extract_item_markers(
 
     if "zero u" in normalized:
         markers["zero_u"] = "yes"
+        markers["rack_unit"] = "zero u"
     if markers.get("rack_unit") == "1":
         markers["rack_1u"] = "yes"
     if "19 inch" in normalized:
         markers["rack_size"] = "19 inch"
+        markers["rack_mount_19"] = "yes"
 
     return markers
 

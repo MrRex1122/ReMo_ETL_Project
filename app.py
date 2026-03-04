@@ -762,6 +762,26 @@ def show_statistics(stats):
     with col5:
         st.metric("⚠️ Ошибок", stats['errors'])
 
+    quality_rows = []
+    if "gemini_rows_total" in stats:
+        quality_rows.append(
+            "Gemini: "
+            f"{stats.get('gemini_rows_total', 0)} | "
+            f"compatible={stats.get('gemini_rows_confirmed_compatible', 0)} | "
+            f"weak={stats.get('gemini_rows_weakly_compatible', 0)} | "
+            f"rejected={stats.get('gemini_rows_rejected_incompatible', 0)}"
+        )
+    if "unresolved_no_compatible_candidates" in stats:
+        quality_rows.append(
+            "Совместимость: "
+            f"unresolved={stats.get('unresolved_no_compatible_candidates', 0)} | "
+            f"local_fallback={stats.get('compatible_local_fallback_count', 0)} | "
+            f"weak_fallback={stats.get('weak_compatible_fallback_count', 0)} | "
+            f"strict_unresolved={stats.get('strict_class_unresolved_count', 0)}"
+        )
+    for row in quality_rows:
+        st.caption(row)
+
 
 
 

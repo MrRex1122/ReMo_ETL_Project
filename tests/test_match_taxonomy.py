@@ -127,5 +127,59 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.assertTrue(self.matcher._is_hard_incompatible_match(features, item))
 
 
+    def test_hard_incompatibility_blocks_temperature_sensor_to_reed(self):
+        features = self.matcher._extract_query_features("Датчик температуры и влажности")
+        item = {
+            "name": "Датчик герконовый магнитоконтактный",
+            "normalized_name": "датчик герконовый магнитоконтактный",
+            "branch_path": "автоматика > датчики",
+            "entity_type": "reed_sensor",
+            "item_markers": {"sensor_kind": "reed"},
+        }
+
+        self.assertTrue(self.matcher._is_hard_incompatible_match(features, item))
+        self.assertEqual(self.matcher._hard_incompatibility_reason(features, item), "sensor_type_mismatch")
+
+    def test_hard_incompatibility_blocks_shelf_to_rails(self):
+        features = self.matcher._extract_query_features("Полка консольная 1U 19''")
+        item = {
+            "name": "Комплект монтажных рельс 1U",
+            "normalized_name": "комплект монтажных рельс 1u",
+            "branch_path": "телеком > аксессуары > шкафные аксессуары",
+            "entity_type": "rack_rail",
+            "item_markers": {"mount_kind": "rail", "rack_unit": "1"},
+        }
+
+        self.assertTrue(self.matcher._is_hard_incompatible_match(features, item))
+        self.assertEqual(self.matcher._hard_incompatibility_reason(features, item), "rack_accessory_type_mismatch")
+
+    def test_hard_incompatibility_blocks_rj45_connector_to_power_cable(self):
+        features = self.matcher._extract_query_features("Коннектор RJ-45 cat6")
+        item = {
+            "name": "Кабель силовой C13-C14 2м",
+            "normalized_name": "кабель силовой c13-c14 2м",
+            "branch_path": "электрика > кабели",
+            "entity_type": "iec_power_cable",
+            "item_markers": {"connector_pair": "c13-c14"},
+        }
+
+        self.assertTrue(self.matcher._is_hard_incompatible_match(features, item))
+        self.assertEqual(self.matcher._hard_incompatibility_reason(features, item), "entity_family_mismatch")
+
+    def test_compatibility_penalty_marks_weak_mismatch(self):
+        features = self.matcher._extract_query_features("Оптический патч-корд LC-LC duplex OS2 2м")
+        item = {
+            "name": "Оптический патч-корд LC-LC duplex OM3 2м",
+            "normalized_name": "оптический патч-корд lc-lc duplex om3 2м",
+            "branch_path": "телеком > кабели > оптические патч корды",
+            "entity_type": "optical_patch_cord",
+            "item_markers": {"connector_pair": "lc-lc", "duplex": "yes", "fiber_mode": "om3", "length_m": "2"},
+        }
+
+        self.assertFalse(self.matcher._is_hard_incompatible_match(features, item))
+        self.assertGreater(self.matcher._compatibility_penalty(features, item), 0.2)
+        self.assertEqual(self.matcher._compatibility_label(features, item), "weakly_compatible")
+
+
 if __name__ == "__main__":
     unittest.main()

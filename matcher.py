@@ -490,75 +490,304 @@ class ReMoMatcher:
         return shared_classify_item_type(text, synonyms=getattr(self, "taxonomy_rules", {}).get("synonyms", {}))
 
     def _is_disallowed_category_substitution(self, query: str, candidate_name: str) -> bool:
-        query_type = self._classify_item_type(query)
-        candidate_type = self._classify_item_type(candidate_name)
+        query_type = self._entity_family(self._classify_item_type(query))
+        candidate_type = self._entity_family(self._classify_item_type(candidate_name))
+        allowed_cross_family = {
+            ("keystone", "rj45_outlet"),
+            ("rj45_outlet", "keystone"),
+        }
         if query_type == "patch_cord" and candidate_type == "bulk_twisted_pair":
             return True
         if getattr(self, "match_mode", MATCH_MODE_EXACT) == MATCH_MODE_EXACT:
-            if query_type != "other" and candidate_type != "other" and query_type != candidate_type:
+            if (
+                query_type != "other"
+                and candidate_type != "other"
+                and query_type != candidate_type
+                and (query_type, candidate_type) not in allowed_cross_family
+            ):
                 return True
         return False
 
-    def _is_hard_incompatible_match(self, query_features: Dict[str, Any], item: Dict[str, Any]) -> bool:
+    @staticmethod
+    def _entity_family(entity_type: str) -> str:
+        normalized = str(entity_type or "").strip().lower()
+        family_map = {
+            "pdu_basic": "pdu",
+            "pdu_metered": "pdu",
+            "temperature_sensor": "sensor",
+            "temperature_humidity_sensor": "sensor",
+            "reed_sensor": "sensor",
+            "optical_patch_cord": "optical_patch_cord",
+            "iec_power_cable": "iec_power_cable",
+            "keystone_module": "keystone",
+            "rj45_connector": "rj45_connector",
+            "rj45_outlet": "rj45_outlet",
+            "rack_blank_panel": "rack_accessory_strict",
+            "rack_brush_panel": "rack_accessory_strict",
+            "rack_shelf": "rack_shelf",
+            "rack_rail": "rack_rail",
+            "floor_box": "floor_box",
+            "ground_bar": "ground_bar",
+            "ats_sts": "ats_sts",
+        }
+        return family_map.get(normalized, normalized)
+
+    def _match_strictness_for_query(self, query_features: Dict[str, Any]) -> str:
+        entity_family = self._entity_family(query_features.get("entity_type", ""))
+        strict_families = {
+            "patch_cord",
+            "patch_panel",
+            "pdu",
+            "sensor",
+            "breaker",
+            "socket",
+            "keystone",
+            "optical_patch_cord",
+            "iec_power_cable",
+            "ats_sts",
+            "rack_accessory_strict",
+            "rack_shelf",
+            "floor_box",
+            "rj45_connector",
+            "rj45_outlet",
+            "ground_bar",
+        }
+        semi_strict_families = {"cable", "wire", "bulk_twisted_pair", "coax", "rack", "rack_rail"}
+        if entity_family in strict_families:
+            return "strict"
+        if entity_family in semi_strict_families:
+            return "semi_strict"
+        return "generic"
+
+    def _hard_incompatibility_reason(self, query_features: Dict[str, Any], item: Dict[str, Any]) -> str:
         query_text = self._clean_text_value(query_features.get("original_text"))
         normalized_query = self._normalize_text(query_text)
         candidate_name = self._clean_text_value(item.get("name"))
         candidate_normalized = self._clean_text_value(item.get("normalized_name")) or self._normalize_text(candidate_name)
         candidate_branch = self._normalize_text(self._clean_text_value(item.get("branch_path")))
-        query_type = self._clean_text_value(query_features.get("entity_type")) or self._classify_item_type(query_text)
-        candidate_type = self._clean_text_value(item.get("entity_type")) or self._classify_item_type(candidate_name)
+        query_type = self._entity_family(
+            self._clean_text_value(query_features.get("entity_type")) or self._classify_item_type(query_text)
+        )
+        candidate_type = self._entity_family(
+            self._clean_text_value(item.get("entity_type")) or self._classify_item_type(candidate_name)
+        )
+        query_markers = query_features.get("markers", {}) or {}
+        item_markers = item.get("item_markers", {}) or {}
 
-        if self._is_disallowed_category_substitution(query_text, candidate_name):
-            return True
-
-        strongly_typed = {
+        strong_family_mismatch = {
             "pdu",
             "patch_panel",
             "patch_cord",
             "bulk_twisted_pair",
             "coax",
-            "sensor",
             "breaker",
             "socket",
+            "ats_sts",
+            "keystone",
+            "rj45_connector",
+            "rj45_outlet",
+            "floor_box",
+            "rack_shelf",
+            "rack_rail",
+            "ground_bar",
+            "optical_patch_cord",
+            "iec_power_cable",
         }
-        if query_type in strongly_typed and candidate_type and candidate_type != query_type:
-            return True
+        allowed_strict_pairs = {
+            ("keystone", "rj45_outlet"),
+            ("rj45_outlet", "keystone"),
+            ("rack_shelf", "rack_rail"),
+            ("rack_rail", "rack_shelf"),
+        }
+        if query_type in strong_family_mismatch and candidate_type and candidate_type != query_type:
+            if not (query_type == "sensor" and candidate_type == "sensor") and (
+                query_type,
+                candidate_type,
+            ) not in allowed_strict_pairs:
+                return "entity_family_mismatch"
 
-        if query_type == "cable" and any(marker in normalized_query for marker in ("iec320", "c13", "c14", "c19", "c20")):
-            if candidate_type not in {"cable", "patch_cord"}:
-                return True
-            required_connectors = [marker for marker in ("c13", "c14", "c19", "c20") if marker in normalized_query]
-            if required_connectors and any(marker not in candidate_normalized for marker in required_connectors):
-                return True
+        query_connector = self._clean_text_value(query_markers.get("connector_pair"))
+        item_connector = self._clean_text_value(item_markers.get("connector_pair"))
+        if query_type == "iec_power_cable":
+            if candidate_type != "iec_power_cable":
+                return "iec_power_cable_family_mismatch"
+            if query_connector and item_connector and query_connector != item_connector:
+                return "connector_mismatch"
+            if query_connector and not item_connector:
+                return "connector_mismatch"
             if any(marker in candidate_normalized for marker in ("pdu", "байпас", "блок розеток")):
-                return True
+                return "iec_vs_power_distribution"
 
-        if ("ats" in normalized_query or "sts" in normalized_query or ("статическ" in normalized_query and "переключател" in normalized_query)):
-            if not any(marker in candidate_normalized for marker in ("ats", "sts", "переключател")):
-                return True
+        if query_type == "ats_sts" and not any(
+            marker in candidate_normalized for marker in ("ats", "sts", "переключател", "transfer switch")
+        ):
+            return "ats_sts_mismatch"
 
-        if "keystone" in normalized_query or "кейстоун" in normalized_query:
-            if not any(marker in candidate_normalized for marker in ("keystone", "кейстоун", "модул")):
-                return True
+        query_sensor = self._clean_text_value(query_markers.get("sensor_kind"))
+        item_sensor = self._clean_text_value(item_markers.get("sensor_kind"))
+        if query_type == "sensor":
+            if query_sensor and item_sensor and query_sensor != item_sensor:
+                return "sensor_type_mismatch"
+            if query_sensor and not item_sensor:
+                return "sensor_type_mismatch"
+            if query_sensor in {"temperature", "temperature_humidity"} and any(
+                marker in candidate_normalized for marker in ("геркон", "магнитоконтакт")
+            ):
+                return "sensor_type_mismatch"
 
-        if "заземл" in normalized_query and "шина" in normalized_query:
-            if "заземл" not in candidate_normalized and "шина" not in candidate_normalized:
-                return True
+        if query_type == "rack_shelf" and self._clean_text_value(item_markers.get("mount_kind")) != "shelf":
+            return "rack_accessory_type_mismatch"
+        if query_type == "rack_rail" and self._clean_text_value(item_markers.get("mount_kind")) != "rail":
+            return "rack_accessory_type_mismatch"
+        if query_type == "rack_accessory_strict":
+            query_mount = self._clean_text_value(query_markers.get("mount_kind"))
+            item_mount = self._clean_text_value(item_markers.get("mount_kind"))
+            if query_mount and item_mount and query_mount != item_mount:
+                return "rack_accessory_type_mismatch"
+            if query_mount and not item_mount:
+                return "rack_accessory_type_mismatch"
 
-        if "заглуш" in normalized_query and "заглуш" not in candidate_normalized:
-            return True
+        if query_type == "keystone" and candidate_type not in {"keystone", "rj45_outlet"}:
+            return "rj45_family_mismatch"
+        if query_type == "rj45_connector" and candidate_type != "rj45_connector":
+            return "rj45_family_mismatch"
+        if query_type == "rj45_outlet" and candidate_type not in {"rj45_outlet", "keystone"}:
+            return "rj45_family_mismatch"
 
-        if "щеточ" in normalized_query and "щет" not in candidate_normalized:
-            return True
+        if query_type == "floor_box":
+            if self._clean_text_value(item_markers.get("installation_kind")) != "floor_box":
+                return "floor_box_vs_power_item"
+            if candidate_type in {"cable", "wire", "iec_power_cable", "pdu"}:
+                return "floor_box_vs_power_item"
 
-        if any(marker in normalized_query for marker in ("оптическ", "волокон")):
-            if not any(marker in candidate_normalized for marker in ("оптическ", "волокон", "кросс")):
-                return True
+        if query_type == "ground_bar":
+            if "заземл" not in candidate_normalized and "шин" not in candidate_normalized:
+                return "grounding_mismatch"
+
+        query_fiber = self._clean_text_value(query_markers.get("fiber_mode"))
+        item_fiber = self._clean_text_value(item_markers.get("fiber_mode"))
+        if query_type == "optical_patch_cord":
+            if candidate_type != "optical_patch_cord":
+                return "optical_marker_mismatch"
+            if query_connector and item_connector and query_connector != item_connector:
+                return "connector_mismatch"
+            if query_connector and not item_connector:
+                return "connector_mismatch"
 
         if "zero u" in normalized_query and "zero u" not in candidate_normalized and "zero u" not in candidate_branch:
-            return True
+            return "form_factor_mismatch"
 
-        return False
+        if self._is_disallowed_category_substitution(query_text, candidate_name):
+            return "category_substitution"
+
+        return ""
+
+    def _is_hard_incompatible_match(self, query_features: Dict[str, Any], item: Dict[str, Any]) -> bool:
+        return bool(self._hard_incompatibility_reason(query_features, item))
+
+    def _compatibility_penalty(self, query_features: Dict[str, Any], item: Dict[str, Any]) -> float:
+        if self._is_hard_incompatible_match(query_features, item):
+            return 0.6
+
+        penalty = 0.0
+        query_markers = query_features.get("markers", {}) or {}
+        item_markers = item.get("item_markers", {}) or {}
+
+        key_pairs = (
+            ("connector_pair", 0.28),
+            ("sensor_kind", 0.28),
+            ("mount_kind", 0.22),
+            ("installation_kind", 0.22),
+            ("fiber_mode", 0.22),
+            ("duplex", 0.12),
+            ("category", 0.18),
+        )
+        for key, weight in key_pairs:
+            query_value = self._clean_text_value(query_markers.get(key))
+            item_value = self._clean_text_value(item_markers.get(key))
+            if query_value and item_value and query_value != item_value:
+                penalty += weight
+
+        query_length = self._clean_text_value(query_markers.get("length_m"))
+        item_length = self._clean_text_value(item_markers.get("length_m"))
+        if query_length and item_length and query_length != item_length:
+            penalty += 0.08
+
+        query_rack = self._clean_text_value(query_markers.get("rack_unit"))
+        item_rack = self._clean_text_value(item_markers.get("rack_unit"))
+        if query_rack and item_rack and query_rack != item_rack:
+            penalty += 0.12
+
+        return penalty
+
+    def _compatibility_label(self, query_features: Dict[str, Any], item: Dict[str, Any]) -> str:
+        if self._is_hard_incompatible_match(query_features, item):
+            return "incompatible"
+        if self._compatibility_penalty(query_features, item) >= 0.2:
+            return "weakly_compatible"
+        return "compatible"
+
+    def _explain_incompatibility(self, query_features: Dict[str, Any], item: Dict[str, Any]) -> str:
+        reason = self._hard_incompatibility_reason(query_features, item)
+        if reason:
+            return reason
+        if self._compatibility_penalty(query_features, item) >= 0.2:
+            return "weak_marker_match"
+        return ""
+
+    def _has_any_compatible_candidates(self, query_features: Dict[str, Any], scored_entries: List[Dict[str, Any]]) -> bool:
+        return any(not self._is_hard_incompatible_match(query_features, entry["item"]) for entry in scored_entries)
+
+    def _best_compatible_local_entry(
+        self,
+        query_features: Dict[str, Any],
+        scored_entries: List[Dict[str, Any]],
+        allow_weak: bool = False,
+    ) -> Dict[str, Any] | None:
+        for entry in scored_entries:
+            label = self._compatibility_label(query_features, entry["item"])
+            if label == "compatible":
+                return entry
+            if allow_weak and label == "weakly_compatible":
+                return entry
+        return None
+
+    def _typed_candidate_pool(self, query_text: str, query_features: Dict[str, Any], limit: int) -> List[Dict[str, Any]]:
+        strictness = self._match_strictness_for_query(query_features)
+        if strictness == "generic":
+            return []
+
+        entity_family = self._entity_family(query_features.get("entity_type", ""))
+        typed_limit = min(limit, 300)
+        branch_paths = [entry["path"] for entry in query_features.get("ranked_branches", []) if entry.get("path")]
+        typed_pool = []
+        seen: set[int] = set()
+
+        for item in self._collect_branch_candidates(branch_paths, limit=max(typed_limit * 2, typed_limit)):
+            item_family = self._entity_family(item.get("entity_type", ""))
+            if entity_family and item_family and item_family != entity_family:
+                continue
+            row_idx = int(item.get("row_idx", -1))
+            if row_idx in seen:
+                continue
+            typed_pool.append(item)
+            seen.add(row_idx)
+            if len(typed_pool) >= typed_limit:
+                return typed_pool
+
+        general_candidates = self._select_candidates(query_text, limit=max(limit * 2, typed_limit))
+        for item in general_candidates:
+            item_family = self._entity_family(item.get("entity_type", ""))
+            if entity_family and item_family and item_family != entity_family:
+                continue
+            row_idx = int(item.get("row_idx", -1))
+            if row_idx in seen:
+                continue
+            typed_pool.append(item)
+            seen.add(row_idx)
+            if len(typed_pool) >= typed_limit:
+                break
+        return typed_pool
 
     def _init_cache_db(self) -> None:
         conn = sqlite3.connect(self.cache_db)
@@ -986,6 +1215,11 @@ class ReMoMatcher:
             "requires_review": "нет",
             "alternatives": "",
             "resolution_source": "cache",
+            "compatibility_status": "compatible",
+            "incompatibility_reason": "",
+            "gemini_shortlist_count": 0,
+            "gemini_visible_candidates": 0,
+            "gemini_truncated_candidates": 0,
         }
 
     def _save_to_cache(
@@ -1045,13 +1279,19 @@ class ReMoMatcher:
         original = self._clean_text_value(query)
         normalized = self._normalize_text(original)
         tokens = self._tokenize(normalized)
+        markers = shared_extract_item_markers(
+            original,
+            attribute_patterns=getattr(self, "taxonomy_rules", {}).get("attribute_patterns", {}),
+            synonyms=getattr(self, "taxonomy_rules", {}).get("synonyms", {}),
+        )
         features: Dict[str, Any] = {
             "original_text": original,
             "normalized_text": normalized,
             "tokens": tokens,
             "row_type": self._detect_query_row_type(original),
             "entity_type": self._classify_item_type(original),
-            "attributes": {},
+            "attributes": dict(markers),
+            "markers": dict(markers),
         }
 
         rules = getattr(self, "taxonomy_rules", {}).get("attribute_patterns", {})
@@ -1082,10 +1322,12 @@ class ReMoMatcher:
             features["attributes"]["rack_1u"] = "yes"
         if "19 inch" in normalized:
             features["attributes"]["rack_size"] = "19 inch"
+            features["attributes"]["rack_mount_19"] = "yes"
 
         branch_hint = self._derive_branch_from_text(original)
         if branch_hint and branch_hint != "прочее":
             features["branch_hint"] = branch_hint
+        features["markers"] = dict(features["attributes"])
         return features
 
     def _rank_branches(self, query_features: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -1113,7 +1355,7 @@ class ReMoMatcher:
             for branch in branch_token_index.get(token, []):
                 scores[branch] += 0.45 * float(token_idf.get(token, 1.0))
 
-        entity_type = query_features.get("entity_type")
+        entity_type = self._entity_family(query_features.get("entity_type", ""))
         for branch in getattr(self, "branch_index", {}) or {}:
             branch_norm = self._normalize_text(branch)
             if entity_type == "pdu" and "pdu" in branch_norm:
@@ -1122,8 +1364,18 @@ class ReMoMatcher:
                 scores[branch] += 1.0
             elif entity_type == "patch_panel" and "патч панел" in branch_norm:
                 scores[branch] += 1.2
-            elif entity_type == "patch_cord" and "патч корд" in branch_norm:
+            elif entity_type in {"patch_cord", "optical_patch_cord"} and "патч корд" in branch_norm:
                 scores[branch] += 1.2
+            elif entity_type in {"keystone", "rj45_connector", "rj45_outlet"} and "модул" in branch_norm:
+                scores[branch] += 1.0
+            elif entity_type in {"rack_accessory_strict", "rack_shelf", "rack_rail"} and "аксессуар" in branch_norm:
+                scores[branch] += 0.9
+            elif entity_type == "floor_box" and "люч" in branch_norm:
+                scores[branch] += 1.1
+            elif entity_type == "sensor" and "датчик" in branch_norm:
+                scores[branch] += 1.0
+            elif entity_type == "ats_sts" and "ats" in branch_norm:
+                scores[branch] += 1.0
             elif entity_type == "cable" and "кабел" in branch_norm:
                 scores[branch] += 0.8
             elif entity_type == "wire" and "провод" in branch_norm:
@@ -1190,9 +1442,23 @@ class ReMoMatcher:
         normalized_name = item.get("normalized_name") or self._normalize_text(item.get("name", ""))
         branch_path = item.get("branch_path", "")
         attributes = query_features.get("attributes", {})
+        item_markers = item.get("item_markers", {}) or {}
 
-        if query_features.get("entity_type") == item.get("entity_type"):
+        if self._entity_family(query_features.get("entity_type", "")) == self._entity_family(item.get("entity_type", "")):
             score += 0.08
+
+        for key, bonus in (
+            ("connector_pair", 0.18),
+            ("sensor_kind", 0.18),
+            ("mount_kind", 0.15),
+            ("installation_kind", 0.15),
+            ("fiber_mode", 0.15),
+            ("category", 0.12),
+        ):
+            query_value = self._clean_text_value(attributes.get(key))
+            item_value = self._clean_text_value(item_markers.get(key))
+            if query_value and item_value and query_value == item_value:
+                score += bonus
 
         category = attributes.get("category")
         if category:
@@ -1241,6 +1507,7 @@ class ReMoMatcher:
             elif marker == "category_cat5e" and attributes.get("category") == "cat5e" and any(pat in normalized_name for pat in patterns):
                 score -= penalty
 
+        score -= self._compatibility_penalty(query_features, item)
         return max(0.0, min(0.999, score))
 
     def _score_candidates_locally(self, query_features: Dict[str, Any], candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -1249,7 +1516,7 @@ class ReMoMatcher:
 
         ranked = self._rank_candidates(
             query_features.get("original_text", ""),
-            limit=max(40, min(len(candidates), 80)),
+            limit=max(80, min(len(candidates), int(getattr(self, "gemini_shortlist_limit", 96)) * 2)),
             candidate_pool=candidates,
         )
         if not ranked:
@@ -1320,6 +1587,11 @@ class ReMoMatcher:
         requires_review: bool,
         alternatives: str,
         reason: str,
+        compatibility_status: str = "compatible",
+        incompatibility_reason: str = "",
+        gemini_shortlist_count: int = 0,
+        gemini_visible_candidates: int = 0,
+        gemini_truncated_candidates: int = 0,
     ) -> Dict[str, Any]:
         return {
             "found_name": item.get("name") or MISSING_POSITION_TEXT,
@@ -1335,9 +1607,25 @@ class ReMoMatcher:
             "requires_review": "да" if requires_review else "нет",
             "alternatives": alternatives,
             "resolution_source": source,
+            "compatibility_status": compatibility_status,
+            "incompatibility_reason": incompatibility_reason,
+            "gemini_shortlist_count": int(gemini_shortlist_count),
+            "gemini_visible_candidates": int(gemini_visible_candidates),
+            "gemini_truncated_candidates": int(gemini_truncated_candidates),
         }
 
-    def _build_missing_result(self, query: str, reason: str, error: str | None = None, alternatives: str = "") -> Dict[str, Any]:
+    def _build_missing_result(
+        self,
+        query: str,
+        reason: str,
+        error: str | None = None,
+        alternatives: str = "",
+        compatibility_status: str = "unresolved_no_compatible_candidates",
+        incompatibility_reason: str = "",
+        gemini_shortlist_count: int = 0,
+        gemini_visible_candidates: int = 0,
+        gemini_truncated_candidates: int = 0,
+    ) -> Dict[str, Any]:
         return {
             "found_name": MISSING_POSITION_TEXT,
             "price": None,
@@ -1352,6 +1640,11 @@ class ReMoMatcher:
             "requires_review": "да",
             "alternatives": alternatives,
             "resolution_source": "unresolved",
+            "compatibility_status": compatibility_status,
+            "incompatibility_reason": incompatibility_reason,
+            "gemini_shortlist_count": int(gemini_shortlist_count),
+            "gemini_visible_candidates": int(gemini_visible_candidates),
+            "gemini_truncated_candidates": int(gemini_truncated_candidates),
         }
 
     def _candidate_models(self) -> List[str]:
@@ -1447,6 +1740,10 @@ class ReMoMatcher:
         article = self._clean_text_value(payload.get("article"))
         confidence = float(payload.get("confidence", 0) or 0)
         reasoning = self._clean_text_value(payload.get("reasoning"))
+        compatibility = self._clean_text_value(payload.get("compatibility")).lower()
+        rejection_reason = self._clean_text_value(payload.get("rejection_reason"))
+        if compatibility not in {"compatible", "weakly_compatible", "incompatible"}:
+            compatibility = "compatible"
 
         matched_item = None
         if found_name:
@@ -1454,16 +1751,30 @@ class ReMoMatcher:
         if matched_item is None and article:
             matched_item = article_lookup.get(article.lower())
 
+        if compatibility == "incompatible":
+            return self._build_missing_result(
+                query,
+                rejection_reason or reasoning or "Gemini отверг все кандидаты как несовместимые",
+                compatibility_status="rejected_incompatible_gemini",
+                incompatibility_reason=rejection_reason or "gemini_rejected_incompatible",
+            )
         if matched_item is None:
-            return self._build_missing_result(query, reasoning or "Gemini не выбрал валидного кандидата")
+            return self._build_missing_result(
+                query,
+                rejection_reason or reasoning or "Gemini не выбрал валидного кандидата",
+                compatibility_status="unresolved_no_compatible_candidates",
+                incompatibility_reason=rejection_reason,
+            )
 
         return self._build_result_from_item(
             matched_item,
             score=max(0.0, min(0.999, confidence)),
             source=source,
-            requires_review=confidence < 0.9,
+            requires_review=confidence < 0.9 or compatibility != "compatible",
             alternatives="",
             reason=reasoning,
+            compatibility_status=compatibility or "compatible",
+            incompatibility_reason=rejection_reason,
         )
 
     def _match_with_gemini(
@@ -1501,19 +1812,37 @@ class ReMoMatcher:
             for item in (candidates or [])
             if item.get("article")
         }
+        strictness = self._match_strictness_for_query(query_features or {})
 
         def build_prompt(context_text: str) -> str:
             if candidates:
+                if strictness == "strict":
+                    selection_policy = (
+                        "Выбирай только если кандидат товарно и технически совместим. "
+                        "Если совместимого кандидата нет, верни found_name=null, article=null, compatibility=\"incompatible\" "
+                        "и краткую rejection_reason."
+                    )
+                elif strictness == "semi_strict":
+                    selection_policy = (
+                        "Сначала ищи полностью совместимый кандидат. Если есть только частично совместимый, можешь выбрать его "
+                        "с compatibility=\"weakly_compatible\" и низкой уверенностью. Если все несовместимы, верни found_name=null."
+                    )
+                else:
+                    selection_policy = (
+                        "Выбери лучший кандидат из списка. Если есть только слабое совпадение, допустим best-effort, "
+                        "но укажи compatibility=\"weakly_compatible\" и кратко опиши риск."
+                    )
                 return (
                     "Ты выбираешь лучший товар только из уже отобранного короткого списка.\n"
                     f"Запрос КП: {query}\n"
                     f"Строка типа: {(query_features or {}).get('row_type', 'item')}\n"
+                    f"Режим строгости: {strictness}\n"
                     f"Категории: {' | '.join(branches or [])}\n"
                     "Ниже только допустимые кандидаты:\n"
                     f"{context_text}\n\n"
-                    "Выбери лучший кандидат только из этого списка. Если все слабые, все равно выбери лучший.\n"
+                    f"{selection_policy}\n"
                     "Верни только JSON: "
-                    '{"found_name":"Точное имя из списка","article":"Артикул из списка или null","confidence":0.0,"reasoning":"краткое объяснение"}'
+                    '{"found_name":"Точное имя из списка или null","article":"Артикул из списка или null","confidence":0.0,"reasoning":"краткое объяснение","compatibility":"compatible|weakly_compatible|incompatible","rejection_reason":"краткая причина или пусто"}'
                 )
             return (
                 "Ты эксперт по технической номенклатуре оборудования, кабеля и материалов.\n"
@@ -1521,7 +1850,7 @@ class ReMoMatcher:
                 "Найди лучший товар в каталоге ниже.\n"
                 f"{context_text}\n"
                 "Верни только JSON: "
-                '{"found_name":"Точное название из каталога или null","article":"Артикул или null","confidence":0.0,"reasoning":"краткое объяснение"}'
+                '{"found_name":"Точное название из каталога или null","article":"Артикул или null","confidence":0.0,"reasoning":"краткое объяснение","compatibility":"compatible|weakly_compatible|incompatible","rejection_reason":"краткая причина или пусто"}'
             )
 
         last_missing: Dict[str, Any] | None = None
@@ -1572,12 +1901,17 @@ class ReMoMatcher:
         branches: List[str],
         scored_entries: List[Dict[str, Any]],
     ) -> Optional[Dict[str, Any]]:
+        strictness = self._match_strictness_for_query(query_features)
         shortlist = [
             entry["item"]
             for entry in scored_entries[: min(int(getattr(self, "gemini_shortlist_limit", 96)), len(scored_entries))]
         ]
         if not shortlist:
             return None
+        chunk_size = max(1, int(getattr(self, "gemini_chunk_size", 12)))
+        max_chunks = max(1, int(getattr(self, "gemini_max_chunks", 8)))
+        visible_candidates = min(len(shortlist), chunk_size * max_chunks)
+        truncated_candidates = max(0, len(shortlist) - visible_candidates)
         try:
             result = self._match_with_gemini(
                 query,
@@ -1588,11 +1922,39 @@ class ReMoMatcher:
         except TypeError:
             result = self._match_with_gemini(query)
         found_name = self._clean_text_value((result or {}).get("found_name"))
+        if result:
+            result["gemini_shortlist_count"] = len(shortlist)
+            result["gemini_visible_candidates"] = visible_candidates
+            result["gemini_truncated_candidates"] = truncated_candidates
         if not result or not found_name or found_name == MISSING_POSITION_TEXT:
+            if strictness == "strict" and result:
+                return result
             return None
         matched_item = getattr(self, "catalog_dict", {}).get(found_name.lower())
+        if strictness == "strict" and str(result.get("compatibility_status") or "").strip() == "weakly_compatible":
+            return self._build_missing_result(
+                query,
+                "Gemini нашел только частично совместимый кандидат; для этой позиции требуется строго совместимое совпадение.",
+                compatibility_status="unresolved_no_compatible_candidates",
+                incompatibility_reason="strict_class_requires_compatible_match",
+                gemini_shortlist_count=len(shortlist),
+                gemini_visible_candidates=visible_candidates,
+                gemini_truncated_candidates=truncated_candidates,
+            )
         if matched_item and self._is_hard_incompatible_match(query_features, matched_item):
-            logger.info("Skipping Gemini result due to hard incompatibility: query=%s found=%s", query, result.get("found_name"))
+            reason = self._hard_incompatibility_reason(query_features, matched_item) or "gemini_selected_incompatible_candidate"
+            logger.info("Skipping Gemini result due to hard incompatibility: query=%s found=%s reason=%s", query, result.get("found_name"), reason)
+            rejected = self._build_missing_result(
+                query,
+                "Gemini выбрал несовместимого кандидата; позиция отклонена.",
+                compatibility_status="rejected_incompatible_gemini",
+                incompatibility_reason=reason,
+                gemini_shortlist_count=len(shortlist),
+                gemini_visible_candidates=visible_candidates,
+                gemini_truncated_candidates=truncated_candidates,
+            )
+            if strictness == "strict":
+                return rejected
             return None
         result["alternatives"] = result.get("alternatives") or self._format_alternatives(scored_entries, skip_first=True)
         if result.get("requires_review") not in {"да", "нет"}:
@@ -1624,6 +1986,7 @@ class ReMoMatcher:
                     query_text,
                     "Строка похожа на раздел каталога и не является конкретной товарной позицией.",
                 )
+            strictness = self._match_strictness_for_query(query_features)
 
             preferred_result: Dict[str, Any] | None = None
             preferred_entry: Dict[str, Any] | None = None
@@ -1653,7 +2016,20 @@ class ReMoMatcher:
             query_features["ranked_branches"] = ranked_branches
             branch_paths = [entry["path"] for entry in ranked_branches if entry.get("path")]
             local_recall_limit = int(getattr(self, "local_recall_pool", 300))
-            branch_candidates = self._collect_branch_candidates(branch_paths, limit=local_recall_limit)
+            branch_candidates = self._typed_candidate_pool(query_text, query_features, local_recall_limit)
+            if branch_candidates:
+                fallback_candidates = self._collect_branch_candidates(branch_paths, limit=local_recall_limit)
+                seen_candidates = {int(item.get("row_idx", -1)) for item in branch_candidates}
+                for item in fallback_candidates:
+                    row_idx = int(item.get("row_idx", -1))
+                    if row_idx in seen_candidates:
+                        continue
+                    branch_candidates.append(item)
+                    seen_candidates.add(row_idx)
+                    if len(branch_candidates) >= local_recall_limit:
+                        break
+            else:
+                branch_candidates = self._collect_branch_candidates(branch_paths, limit=local_recall_limit)
             if not branch_candidates:
                 branch_candidates = self._select_candidates(query_text, limit=local_recall_limit)
 
@@ -1699,6 +2075,14 @@ class ReMoMatcher:
             compatible_entries = [
                 entry for entry in scored_entries if not self._is_hard_incompatible_match(query_features, entry["item"])
             ]
+            logger.info(
+                "Gemini compatibility filter: query=%s scored=%s compatible=%s filtered_out=%s strictness=%s",
+                query_text[:120],
+                len(scored_entries),
+                len(compatible_entries),
+                max(0, len(scored_entries) - len(compatible_entries)),
+                strictness,
+            )
             if compatible_entries:
                 scored_entries = compatible_entries
             else:
@@ -1706,6 +2090,8 @@ class ReMoMatcher:
                     query_text,
                     "Точные совместимые кандидаты не найдены: ближайшие совпадения конфликтуют с типом или ключевыми признаками позиции.",
                     alternatives=self._format_alternatives(scored_entries),
+                    compatibility_status="unresolved_no_compatible_candidates",
+                    incompatibility_reason="no_compatible_candidates",
                 )
 
             best_entry = scored_entries[0]
@@ -1745,6 +2131,7 @@ class ReMoMatcher:
                 and margin >= getattr(self, "local_margin_threshold", 0.08)
                 and top_branch_gap >= 0.15
                 and query_features.get("row_type") == "item"
+                and self._compatibility_label(query_features, best_entry["item"]) == "compatible"
             )
             if strong_local:
                 result = self._build_result_from_item(
@@ -1768,21 +2155,66 @@ class ReMoMatcher:
                 if gemini_result:
                     return gemini_result
 
-            forced_reason = (
-                "Выбран лучший локальный кандидат без достаточного отрыва. Требуется проверка."
-                if query_features.get("row_type") == "item"
-                else "Строка похожа на раздел каталога; выбран обобщенный лучший кандидат."
+            best_compatible = self._best_compatible_local_entry(query_features, scored_entries)
+            best_weak = self._best_compatible_local_entry(query_features, scored_entries, allow_weak=True)
+            if strictness == "strict":
+                if best_compatible is None:
+                    return self._build_missing_result(
+                        query_text,
+                        "Нет совместимого кандидата для строго типизированной позиции.",
+                        alternatives=self._format_alternatives(scored_entries),
+                        compatibility_status="unresolved_no_compatible_candidates",
+                        incompatibility_reason="strict_class_no_compatible_candidate",
+                    )
+            if best_compatible is not None:
+                result = self._build_result_from_item(
+                    best_compatible["item"],
+                    float(best_compatible["score"]),
+                    "compatible_local_fallback",
+                    True,
+                    self._format_alternatives(scored_entries, skip_first=True),
+                    "Gemini не подтвердил позицию; сохранен лучший локально совместимый кандидат. Требуется проверка.",
+                    compatibility_status="compatible",
+                )
+                self._save_to_cache(
+                    query_text,
+                    result["found_name"],
+                    result["price"],
+                    result["article"] or "",
+                    result["similarity_score"],
+                    "compatible_local_fallback",
+                )
+                return result
+
+            if strictness != "strict" and best_weak is not None:
+                weak_reason = self._explain_incompatibility(query_features, best_weak["item"]) or "weak_compatible_shortlist"
+                result = self._build_result_from_item(
+                    best_weak["item"],
+                    float(best_weak["score"]),
+                    "weak_compatible_fallback",
+                    True,
+                    self._format_alternatives(scored_entries, skip_first=True),
+                    "Gemini не подтвердил полное совпадение; сохранен частично совместимый кандидат. Требуется проверка.",
+                    compatibility_status="weakly_compatible",
+                    incompatibility_reason=weak_reason,
+                )
+                self._save_to_cache(
+                    query_text,
+                    result["found_name"],
+                    result["price"],
+                    result["article"] or "",
+                    result["similarity_score"],
+                    "weak_compatible_fallback",
+                )
+                return result
+
+            return self._build_missing_result(
+                query_text,
+                "Совместимый кандидат не подтвержден; позиция оставлена без сопоставления.",
+                alternatives=self._format_alternatives(scored_entries),
+                compatibility_status="unresolved_no_compatible_candidates",
+                incompatibility_reason="no_confirmed_compatible_candidate",
             )
-            result = self._build_result_from_item(
-                best_entry["item"],
-                best_score,
-                "forced_best_match",
-                True,
-                self._format_alternatives(scored_entries, skip_first=True),
-                forced_reason,
-            )
-            self._save_to_cache(query_text, result["found_name"], result["price"], result["article"] or "", result["similarity_score"], "forced_best_match")
-            return result
 
         except Exception as exc:
             logger.error("Matching error: %s", exc, exc_info=True)
@@ -1842,10 +2274,17 @@ class ReMoMatcher:
         query_text = str(query or "").strip()
         model_reason = str((result or {}).get("reason") or "").strip()
         model_error = str((result or {}).get("error") or "").strip()
+        incompatibility_reason = str((result or {}).get("incompatibility_reason") or "").strip()
         if model_error:
             return (
                 f"Позиция '{query_text}' не сопоставлена из-за ошибки обращения к модели/сервису: {model_error}. "
                 "Рекомендуется повторить попытку позже и проверить доступность API/лимиты."
+            )
+        if incompatibility_reason:
+            return (
+                f"Позиция '{query_text}' не найдена: совместимый кандидат не подтвержден. "
+                f"Причина: {incompatibility_reason}. "
+                "Проверьте тип позиции, ключевые технические признаки и наличие релевантного аналога в каталоге."
             )
         if model_reason:
             return (
@@ -1889,13 +2328,32 @@ class ReMoMatcher:
             "Требует проверки",
             "Альтернативы",
             "Источник решения",
+            "Совместимость решения",
+            "Причина несовместимости",
+            "Gemini shortlist",
+            "Gemini visible candidates",
+            "Gemini truncated",
         ):
             if text_col not in df.columns:
                 df[text_col] = None
             else:
                 df[text_col] = df[text_col].astype(object)
 
-        stats = {"total": 0, "found": 0, "not_found": 0, "from_cache": 0, "errors": 0}
+        stats = {
+            "total": 0,
+            "found": 0,
+            "not_found": 0,
+            "from_cache": 0,
+            "errors": 0,
+            "gemini_rows_total": 0,
+            "gemini_rows_confirmed_compatible": 0,
+            "gemini_rows_weakly_compatible": 0,
+            "gemini_rows_rejected_incompatible": 0,
+            "unresolved_no_compatible_candidates": 0,
+            "compatible_local_fallback_count": 0,
+            "weak_compatible_fallback_count": 0,
+            "strict_class_unresolved_count": 0,
+        }
         tasks: List[Tuple[int, str]] = []
         for idx, row in df.iterrows():
             query = str(row[col_b]).strip()
@@ -1918,6 +2376,11 @@ class ReMoMatcher:
             df.at[idx, "Требует проверки"] = result.get("requires_review")
             df.at[idx, "Альтернативы"] = result.get("alternatives")
             df.at[idx, "Источник решения"] = result.get("resolution_source")
+            df.at[idx, "Совместимость решения"] = result.get("compatibility_status")
+            df.at[idx, "Причина несовместимости"] = result.get("incompatibility_reason")
+            df.at[idx, "Gemini shortlist"] = result.get("gemini_shortlist_count")
+            df.at[idx, "Gemini visible candidates"] = result.get("gemini_visible_candidates")
+            df.at[idx, "Gemini truncated"] = result.get("gemini_truncated_candidates")
 
             if found_name == MISSING_POSITION_TEXT:
                 df.at[idx, "Причина отсутствия"] = self._compose_not_found_reason(task_query_map.get(idx, ""), result)
@@ -1932,6 +2395,30 @@ class ReMoMatcher:
                 stats["found"] += 1
             if not result.get("success", True):
                 stats["errors"] += 1
+
+            used_gemini = int(result.get("gemini_shortlist_count") or 0) > 0
+            if used_gemini:
+                stats["gemini_rows_total"] += 1
+
+            compatibility_status = str(result.get("compatibility_status") or "").strip()
+            if used_gemini and compatibility_status == "compatible":
+                stats["gemini_rows_confirmed_compatible"] += 1
+            elif used_gemini and compatibility_status == "weakly_compatible":
+                stats["gemini_rows_weakly_compatible"] += 1
+            elif used_gemini and compatibility_status == "rejected_incompatible_gemini":
+                stats["gemini_rows_rejected_incompatible"] += 1
+            elif compatibility_status == "unresolved_no_compatible_candidates":
+                stats["unresolved_no_compatible_candidates"] += 1
+
+            resolution_source = str(result.get("resolution_source") or "").strip()
+            if resolution_source == "compatible_local_fallback":
+                stats["compatible_local_fallback_count"] += 1
+            elif resolution_source == "weak_compatible_fallback":
+                stats["weak_compatible_fallback_count"] += 1
+
+            incompatibility_reason = str(result.get("incompatibility_reason") or "").strip()
+            if compatibility_status == "unresolved_no_compatible_candidates" and incompatibility_reason.startswith("strict_class"):
+                stats["strict_class_unresolved_count"] += 1
 
         if output_path is None:
             src = Path(excel_path)
