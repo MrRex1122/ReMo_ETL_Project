@@ -35,6 +35,7 @@ from catalog_schema import (
     CANONICAL_NAME_COLUMN,
     CANONICAL_PRICE_COLUMN,
     canonicalize_catalog_columns,
+    normalize_header,
 )
 from config import (
     get_catalog_csv_path,
@@ -67,6 +68,7 @@ DEFAULT_MATCH_PROMPT_TEMPLATE = (
     "{catalog_context}\n"
     "Верни только JSON."
 )
+MATCHER_LOAD_CHUNKSIZE = 50000
 GROUP_TOKEN_STOPWORDS = {
     "и",
     "в",
@@ -312,6 +314,44 @@ class ReMoMatcher:
             return mode
         return MATCH_MODE_EXACT
 
+    def _catalog_load_chunksize(self) -> int:
+        raw_value = os.getenv("REMO_MATCHER_LOAD_CHUNKSIZE", str(MATCHER_LOAD_CHUNKSIZE))
+        try:
+            return max(1000, int(raw_value))
+        except (TypeError, ValueError):
+            return MATCHER_LOAD_CHUNKSIZE
+
+    def _should_load_catalog_column(self, column_name: str) -> bool:
+        header = normalize_header(column_name)
+        normalized = header.lower().replace("ё", "е")
+        explicit_columns = {
+            CANONICAL_NAME_COLUMN,
+            CANONICAL_ARTICLE_COLUMN,
+            CANONICAL_PRICE_COLUMN,
+            "Название класса",
+            "Код класса",
+            "Тип изделия",
+            "Тип исполнения кабельного изделия",
+            "Производитель",
+            "search_branch_path",
+            "search_branch_leaf",
+            "search_normalized_name",
+            "search_tokens_json",
+            "search_entity_type",
+            "search_item_markers_json",
+        }
+        if header in explicit_columns:
+            return True
+        if "наименован" in normalized or "номенклатур" in normalized or normalized in {"товар", "product name", "name"}:
+            return True
+        if ("цена" in normalized and "закуп" not in normalized and "опт" not in normalized) or normalized in {"retail price", "price"}:
+            return True
+        if any(marker in normalized for marker in ("артикул", "sku", "партномер", "part number", "partnumber", "vendor code")):
+            return True
+        if normalized in {"код", "код товара", "код номенклатуры", "item code", "product code"}:
+            return True
+        return False
+
     def _load_taxonomy_rules(self) -> Dict[str, Any]:
         path_raw = os.getenv("REMO_TAXONOMY_RULES_PATH")
         path = Path(path_raw) if path_raw else DEFAULT_TAXONOMY_RULES_PATH
@@ -486,102 +526,122 @@ class ReMoMatcher:
 
     def _load_catalog(self) -> None:
         logger.info("Loading catalog from %s", self.db_csv_path)
-        self.catalog = pd.read_csv(self.db_csv_path, sep=";", encoding="utf-8", low_memory=False)
-        self.catalog = canonicalize_catalog_columns(self.catalog, create_missing=True)
-
-        if CANONICAL_NAME_COLUMN not in self.catalog.columns:
-            raise ValueError("Catalog name column cannot be resolved")
-        if self.catalog[CANONICAL_NAME_COLUMN].fillna("").astype(str).str.strip().eq("").all():
-            raise ValueError("Catalog name column cannot be resolved")
-
+        self.catalog = None
         self.catalog_dict = {}
         self.catalog_normalized_dict = {}
         self.catalog_items = []
         token_to_items: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         token_doc_frequency: Counter[str] = Counter()
+        sample_lines: List[str] = []
+        saw_name_column = False
+        saw_name_value = False
+        row_idx = 0
+        chunksize = self._catalog_load_chunksize()
+        logger.info("Matcher catalog load config: chunksize=%s selective_columns=yes", chunksize)
 
-        for idx, row in self.catalog.iterrows():
-            name = self._clean_text_value(row.get(CANONICAL_NAME_COLUMN))
-            if not name:
-                continue
+        for chunk in pd.read_csv(
+            self.db_csv_path,
+            sep=";",
+            encoding="utf-8",
+            low_memory=False,
+            chunksize=chunksize,
+            usecols=self._should_load_catalog_column,
+        ):
+            chunk = canonicalize_catalog_columns(chunk, create_missing=True)
+            if CANONICAL_NAME_COLUMN in chunk.columns:
+                saw_name_column = True
 
-            article = self._clean_text_value(row.get(CANONICAL_ARTICLE_COLUMN))
-            price = self._parse_price_value(row.get(CANONICAL_PRICE_COLUMN))
-            item_type = self._clean_text_value(row.get("Тип изделия"))
-            class_name = self._clean_text_value(row.get("Название класса"))
-            combined_text = " ".join(filter(None, [name, item_type, class_name]))
-            normalized_name = self._clean_text_value(row.get("search_normalized_name")) or self._normalize_text(name)
+            for _, row in chunk.iterrows():
+                name = self._clean_text_value(row.get(CANONICAL_NAME_COLUMN))
+                if not name:
+                    continue
+                saw_name_value = True
 
-            tokens: List[str] = []
-            precomputed_tokens_raw = self._clean_text_value(row.get("search_tokens_json"))
-            if precomputed_tokens_raw:
-                try:
-                    loaded_tokens = json.loads(precomputed_tokens_raw)
-                    if isinstance(loaded_tokens, list):
-                        tokens = sorted(
-                            {
-                                self._clean_text_value(token)
-                                for token in loaded_tokens
-                                if self._clean_text_value(token)
+                article = self._clean_text_value(row.get(CANONICAL_ARTICLE_COLUMN))
+                price = self._parse_price_value(row.get(CANONICAL_PRICE_COLUMN))
+                item_type = self._clean_text_value(row.get("Тип изделия"))
+                class_name = self._clean_text_value(row.get("Название класса"))
+                combined_text = " ".join(filter(None, [name, item_type, class_name]))
+                normalized_name = self._clean_text_value(row.get("search_normalized_name")) or self._normalize_text(name)
+
+                tokens: List[str] = []
+                precomputed_tokens_raw = self._clean_text_value(row.get("search_tokens_json"))
+                if precomputed_tokens_raw:
+                    try:
+                        loaded_tokens = json.loads(precomputed_tokens_raw)
+                        if isinstance(loaded_tokens, list):
+                            tokens = sorted(
+                                {
+                                    self._clean_text_value(token)
+                                    for token in loaded_tokens
+                                    if self._clean_text_value(token)
+                                }
+                            )
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        tokens = []
+                if not tokens:
+                    tokens = sorted(set(self._tokenize(combined_text or normalized_name)))
+
+                branch_path = self._clean_text_value(row.get("search_branch_path")) or self._normalize_catalog_branch(row)
+                branch_leaf = self._clean_text_value(row.get("search_branch_leaf")) or branch_path.split(BRANCH_PATH_SEPARATOR)[-1]
+                entity_type = self._clean_text_value(row.get("search_entity_type")) or self._classify_item_type(combined_text)
+
+                item_markers: Dict[str, Any] = {}
+                precomputed_markers_raw = self._clean_text_value(row.get("search_item_markers_json"))
+                if precomputed_markers_raw:
+                    try:
+                        loaded_markers = json.loads(precomputed_markers_raw)
+                        if isinstance(loaded_markers, dict):
+                            item_markers = {
+                                self._clean_text_value(key): self._clean_text_value(value)
+                                for key, value in loaded_markers.items()
+                                if self._clean_text_value(key)
                             }
-                        )
-                except (TypeError, ValueError, json.JSONDecodeError):
-                    tokens = []
-            if not tokens:
-                tokens = sorted(set(self._tokenize(combined_text or normalized_name)))
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        item_markers = {}
+                if not item_markers:
+                    item_markers = shared_extract_item_markers(
+                        combined_text,
+                        attribute_patterns=getattr(self, "taxonomy_rules", {}).get("attribute_patterns", {}),
+                        synonyms=getattr(self, "taxonomy_rules", {}).get("synonyms", {}),
+                    )
 
-            branch_path = self._clean_text_value(row.get("search_branch_path")) or self._normalize_catalog_branch(row)
-            branch_leaf = self._clean_text_value(row.get("search_branch_leaf")) or branch_path.split(BRANCH_PATH_SEPARATOR)[-1]
-            entity_type = self._clean_text_value(row.get("search_entity_type")) or self._classify_item_type(combined_text)
+                item = {
+                    "name": name,
+                    "name_lc": name.lower(),
+                    "normalized_name": normalized_name,
+                    "article": article,
+                    "price": price,
+                    "row_idx": row_idx,
+                    "tokens": tokens,
+                    "branch_path": branch_path,
+                    "branch_leaf": branch_leaf,
+                    "class_name": class_name,
+                    "class_code": self._clean_text_value(row.get("Код класса")),
+                    "item_type": item_type,
+                    "cable_execution": self._clean_text_value(row.get("Тип исполнения кабельного изделия")),
+                    "manufacturer": self._clean_text_value(row.get("Производитель")),
+                    "entity_type": entity_type,
+                    "item_markers": item_markers,
+                }
 
-            item_markers: Dict[str, Any] = {}
-            precomputed_markers_raw = self._clean_text_value(row.get("search_item_markers_json"))
-            if precomputed_markers_raw:
-                try:
-                    loaded_markers = json.loads(precomputed_markers_raw)
-                    if isinstance(loaded_markers, dict):
-                        item_markers = {
-                            self._clean_text_value(key): self._clean_text_value(value)
-                            for key, value in loaded_markers.items()
-                            if self._clean_text_value(key)
-                        }
-                except (TypeError, ValueError, json.JSONDecodeError):
-                    item_markers = {}
-            if not item_markers:
-                item_markers = shared_extract_item_markers(
-                    combined_text,
-                    attribute_patterns=getattr(self, "taxonomy_rules", {}).get("attribute_patterns", {}),
-                    synonyms=getattr(self, "taxonomy_rules", {}).get("synonyms", {}),
-                )
+                self.catalog_dict.setdefault(item["name_lc"], item)
+                if normalized_name and normalized_name not in self.catalog_normalized_dict:
+                    self.catalog_normalized_dict[normalized_name] = item
 
-            item = {
-                "name": name,
-                "name_lc": name.lower(),
-                "normalized_name": normalized_name,
-                "article": article,
-                "price": price,
-                "row_idx": int(idx),
-                "tokens": tokens,
-                "branch_path": branch_path,
-                "branch_leaf": branch_leaf,
-                "class_name": class_name,
-                "class_code": self._clean_text_value(row.get("Код класса")),
-                "item_type": item_type,
-                "cable_execution": self._clean_text_value(row.get("Тип исполнения кабельного изделия")),
-                "manufacturer": self._clean_text_value(row.get("Производитель")),
-                "entity_type": entity_type,
-                "item_markers": item_markers,
-            }
+                self.catalog_items.append(item)
+                for token in tokens:
+                    token_to_items[token].append(item)
+                for token in set(tokens):
+                    token_doc_frequency[token] += 1
+                if len(sample_lines) < max(300, int(getattr(self, "catalog_sample_items", 500))):
+                    sample_lines.append(
+                        f"• {name} | Артикул: {article or 'N/A'} | Цена: {price if price is not None else 'N/A'}"
+                    )
+                row_idx += 1
 
-            self.catalog_dict.setdefault(item["name_lc"], item)
-            if normalized_name and normalized_name not in self.catalog_normalized_dict:
-                self.catalog_normalized_dict[normalized_name] = item
-
-            self.catalog_items.append(item)
-            for token in tokens:
-                token_to_items[token].append(item)
-            for token in set(tokens):
-                token_doc_frequency[token] += 1
+        if not saw_name_column or not saw_name_value:
+            raise ValueError("Catalog name column cannot be resolved")
 
         total_items = max(1, len(self.catalog_items))
         self.token_index = dict(token_to_items)
@@ -595,7 +655,7 @@ class ReMoMatcher:
             for token, freq in token_doc_frequency.items()
         }
         self._build_branch_index()
-        self._prepare_catalog_text(max_items=int(getattr(self, "catalog_sample_items", 500)))
+        self.catalog_text = "\n".join(sample_lines[:300])
         logger.info("Loaded catalog items: %s", len(self.catalog_items))
 
     def _prepare_catalog_text(self, max_items: int = 500) -> None:
