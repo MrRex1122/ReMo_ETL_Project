@@ -140,14 +140,17 @@ DEFAULT_TAXONOMY_RULES: Dict[str, Any] = {
         '19"': "19 inch",
         "19''": "19 inch",
         "cat 6": "cat6",
+        "cat 6a": "cat6a",
         "кат 6": "cat6",
+        "кат 6a": "cat6a",
         "cat 5e": "cat5e",
         "кат 5e": "cat5e",
     },
     "attribute_patterns": {
         "category": [
-            {"regex": r"\bcat\s*6a?\b|\bкат\s*6a?\b", "value": "cat6"},
-            {"regex": r"\bcat\s*5e\b|\bкат\s*5e\b", "value": "cat5e"},
+            {"regex": r"\b(?:cat|кат|категор(?:ия|ии)?)\s*6(?:a|а)\b", "value": "cat6a"},
+            {"regex": r"\b(?:cat|кат|категор(?:ия|ии)?)\s*6\b", "value": "cat6"},
+            {"regex": r"\b(?:cat|кат|категор(?:ия|ии)?)\s*5e\b", "value": "cat5e"},
         ],
         "rack_unit": [
             {"regex": r"\bzero\s*u\b", "value": "zero u"},
@@ -535,6 +538,11 @@ class ReMoMatcher:
 
     def _match_strictness_for_query(self, query_features: Dict[str, Any]) -> str:
         entity_family = self._entity_family(query_features.get("entity_type", ""))
+        query_markers = query_features.get("markers", {}) or {}
+        if entity_family == "bulk_twisted_pair" and any(
+            self._clean_text_value(query_markers.get(key)) for key in ("category", "shielding", "cable_environment")
+        ):
+            return "strict"
         strict_families = {
             "patch_cord",
             "patch_panel",
@@ -630,6 +638,28 @@ class ReMoMatcher:
             if any(marker in candidate_normalized for marker in ("pdu", "байпас", "блок розеток")):
                 return "iec_vs_power_distribution"
 
+        query_category = self._clean_text_value(query_markers.get("category"))
+        item_category = self._clean_text_value(item_markers.get("category"))
+        if query_type in {"bulk_twisted_pair", "patch_cord"} and query_category and item_category != query_category:
+            return "category_mismatch"
+
+        query_shielding = self._clean_text_value(query_markers.get("shielding"))
+        item_shielding = self._clean_text_value(item_markers.get("shielding"))
+        if query_type == "bulk_twisted_pair" and query_shielding:
+            if query_shielding == "shielded":
+                if item_shielding in {"", "utp"}:
+                    return "shielding_mismatch"
+            elif item_shielding and item_shielding != query_shielding:
+                return "shielding_mismatch"
+            if not item_shielding and query_shielding in {"ftp", "sftp", "shielded"}:
+                return "shielding_mismatch"
+
+        query_cable_environment = self._clean_text_value(query_markers.get("cable_environment"))
+        item_cable_environment = self._clean_text_value(item_markers.get("cable_environment"))
+        if query_type == "bulk_twisted_pair" and query_cable_environment == "outdoor":
+            if item_cable_environment != "outdoor":
+                return "cable_environment_mismatch"
+
         if query_type == "ats_sts" and not any(
             marker in candidate_normalized for marker in ("ats", "sts", "переключател", "transfer switch")
         ):
@@ -710,6 +740,8 @@ class ReMoMatcher:
             ("sensor_kind", 0.28),
             ("mount_kind", 0.22),
             ("installation_kind", 0.22),
+            ("shielding", 0.24),
+            ("cable_environment", 0.24),
             ("fiber_mode", 0.22),
             ("duplex", 0.12),
             ("category", 0.18),
@@ -825,6 +857,24 @@ class ReMoMatcher:
                     f"{self._clean_text_value(item.get('name'))} {self._clean_text_value(item.get('branch_path'))}"
                 )
                 return any(token in search_text for token in ("оптическ", "кросс", "волокон", "fiber", "odf"))
+            if entity_family == "bulk_twisted_pair":
+                if item_family != "bulk_twisted_pair":
+                    return False
+                query_markers = query_features.get("markers", {}) or {}
+                item_markers = item.get("item_markers", {}) or {}
+                query_category = self._clean_text_value(query_markers.get("category"))
+                item_category = self._clean_text_value(item_markers.get("category"))
+                if query_category and item_category and item_category != query_category:
+                    return False
+                query_shielding = self._clean_text_value(query_markers.get("shielding"))
+                item_shielding = self._clean_text_value(item_markers.get("shielding"))
+                if query_shielding and item_shielding and item_shielding != query_shielding:
+                    return False
+                query_environment = self._clean_text_value(query_markers.get("cable_environment"))
+                item_environment = self._clean_text_value(item_markers.get("cable_environment"))
+                if query_environment == "outdoor" and item_environment and item_environment != "outdoor":
+                    return False
+                return True
             if entity_family and item_family and item_family != entity_family:
                 return False
             return True
@@ -1027,11 +1077,15 @@ class ReMoMatcher:
                     except (TypeError, ValueError, json.JSONDecodeError):
                         item_markers = {}
                 if not item_markers:
-                    item_markers = shared_extract_item_markers(
-                        combined_text,
-                        attribute_patterns=getattr(self, "taxonomy_rules", {}).get("attribute_patterns", {}),
-                        synonyms=getattr(self, "taxonomy_rules", {}).get("synonyms", {}),
-                    )
+                    item_markers = {}
+                derived_markers = shared_extract_item_markers(
+                    combined_text,
+                    attribute_patterns=getattr(self, "taxonomy_rules", {}).get("attribute_patterns", {}),
+                    synonyms=getattr(self, "taxonomy_rules", {}).get("synonyms", {}),
+                )
+                for marker_key, marker_value in derived_markers.items():
+                    if not self._clean_text_value(item_markers.get(marker_key)):
+                        item_markers[marker_key] = marker_value
 
                 item = {
                     "name": name,
@@ -1387,9 +1441,13 @@ class ReMoMatcher:
         if length_match:
             features["attributes"]["length_m"] = length_match.group(1).replace(",", ".")
 
-        current_match = re.search(r"(\d+(?:[.,]\d+)?)\s*а\b", normalized)
-        if current_match:
+        current_matches = re.finditer(r"(\d+(?:[.,]\d+)?)\s*а\b", normalized)
+        for current_match in current_matches:
+            prefix = normalized[max(0, current_match.start() - 16) : current_match.start()]
+            if re.search(r"(?:cat|кат|категор(?:ия|ии)?)\s*$", prefix, flags=re.IGNORECASE):
+                continue
             features["attributes"]["current_a"] = current_match.group(1).replace(",", ".")
+            break
 
         if "zero u" in normalized:
             features["attributes"]["zero_u"] = "yes"

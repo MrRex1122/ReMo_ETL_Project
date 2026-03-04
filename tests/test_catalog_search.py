@@ -62,6 +62,26 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertIn("fiber_mode", markers)
             self.assertIn("duplex", markers)
 
+    def test_build_search_catalog_extracts_twisted_pair_shielding_and_environment(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Кабель витая пара, LSZH, экранированный, категория 6а, внешний;TP-1;500;Кабели;CLS-3;Кабель;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            built = pd.read_csv(build_search_catalog_from_merged(merged_path), sep=";", encoding="utf-8")
+            markers = built.loc[0, "search_item_markers_json"]
+
+            self.assertIn("shielding", markers)
+            self.assertIn("cable_environment", markers)
+            self.assertIn("cat6a", markers)
+
     def test_classify_item_type_marks_optical_cross_and_not_patch_cord(self):
         self.assertEqual(classify_item_type("Оптический кросс на 48 волокон 1U"), "optical_cross")
         self.assertEqual(classify_item_type("Оптический патч-корд LC-LC duplex OS2 2м"), "optical_patch_cord")

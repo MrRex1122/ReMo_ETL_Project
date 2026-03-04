@@ -248,5 +248,44 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.assertEqual(self.matcher._compatibility_label(features, item), "weakly_compatible")
 
 
+    def test_bulk_twisted_pair_with_explicit_markers_becomes_strict(self):
+        features = self.matcher._extract_query_features(
+            "Кабель витая пара, LSZH, неэкранированный, категория 6, внешний"
+        )
+
+        self.assertEqual(features["attributes"].get("category"), "cat6")
+        self.assertEqual(self.matcher._match_strictness_for_query(features), "strict")
+
+    def test_hard_incompatibility_blocks_bulk_twisted_pair_category_mismatch(self):
+        features = self.matcher._extract_query_features(
+            "Кабель витая пара, LSZH, неэкранированный, категория 6"
+        )
+        item = {
+            "name": "Витая пара категория 5e U/UTP LSZH 305 м",
+            "normalized_name": "витая пара категория 5e u/utp lszh 305 м",
+            "branch_path": "телеком > кабели > витая пара > cat5e",
+            "entity_type": "bulk_twisted_pair",
+            "item_markers": {"category": "cat5e", "shielding": "utp"},
+        }
+
+        self.assertTrue(self.matcher._is_hard_incompatible_match(features, item))
+        self.assertEqual(self.matcher._hard_incompatibility_reason(features, item), "category_mismatch")
+
+    def test_hard_incompatibility_blocks_outdoor_bulk_twisted_pair_to_indoor(self):
+        features = self.matcher._extract_query_features(
+            "Кабель витая пара, LSZH, неэкранированный, категория 6, внешний"
+        )
+        item = {
+            "name": "Витая пара U/UTP категория 6 LSZH",
+            "normalized_name": "витая пара u/utp категория 6 lszh",
+            "branch_path": "телеком > кабели > витая пара > cat6",
+            "entity_type": "bulk_twisted_pair",
+            "item_markers": {"category": "cat6", "shielding": "utp", "cable_environment": "indoor"},
+        }
+
+        self.assertTrue(self.matcher._is_hard_incompatible_match(features, item))
+        self.assertEqual(self.matcher._hard_incompatibility_reason(features, item), "cable_environment_mismatch")
+
+
 if __name__ == "__main__":
     unittest.main()

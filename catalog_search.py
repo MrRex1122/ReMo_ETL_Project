@@ -390,9 +390,30 @@ def extract_item_markers(
                 markers[feature_name] = str(value).lower()
                 break
 
-    category_match = re.search(r"\b(cat\s*6a|cat\s*6|cat\s*5e)\b", normalized, flags=re.IGNORECASE)
+    category_match = re.search(
+        r"\b(?:cat|кат|категор(?:ия|ии)?)\s*(5e|6a|6а|6)\b",
+        normalized,
+        flags=re.IGNORECASE,
+    )
     if category_match:
-        markers["category"] = category_match.group(1).replace(" ", "").lower()
+        category_value = category_match.group(1).replace("а", "a").lower()
+        markers["category"] = f"cat{category_value}"
+
+    if "неэкранир" in normalized:
+        markers["shielding"] = "utp"
+    elif any(token in normalized for token in ("s/ftp", "sftp", "sf/utp", "f/ftp")):
+        markers["shielding"] = "sftp"
+    elif any(token in normalized for token in ("f/utp", "f utp", "ftp")):
+        markers["shielding"] = "ftp"
+    elif "экранир" in normalized:
+        markers["shielding"] = "shielded"
+    elif any(token in normalized for token in ("u/utp", "u utp", "utp", "неэкранир")):
+        markers["shielding"] = "utp"
+
+    if any(token in normalized for token in ("внешн", "наружн", "outdoor", "уличн")):
+        markers["cable_environment"] = "outdoor"
+    elif any(token in normalized for token in ("внутр", "indoor")):
+        markers["cable_environment"] = "indoor"
 
     rack_unit_match = re.search(r"\b(\d{1,2})\s*u\b", normalized, flags=re.IGNORECASE)
     if rack_unit_match:
@@ -432,9 +453,13 @@ def extract_item_markers(
     if length_match:
         markers["length_m"] = length_match.group(1).replace(",", ".")
 
-    current_match = re.search(r"(\d+(?:[.,]\d+)?)\s*а\b", normalized)
-    if current_match:
+    current_matches = re.finditer(r"(\d+(?:[.,]\d+)?)\s*а\b", normalized)
+    for current_match in current_matches:
+        prefix = normalized[max(0, current_match.start() - 16) : current_match.start()]
+        if re.search(r"(?:cat|кат|категор(?:ия|ии)?)\s*$", prefix, flags=re.IGNORECASE):
+            continue
         markers["current_a"] = current_match.group(1).replace(",", ".")
+        break
 
     if "zero u" in normalized:
         markers["zero_u"] = "yes"
