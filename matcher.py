@@ -1314,7 +1314,7 @@ class ReMoMatcher:
     ) -> List[str]:
         if not candidates:
             return []
-        chunk_size = 8
+        chunk_size = 10
         chunks: List[str] = []
         for offset in range(0, len(candidates), chunk_size):
             chunk = candidates[offset : offset + chunk_size]
@@ -1471,7 +1471,7 @@ class ReMoMatcher:
         branches: List[str],
         scored_entries: List[Dict[str, Any]],
     ) -> Optional[Dict[str, Any]]:
-        shortlist = [entry["item"] for entry in scored_entries[: min(12, len(scored_entries))]]
+        shortlist = [entry["item"] for entry in scored_entries[: min(48, len(scored_entries))]]
         if not shortlist:
             return None
         try:
@@ -1483,9 +1483,10 @@ class ReMoMatcher:
             )
         except TypeError:
             result = self._match_with_gemini(query)
-        if not result or result.get("found_name") == MISSING_POSITION_TEXT:
+        found_name = self._clean_text_value((result or {}).get("found_name"))
+        if not result or not found_name or found_name == MISSING_POSITION_TEXT:
             return None
-        matched_item = getattr(self, "catalog_dict", {}).get(str(result.get("found_name", "")).lower())
+        matched_item = getattr(self, "catalog_dict", {}).get(found_name.lower())
         if matched_item and self._is_hard_incompatible_match(query_features, matched_item):
             logger.info("Skipping Gemini result due to hard incompatibility: query=%s found=%s", query, result.get("found_name"))
             return None
@@ -1512,48 +1513,81 @@ class ReMoMatcher:
             if not query_text:
                 return self._build_missing_result(query, "Пустая строка")
 
-            exact_match = (getattr(self, "catalog_dict", {}) or {}).get(query_text.lower())
-            if exact_match:
-                self._save_to_cache(query_text, exact_match["name"], exact_match["price"], exact_match["article"], 1.0, "exact_match")
-                return self._build_result_from_item(exact_match, 1.0, "exact_match", False, "", "")
-
             normalized_query = self._normalize_text(query_text)
-            normalized_match = (getattr(self, "catalog_normalized_dict", {}) or {}).get(normalized_query)
-            if normalized_match:
-                self._save_to_cache(query_text, normalized_match["name"], normalized_match["price"], normalized_match["article"], 0.98, "normalized_match")
-                return self._build_result_from_item(normalized_match, 0.98, "normalized_match", False, "", "")
-
-            local_direct = self._try_local_semantic_match(query_text)
-            if local_direct:
-                self._save_to_cache(
-                    query_text,
-                    local_direct["found_name"],
-                    local_direct["price"],
-                    local_direct["article"] or "",
-                    local_direct["similarity_score"],
-                    "local_semantic_match",
-                )
-                local_direct.pop("_matched_item", None)
-                return local_direct
-
             query_features = self._extract_query_features(query_text)
             if query_features.get("row_type") == "section":
                 return self._build_missing_result(
                     query_text,
                     "Строка похожа на раздел каталога и не является конкретной товарной позицией.",
                 )
+
+            preferred_result: Dict[str, Any] | None = None
+            preferred_entry: Dict[str, Any] | None = None
+
+            exact_match = (getattr(self, "catalog_dict", {}) or {}).get(query_text.lower())
+            if exact_match:
+                preferred_result = self._build_result_from_item(exact_match, 1.0, "exact_match", False, "", "")
+                preferred_entry = {"item": exact_match, "score": 1.0, "lexical_score": 1.0}
+            else:
+                normalized_match = (getattr(self, "catalog_normalized_dict", {}) or {}).get(normalized_query)
+                if normalized_match:
+                    preferred_result = self._build_result_from_item(normalized_match, 0.98, "normalized_match", False, "", "")
+                    preferred_entry = {"item": normalized_match, "score": 0.98, "lexical_score": 0.98}
+                else:
+                    local_direct = self._try_local_semantic_match(query_text)
+                    if local_direct:
+                        matched_item = local_direct.pop("_matched_item", None)
+                        preferred_result = dict(local_direct)
+                        if matched_item:
+                            preferred_entry = {
+                                "item": matched_item,
+                                "score": float(local_direct["similarity_score"]),
+                                "lexical_score": float(local_direct["similarity_score"]),
+                            }
+
             ranked_branches = self._rank_branches(query_features)
             query_features["ranked_branches"] = ranked_branches
             branch_paths = [entry["path"] for entry in ranked_branches if entry.get("path")]
             branch_candidates = self._collect_branch_candidates(branch_paths)
             if not branch_candidates:
-                branch_candidates = self._select_candidates(query_text, limit=60)
+                branch_candidates = self._select_candidates(query_text, limit=120)
 
             scored_entries = self._score_candidates_locally(query_features, branch_candidates)
             if not scored_entries and getattr(self, "catalog_items", []):
-                scored_entries = self._score_candidates_locally(query_features, self._select_candidates(query_text, limit=20))
+                scored_entries = self._score_candidates_locally(query_features, self._select_candidates(query_text, limit=60))
+            if preferred_entry:
+                preferred_key = int(preferred_entry["item"].get("row_idx", -1))
+                seen_preferred = any(int(entry["item"].get("row_idx", -2)) == preferred_key for entry in scored_entries)
+                if not seen_preferred:
+                    scored_entries.append(preferred_entry)
+                    scored_entries.sort(
+                        key=lambda entry: (entry["score"], entry["lexical_score"], -int(entry["item"].get("row_idx", 0))),
+                        reverse=True,
+                    )
             if not scored_entries:
-                return self._match_with_gemini(query_text)
+                gemini_result = self._match_with_gemini(query_text)
+                if self._clean_text_value(gemini_result.get("found_name")) and gemini_result.get("found_name") != MISSING_POSITION_TEXT:
+                    return gemini_result
+                if preferred_result:
+                    preferred_result["requires_review"] = "да"
+                    preferred_result["confidence_level"] = self._confidence_level_from_score(
+                        preferred_result["similarity_score"], True
+                    )
+                    preferred_result["reason"] = (
+                        preferred_result.get("reason")
+                        or "Gemini не подтвердил позицию; сохранен лучший локальный кандидат. Требуется проверка."
+                    )
+                    preferred_result["resolution_source"] = "gemini_fallback"
+                    self._save_to_cache(
+                        query_text,
+                        preferred_result["found_name"],
+                        preferred_result["price"],
+                        preferred_result["article"] or "",
+                        preferred_result["similarity_score"],
+                        "gemini_fallback",
+                    )
+                    return preferred_result
+                return gemini_result
 
             compatible_entries = [
                 entry for entry in scored_entries if not self._is_hard_incompatible_match(query_features, entry["item"])
@@ -1566,6 +1600,10 @@ class ReMoMatcher:
                     "Точные совместимые кандидаты не найдены: ближайшие совпадения конфликтуют с типом или ключевыми признаками позиции.",
                     alternatives=self._format_alternatives(scored_entries),
                 )
+
+            gemini_result = self._resolve_ambiguous_candidates_with_gemini(query_text, query_features, branch_paths, scored_entries)
+            if gemini_result:
+                return gemini_result
 
             best_entry = scored_entries[0]
             best_score = float(best_entry["score"])
@@ -1600,7 +1638,7 @@ class ReMoMatcher:
                 or margin < max(0.05, getattr(self, "local_margin_threshold", 0.08))
                 or top_branch_gap < 0.15
             )
-            if ambiguous:
+            if False and ambiguous:
                 gemini_result = self._resolve_ambiguous_candidates_with_gemini(query_text, query_features, branch_paths, scored_entries)
                 if gemini_result:
                     return gemini_result
