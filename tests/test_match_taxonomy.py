@@ -22,6 +22,7 @@ class MatchTaxonomyTests(unittest.TestCase):
             self.matcher,
             ReMoMatcher,
         )
+        self.matcher._is_hard_incompatible_match = ReMoMatcher._is_hard_incompatible_match.__get__(self.matcher, ReMoMatcher)
         self.matcher.match_mode = "exact"
         self.matcher.branch_index = {
             "телеком > питание > pdu": [],
@@ -97,6 +98,33 @@ class MatchTaxonomyTests(unittest.TestCase):
 
         self.assertEqual(ranked[0]["item"]["article"], "PDU-ZU")
         self.assertGreater(ranked[0]["score"], ranked[1]["score"])
+
+    def test_detect_query_row_type_marks_sks_as_section(self):
+        self.assertEqual(self.matcher._detect_query_row_type("СКС"), "section")
+
+    def test_hard_incompatibility_blocks_power_cord_to_pdu(self):
+        features = self.matcher._extract_query_features(
+            "Кабель электрический соединительный 230VAC 16A IEC320 C19-C20"
+        )
+        item = {
+            "name": "Блок распределения питания PDU Ippon Basic 1 U",
+            "normalized_name": "блок распределения питания pdu ippon basic 1 u",
+            "branch_path": "телеком > питание > pdu",
+            "entity_type": "pdu",
+        }
+
+        self.assertTrue(self.matcher._is_hard_incompatible_match(features, item))
+
+    def test_hard_incompatibility_blocks_ats_to_breaker(self):
+        features = self.matcher._extract_query_features("Статический переключатель ATS/STS 16A")
+        item = {
+            "name": "Автоматический выключатель BKN-b 3P+N C16A",
+            "normalized_name": "автоматический выключатель bkn b 3p n c16a",
+            "branch_path": "электрика > автоматы",
+            "entity_type": "breaker",
+        }
+
+        self.assertTrue(self.matcher._is_hard_incompatible_match(features, item))
 
 
 if __name__ == "__main__":

@@ -437,6 +437,67 @@ class ReMoMatcher:
                 return True
         return False
 
+    def _is_hard_incompatible_match(self, query_features: Dict[str, Any], item: Dict[str, Any]) -> bool:
+        query_text = self._clean_text_value(query_features.get("original_text"))
+        normalized_query = self._normalize_text(query_text)
+        candidate_name = self._clean_text_value(item.get("name"))
+        candidate_normalized = self._clean_text_value(item.get("normalized_name")) or self._normalize_text(candidate_name)
+        candidate_branch = self._normalize_text(self._clean_text_value(item.get("branch_path")))
+        query_type = self._clean_text_value(query_features.get("entity_type")) or self._classify_item_type(query_text)
+        candidate_type = self._clean_text_value(item.get("entity_type")) or self._classify_item_type(candidate_name)
+
+        if self._is_disallowed_category_substitution(query_text, candidate_name):
+            return True
+
+        strongly_typed = {
+            "pdu",
+            "patch_panel",
+            "patch_cord",
+            "bulk_twisted_pair",
+            "coax",
+            "sensor",
+            "breaker",
+            "socket",
+        }
+        if query_type in strongly_typed and candidate_type and candidate_type != query_type:
+            return True
+
+        if query_type == "cable" and any(marker in normalized_query for marker in ("iec320", "c13", "c14", "c19", "c20")):
+            if candidate_type not in {"cable", "patch_cord"}:
+                return True
+            required_connectors = [marker for marker in ("c13", "c14", "c19", "c20") if marker in normalized_query]
+            if required_connectors and any(marker not in candidate_normalized for marker in required_connectors):
+                return True
+            if any(marker in candidate_normalized for marker in ("pdu", "байпас", "блок розеток")):
+                return True
+
+        if ("ats" in normalized_query or "sts" in normalized_query or ("статическ" in normalized_query and "переключател" in normalized_query)):
+            if not any(marker in candidate_normalized for marker in ("ats", "sts", "переключател")):
+                return True
+
+        if "keystone" in normalized_query or "кейстоун" in normalized_query:
+            if not any(marker in candidate_normalized for marker in ("keystone", "кейстоун", "модул")):
+                return True
+
+        if "заземл" in normalized_query and "шина" in normalized_query:
+            if "заземл" not in candidate_normalized and "шина" not in candidate_normalized:
+                return True
+
+        if "заглуш" in normalized_query and "заглуш" not in candidate_normalized:
+            return True
+
+        if "щеточ" in normalized_query and "щет" not in candidate_normalized:
+            return True
+
+        if any(marker in normalized_query for marker in ("оптическ", "волокон")):
+            if not any(marker in candidate_normalized for marker in ("оптическ", "волокон", "кросс")):
+                return True
+
+        if "zero u" in normalized_query and "zero u" not in candidate_normalized and "zero u" not in candidate_branch:
+            return True
+
+        return False
+
     def _init_cache_db(self) -> None:
         conn = sqlite3.connect(self.cache_db)
         cursor = conn.cursor()
@@ -905,6 +966,8 @@ class ReMoMatcher:
         if not text:
             return "empty"
         normalized = self._normalize_text(text)
+        if normalized in {"скс", "лвс"}:
+            return "section"
         patterns = getattr(self, "taxonomy_rules", {}).get("section_row_patterns", [])
         for pattern in patterns:
             if re.search(pattern, normalized, flags=re.IGNORECASE):
@@ -1422,13 +1485,15 @@ class ReMoMatcher:
             result = self._match_with_gemini(query)
         if not result or result.get("found_name") == MISSING_POSITION_TEXT:
             return None
+        matched_item = getattr(self, "catalog_dict", {}).get(str(result.get("found_name", "")).lower())
+        if matched_item and self._is_hard_incompatible_match(query_features, matched_item):
+            logger.info("Skipping Gemini result due to hard incompatibility: query=%s found=%s", query, result.get("found_name"))
+            return None
         result["alternatives"] = result.get("alternatives") or self._format_alternatives(scored_entries, skip_first=True)
         if result.get("requires_review") not in {"да", "нет"}:
             result["requires_review"] = "да" if result.get("similarity_score", 0) < 0.9 else "нет"
-        if not result.get("category_path"):
-            match_item = getattr(self, "catalog_dict", {}).get(str(result.get("found_name", "")).lower())
-            if match_item:
-                result["category_path"] = match_item.get("branch_path")
+        if not result.get("category_path") and matched_item:
+            result["category_path"] = matched_item.get("branch_path")
         result.setdefault(
             "confidence_level",
             self._confidence_level_from_score(result.get("similarity_score", 0), result.get("requires_review") == "да"),
@@ -1472,6 +1537,11 @@ class ReMoMatcher:
                 return local_direct
 
             query_features = self._extract_query_features(query_text)
+            if query_features.get("row_type") == "section":
+                return self._build_missing_result(
+                    query_text,
+                    "Строка похожа на раздел каталога и не является конкретной товарной позицией.",
+                )
             ranked_branches = self._rank_branches(query_features)
             query_features["ranked_branches"] = ranked_branches
             branch_paths = [entry["path"] for entry in ranked_branches if entry.get("path")]
@@ -1484,6 +1554,18 @@ class ReMoMatcher:
                 scored_entries = self._score_candidates_locally(query_features, self._select_candidates(query_text, limit=20))
             if not scored_entries:
                 return self._match_with_gemini(query_text)
+
+            compatible_entries = [
+                entry for entry in scored_entries if not self._is_hard_incompatible_match(query_features, entry["item"])
+            ]
+            if compatible_entries:
+                scored_entries = compatible_entries
+            else:
+                return self._build_missing_result(
+                    query_text,
+                    "Точные совместимые кандидаты не найдены: ближайшие совпадения конфликтуют с типом или ключевыми признаками позиции.",
+                    alternatives=self._format_alternatives(scored_entries),
+                )
 
             best_entry = scored_entries[0]
             best_score = float(best_entry["score"])
