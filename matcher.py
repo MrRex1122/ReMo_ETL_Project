@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 import pandas as pd
 
@@ -2413,8 +2413,15 @@ class ReMoMatcher:
             "длина/сечение/материал, а также попробуйте режим 'analog' для поиска близкого аналога."
         )
 
-    def process_excel(self, excel_path: str, output_path: str | None = None) -> Tuple[pd.DataFrame, Dict[str, int]]:
+    def process_excel(
+        self,
+        excel_path: str,
+        output_path: str | None = None,
+        progress_callback: Callable[..., None] | None = None,
+    ) -> Tuple[pd.DataFrame, Dict[str, int]]:
         logger.info("Start processing Excel: %s", excel_path)
+        if progress_callback is not None:
+            progress_callback(stage="reading_excel", message="Чтение Excel-файла")
         df = pd.read_excel(excel_path)
 
         col_b = None
@@ -2479,8 +2486,17 @@ class ReMoMatcher:
             tasks.append((idx, query))
 
         stats["total"] = len(tasks)
+        if progress_callback is not None:
+            progress_callback(
+                stage="matching",
+                current=0,
+                total=len(tasks),
+                message=f"Подготовлено строк к обработке: {len(tasks)}",
+            )
         task_query_map = {idx: query for idx, query in tasks}
+        processed_count = 0
         for idx, result in self._run_matches_parallel(tasks):
+            processed_count += 1
             found_name = result.get("found_name") or MISSING_POSITION_TEXT
             df.at[idx, "Цена"] = result.get("price")
             df.at[idx, "Найденная номенклатура"] = found_name
@@ -2535,10 +2551,25 @@ class ReMoMatcher:
             if compatibility_status == "unresolved_no_compatible_candidates" and incompatibility_reason.startswith("strict_class"):
                 stats["strict_class_unresolved_count"] += 1
 
+            if progress_callback is not None:
+                progress_callback(
+                    stage="matching",
+                    current=processed_count,
+                    total=len(tasks),
+                    message=f"Обработано позиций: {processed_count} из {len(tasks)}",
+                )
+
         if output_path is None:
             src = Path(excel_path)
             output_path = str(src.with_name(f"{src.stem}_matched{src.suffix}"))
 
+        if progress_callback is not None:
+            progress_callback(
+                stage="saving_results",
+                current=stats["total"],
+                total=stats["total"],
+                message="Сохранение итогового Excel-файла",
+            )
         df.to_excel(output_path, index=False)
         logger.info("Result saved: %s", output_path)
         return df, stats

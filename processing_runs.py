@@ -27,6 +27,7 @@ class ProcessingRunArtifacts:
     result_csv_path: Path
     draft_csv_path: Path
     stats_json_path: Path
+    progress_json_path: Path
     error_txt_path: Path
     result_xlsx_path: Path
 
@@ -147,6 +148,7 @@ def build_run_artifacts(run_id: str) -> ProcessingRunArtifacts:
         result_csv_path=run_dir / "result.csv",
         draft_csv_path=run_dir / "draft.csv",
         stats_json_path=run_dir / "stats.json",
+        progress_json_path=run_dir / "progress.json",
         error_txt_path=run_dir / "error.txt",
         result_xlsx_path=run_dir / "result.xlsx",
     )
@@ -400,6 +402,14 @@ def _write_text_atomic(path: Path, text: str) -> None:
     part_path.replace(path)
 
 
+def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+    part_path = path.with_suffix(f"{path.suffix}.part")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with part_path.open("w", encoding="utf-8") as fh:
+        json.dump(payload, fh, ensure_ascii=False, indent=2)
+    part_path.replace(path)
+
+
 def write_processing_run_result(run_id: str, df: pd.DataFrame, stats: dict[str, Any]) -> None:
     artifacts = build_run_artifacts(run_id)
     result_part_path = artifacts.result_csv_path.with_suffix(f"{artifacts.result_csv_path.suffix}.part")
@@ -416,6 +426,44 @@ def write_processing_run_result(run_id: str, df: pd.DataFrame, stats: dict[str, 
 
     result_part_path.replace(artifacts.result_csv_path)
     stats_part_path.replace(artifacts.stats_json_path)
+
+
+def write_processing_run_progress(
+    run_id: str,
+    *,
+    stage: str,
+    current: int | None = None,
+    total: int | None = None,
+    message: str | None = None,
+    percent: float | None = None,
+) -> Path:
+    artifacts = build_run_artifacts(run_id)
+    normalized_percent = None
+    if percent is not None:
+        normalized_percent = max(0.0, min(1.0, float(percent)))
+    payload = {
+        "run_id": run_id,
+        "stage": str(stage),
+        "current": int(current) if current is not None else None,
+        "total": int(total) if total is not None else None,
+        "message": str(message or "").strip(),
+        "percent": normalized_percent,
+        "updated_at": _now_iso(),
+    }
+    _write_json_atomic(artifacts.progress_json_path, payload)
+    touch_processing_run(run_id)
+    return artifacts.progress_json_path
+
+
+def load_processing_run_progress(run_id: str) -> dict[str, Any] | None:
+    progress_path = build_run_artifacts(run_id).progress_json_path
+    if not progress_path.exists():
+        return None
+    with progress_path.open("r", encoding="utf-8") as fh:
+        payload = json.load(fh)
+    if isinstance(payload, dict):
+        return payload
+    raise ValueError(f"Run progress payload is invalid for {run_id}")
 
 
 def load_processing_run_dataframe(run: ProcessingRunRecord, prefer_draft: bool = True) -> pd.DataFrame:

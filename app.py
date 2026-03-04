@@ -42,6 +42,7 @@ from processing_runs import (
     has_processing_run_draft,
     list_processing_runs,
     load_processing_run_dataframe,
+    load_processing_run_progress,
     load_processing_run_stats,
     mark_processing_run_completed,
     mark_processing_run_failed,
@@ -51,6 +52,7 @@ from processing_runs import (
     save_processing_run_draft,
     unregister_processing_run_thread,
     write_processing_run_error,
+    write_processing_run_progress,
     write_processing_run_result,
 )
 from snapshot_export import (
@@ -426,14 +428,62 @@ def _run_processing_job(run_id: str, matcher_settings: dict[str, Any]) -> None:
             raise RuntimeError(f"Run not found: {run_id}")
 
         mark_processing_run_started(run_id)
+        write_processing_run_progress(
+            run_id,
+            stage="matcher_init",
+            percent=0.02,
+            message="Инициализация matcher и загрузка каталога",
+        )
         logger.info("🚀 Processing run started in background: %s", run_id)
 
         matcher = _create_matcher_instance(str(run.catalog_source_path), matcher_settings)
         artifacts = build_run_artifacts(run_id)
+        write_processing_run_progress(
+            run_id,
+            stage="processing",
+            percent=0.08,
+            message="Matcher готов, начинается обработка файла",
+        )
         logger.info("⏳ Background run %s: processing %s", run_id, run.input_file_path)
-        df_result, stats = matcher.process_excel(str(run.input_file_path), output_path=str(artifacts.result_xlsx_path))
+
+        def _progress_callback(
+            *,
+            stage: str,
+            current: int | None = None,
+            total: int | None = None,
+            message: str | None = None,
+        ) -> None:
+            percent = None
+            if stage == "matching" and total:
+                percent = 0.08 + (0.87 * (max(0, min(int(current or 0), int(total))) / max(1, int(total))))
+            elif stage == "reading_excel":
+                percent = 0.08
+            elif stage == "saving_results":
+                percent = 0.97
+            write_processing_run_progress(
+                run_id,
+                stage=stage,
+                current=current,
+                total=total,
+                message=message,
+                percent=percent,
+            )
+
+        df_result, stats = matcher.process_excel(
+            str(run.input_file_path),
+            output_path=str(artifacts.result_xlsx_path),
+            progress_callback=_progress_callback,
+        )
 
         write_processing_run_result(run_id, df_result, stats)
+        write_processing_run_progress(
+            run_id,
+            stage="saving_results",
+            current=int(stats.get("total", len(df_result))),
+            total=int(stats.get("total", len(df_result))),
+            percent=0.99,
+            message="Сохранение результатов",
+        )
         rows_total = int(stats.get("total", len(df_result)))
         found_count = int(stats.get("found", 0))
         missing_count = int(stats.get("not_found", 0))
@@ -449,12 +499,25 @@ def _run_processing_job(run_id: str, matcher_settings: dict[str, Any]) -> None:
             missing_count=missing_count,
             requires_review_count=requires_review_count,
         )
+        write_processing_run_progress(
+            run_id,
+            stage="completed",
+            current=rows_total,
+            total=rows_total,
+            percent=1.0,
+            message="Обработка завершена",
+        )
         logger.info("✅ Processing run completed: %s", run_id)
     except Exception as exc:
         logger.error("❌ Processing run failed: %s", run_id, exc_info=True)
         error_text = str(exc)
         try:
             write_processing_run_error(run_id, error_text)
+            write_processing_run_progress(
+                run_id,
+                stage="failed",
+                message=error_text,
+            )
         except Exception:
             logger.exception("Failed to write run error file: %s", run_id)
         mark_processing_run_failed(run_id, error_text)
@@ -473,6 +536,12 @@ def _start_processing_run(uploaded_file) -> str:
     artifacts = build_run_artifacts(run.run_id)
     with open(artifacts.input_path, 'wb') as fh:
         fh.write(uploaded_file.getbuffer())
+    write_processing_run_progress(
+        run.run_id,
+        stage="queued",
+        percent=0.0,
+        message="Прогон создан и ожидает запуска фонового потока",
+    )
 
     matcher_settings = _current_matcher_runtime_settings()
     worker = threading.Thread(
@@ -677,6 +746,16 @@ def _get_active_or_preferred_run() -> Any:
     if active_run_id:
         return get_processing_run(active_run_id)
     return get_preferred_run_for_restore()
+
+
+def _load_run_progress_safe(run_id: str) -> dict[str, Any] | None:
+    try:
+        return load_processing_run_progress(run_id)
+    except FileNotFoundError:
+        return None
+    except Exception as exc:
+        logger.warning("⚠️ Failed to load run progress for %s: %s", run_id, exc)
+        return None
 
 
 def _load_run_results_into_session(run) -> tuple[pd.DataFrame, dict[str, Any]]:
@@ -1420,6 +1499,36 @@ def main():
             if run_for_display.started_at:
                 st.write(f"**Старт:** {run_for_display.started_at}")
             st.write(f"**Обновлен:** {run_for_display.updated_at}")
+            progress_state = _load_run_progress_safe(run_for_display.run_id)
+            if progress_state:
+                stage_labels = {
+                    "queued": "Ожидание запуска",
+                    "matcher_init": "Инициализация matcher",
+                    "reading_excel": "Чтение Excel",
+                    "processing": "Подготовка к обработке",
+                    "matching": "Сопоставление позиций",
+                    "saving_results": "Сохранение результатов",
+                    "completed": "Завершено",
+                    "failed": "Ошибка",
+                }
+                progress_stage = str(progress_state.get("stage") or "").strip()
+                progress_message = str(progress_state.get("message") or "").strip()
+                current = progress_state.get("current")
+                total = progress_state.get("total")
+                percent = progress_state.get("percent")
+                try:
+                    normalized_progress = float(percent) if percent is not None else 0.0
+                except (TypeError, ValueError):
+                    normalized_progress = 0.0
+                normalized_progress = max(0.0, min(1.0, normalized_progress))
+                st.write(
+                    f"**Этап:** {stage_labels.get(progress_stage, progress_stage or 'Неизвестно')}"
+                )
+                st.progress(normalized_progress)
+                if current is not None and total is not None and int(total) > 0:
+                    st.caption(f"Прогресс: {int(current)} / {int(total)}")
+                if progress_message:
+                    st.caption(progress_message)
             if run_for_display.status == "completed":
                 st.caption(
                     "Статистика: "
@@ -1504,6 +1613,22 @@ def main():
                 f"⏳ Прогон `{run.run_id}` еще выполняется "
                 f"({run.status}). Обновите страницу позже или нажмите «Обновить статус» на вкладке «Загрузка»."
             )
+            progress_state = _load_run_progress_safe(run.run_id)
+            if progress_state:
+                progress_message = str(progress_state.get("message") or "").strip()
+                percent = progress_state.get("percent")
+                try:
+                    normalized_progress = float(percent) if percent is not None else 0.0
+                except (TypeError, ValueError):
+                    normalized_progress = 0.0
+                normalized_progress = max(0.0, min(1.0, normalized_progress))
+                st.progress(normalized_progress)
+                current = progress_state.get("current")
+                total = progress_state.get("total")
+                if current is not None and total is not None and int(total) > 0:
+                    st.caption(f"Прогресс: {int(current)} / {int(total)}")
+                if progress_message:
+                    st.caption(progress_message)
         elif run.status in ("failed", "interrupted"):
             st.error(
                 f"❌ Прогон `{run.run_id}` не завершен: "
