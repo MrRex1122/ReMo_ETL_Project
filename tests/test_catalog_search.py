@@ -8,6 +8,8 @@ import pandas as pd
 from catalog_merge import refresh_merged_catalog
 from catalog_search import (
     build_search_catalog_from_merged,
+    classify_item_type,
+    derive_branch_from_text,
     get_search_catalog_path,
     get_search_catalog_readiness,
     refresh_search_catalog,
@@ -59,6 +61,11 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertIn("connector_pair", markers)
             self.assertIn("fiber_mode", markers)
             self.assertIn("duplex", markers)
+
+    def test_classify_item_type_marks_optical_cross_and_not_patch_cord(self):
+        self.assertEqual(classify_item_type("Оптический кросс на 48 волокон 1U"), "optical_cross")
+        self.assertEqual(classify_item_type("Оптический патч-корд LC-LC duplex OS2 2м"), "optical_patch_cord")
+        self.assertEqual(derive_branch_from_text("Оптический кросс на 48 волокон 1U"), "телеком > оптика > кроссы")
 
     def test_search_catalog_readiness_tracks_missing_ready_and_stale_states(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

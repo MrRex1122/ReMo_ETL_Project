@@ -166,6 +166,73 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.assertTrue(self.matcher._is_hard_incompatible_match(features, item))
         self.assertEqual(self.matcher._hard_incompatibility_reason(features, item), "entity_family_mismatch")
 
+    def test_optical_cross_is_strict_and_blocks_non_optical_items(self):
+        features = self.matcher._extract_query_features("Оптический кросс на 48 волокон 1U")
+        item = {
+            "name": "Блок управления противопожарным клапаном",
+            "normalized_name": "блок управления противопожарным клапаном",
+            "branch_path": "автоматика > управление",
+            "entity_type": "other",
+        }
+
+        self.assertEqual(self.matcher._match_strictness_for_query(features), "strict")
+        self.assertTrue(self.matcher._is_hard_incompatible_match(features, item))
+        self.assertEqual(self.matcher._hard_incompatibility_reason(features, item), "optical_cross_family_mismatch")
+
+    def test_patch_panel_blocks_non_panel_items(self):
+        features = self.matcher._extract_query_features(
+            "Панель коммутационная неэкранированной 24 порта, блочная, категория 6"
+        )
+        item = {
+            "name": "Пена монтажная Roof Complect огнеупорная",
+            "normalized_name": "пена монтажная roof complect огнеупорная",
+            "branch_path": "прочее",
+            "entity_type": "other",
+        }
+
+        self.assertEqual(self.matcher._match_strictness_for_query(features), "strict")
+        self.assertTrue(self.matcher._is_hard_incompatible_match(features, item))
+        self.assertEqual(self.matcher._hard_incompatibility_reason(features, item), "patch_panel_family_mismatch")
+
+    def test_strict_fallback_rejects_cross_family_candidate(self):
+        features = self.matcher._extract_query_features(
+            "Панель коммутационная неэкранированной 24 порта, блочная, категория 6"
+        )
+        wrong_item = {
+            "name": "Пена монтажная Roof Complect огнеупорная",
+            "normalized_name": "пена монтажная roof complect огнеупорная",
+            "branch_path": "прочее",
+            "entity_type": "other",
+        }
+        valid_item = {
+            "name": "Патч-панель 1U категории 6 UTP 24 порта",
+            "normalized_name": "патч панель 1u категории 6 utp 24 порта",
+            "branch_path": "телеком > коммутация > патч панели",
+            "entity_type": "patch_panel",
+            "item_markers": {"category": "cat6", "rack_unit": "1"},
+        }
+
+        self.assertFalse(self.matcher._is_strict_fallback_allowed(features, wrong_item))
+        self.assertTrue(self.matcher._is_strict_fallback_allowed(features, valid_item))
+
+    def test_gemini_family_gate_rejects_cross_family_for_optical_cross(self):
+        features = self.matcher._extract_query_features("Оптический кросс на 24 волокна 1U")
+        wrong_item = {
+            "name": "Термометр биметаллический",
+            "normalized_name": "термометр биметаллический",
+            "branch_path": "измерение > термометры",
+            "entity_type": "other",
+        }
+        valid_item = {
+            "name": "Оптический кросс 24 волокна 1U",
+            "normalized_name": "оптический кросс 24 волокна 1u",
+            "branch_path": "телеком > оптика > кроссы",
+            "entity_type": "optical_cross",
+        }
+
+        self.assertFalse(self.matcher._is_gemini_result_family_valid(features, wrong_item))
+        self.assertTrue(self.matcher._is_gemini_result_family_valid(features, valid_item))
+
     def test_compatibility_penalty_marks_weak_mismatch(self):
         features = self.matcher._extract_query_features("Оптический патч-корд LC-LC duplex OS2 2м")
         item = {

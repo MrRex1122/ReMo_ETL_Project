@@ -184,6 +184,7 @@ def _detect_connector_pair(normalized: str) -> str:
 
 def classify_item_type(text: str, synonyms: Mapping[str, str] | None = None) -> str:
     normalized = normalize_query_terms(text, synonyms=synonyms)
+    phrase_normalized = normalized.replace("-", " ")
     if (
         "ats" in normalized
         or "sts" in normalized
@@ -201,9 +202,11 @@ def classify_item_type(text: str, synonyms: Mapping[str, str] | None = None) -> 
             return "pdu_metered"
         return "pdu_basic"
     if any(marker in normalized for marker in ("оптическ", "волокон")) and (
-        "патч корд" in normalized or "patch cord" in normalized
+        "патч корд" in phrase_normalized or "patch cord" in phrase_normalized
     ):
         return "optical_patch_cord"
+    if ("оптическ" in normalized and "кросс" in normalized) or ("кросс" in normalized and "волокон" in normalized):
+        return "optical_cross"
     if "keystone" in normalized or "кейстоун" in normalized:
         return "keystone_module"
     if "коннектор" in normalized and re.search(r"\brj[\s-]?45\b", normalized, flags=re.IGNORECASE):
@@ -224,7 +227,11 @@ def classify_item_type(text: str, synonyms: Mapping[str, str] | None = None) -> 
         return "ground_bar"
     if any(marker in normalized for marker in ("iec320", "c13", "c14", "c19", "c20")):
         return "iec_power_cable"
-    if "патч корд" in normalized:
+    if "патч панел" in phrase_normalized or "patch panel" in phrase_normalized or (
+        "панел" in normalized and "коммутац" in normalized
+    ):
+        return "patch_panel"
+    if "патч корд" in phrase_normalized:
         return "patch_cord"
     bulk_markers = ("витая пара", "utp", "ftp", "f utp", "u utp", "бухта", "305м", "500м")
     if any(marker in normalized for marker in bulk_markers):
@@ -233,8 +240,6 @@ def classify_item_type(text: str, synonyms: Mapping[str, str] | None = None) -> 
         return "coax"
     if "шкаф" in normalized or "стойк" in normalized:
         return "rack"
-    if "патч панел" in normalized:
-        return "patch_panel"
     if "кабель" in normalized:
         return "cable"
     if "провод" in normalized:
@@ -276,6 +281,8 @@ def derive_branch_from_text(
         return "телеком > питание > ats"
     if entity_type == "patch_panel":
         return "телеком > коммутация > патч панели"
+    if entity_type == "optical_cross":
+        return "телеком > оптика > кроссы"
     if entity_type == "optical_patch_cord":
         return "телеком > кабели > оптические патч корды"
     if entity_type == "patch_cord":

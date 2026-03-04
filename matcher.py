@@ -518,6 +518,7 @@ class ReMoMatcher:
             "temperature_humidity_sensor": "sensor",
             "reed_sensor": "sensor",
             "optical_patch_cord": "optical_patch_cord",
+            "optical_cross": "optical_cross",
             "iec_power_cable": "iec_power_cable",
             "keystone_module": "keystone",
             "rj45_connector": "rj45_connector",
@@ -543,6 +544,7 @@ class ReMoMatcher:
             "socket",
             "keystone",
             "optical_patch_cord",
+            "optical_cross",
             "iec_power_cable",
             "ats_sts",
             "rack_accessory_strict",
@@ -591,6 +593,7 @@ class ReMoMatcher:
             "rack_rail",
             "ground_bar",
             "optical_patch_cord",
+            "optical_cross",
             "iec_power_cable",
         }
         allowed_strict_pairs = {
@@ -599,6 +602,15 @@ class ReMoMatcher:
             ("rack_shelf", "rack_rail"),
             ("rack_rail", "rack_shelf"),
         }
+        if query_type == "patch_panel" and candidate_type != "patch_panel":
+            return "patch_panel_family_mismatch"
+        if query_type == "optical_cross":
+            if candidate_type != "optical_cross":
+                return "optical_cross_family_mismatch"
+            optical_markers = ("оптическ", "кросс", "волокон", "odf", "fiber")
+            optical_haystack = f"{candidate_normalized} {candidate_branch}".strip()
+            if not any(marker in optical_haystack for marker in optical_markers):
+                return "optical_cross_family_mismatch"
         if query_type in strong_family_mismatch and candidate_type and candidate_type != query_type:
             if not (query_type == "sensor" and candidate_type == "sensor") and (
                 query_type,
@@ -752,6 +764,39 @@ class ReMoMatcher:
                 return entry
         return None
 
+    def _is_strict_fallback_allowed(self, query_features: Dict[str, Any], item: Dict[str, Any]) -> bool:
+        if self._compatibility_label(query_features, item) != "compatible":
+            return False
+
+        strictness = self._match_strictness_for_query(query_features)
+        if strictness != "strict":
+            return True
+
+        query_family = self._entity_family(query_features.get("entity_type", ""))
+        candidate_family = self._entity_family(item.get("entity_type", ""))
+        allowed_pairs = {
+            ("keystone", "rj45_outlet"),
+            ("rj45_outlet", "keystone"),
+        }
+        if query_family in {"patch_panel", "optical_cross"}:
+            return candidate_family == query_family
+        if candidate_family == query_family:
+            return True
+        return (query_family, candidate_family) in allowed_pairs
+
+    def _is_gemini_result_family_valid(self, query_features: Dict[str, Any], item: Dict[str, Any]) -> bool:
+        query_family = self._entity_family(query_features.get("entity_type", ""))
+        candidate_family = self._entity_family(item.get("entity_type", ""))
+        allowed_pairs = {
+            ("keystone", "rj45_outlet"),
+            ("rj45_outlet", "keystone"),
+        }
+        if query_family in {"patch_panel", "optical_cross"}:
+            return candidate_family == query_family
+        if (query_family, candidate_family) in allowed_pairs:
+            return True
+        return not self._is_hard_incompatible_match(query_features, item)
+
     def _typed_candidate_pool(self, query_text: str, query_features: Dict[str, Any], limit: int) -> List[Dict[str, Any]]:
         strictness = self._match_strictness_for_query(query_features)
         if strictness == "generic":
@@ -762,10 +807,40 @@ class ReMoMatcher:
         branch_paths = [entry["path"] for entry in query_features.get("ranked_branches", []) if entry.get("path")]
         typed_pool = []
         seen: set[int] = set()
+        supplemented = 0
+
+        def _matches_typed_family(item: Dict[str, Any]) -> bool:
+            item_family = self._entity_family(item.get("entity_type", ""))
+            if entity_family == "patch_panel":
+                if item_family == "patch_panel":
+                    return True
+                search_text = self._normalize_text(
+                    f"{self._clean_text_value(item.get('name'))} {self._clean_text_value(item.get('branch_path'))}"
+                )
+                return any(token in search_text for token in ("патч", "коммутац", "панел"))
+            if entity_family == "optical_cross":
+                if item_family == "optical_cross":
+                    return True
+                search_text = self._normalize_text(
+                    f"{self._clean_text_value(item.get('name'))} {self._clean_text_value(item.get('branch_path'))}"
+                )
+                return any(token in search_text for token in ("оптическ", "кросс", "волокон", "fiber", "odf"))
+            if entity_family and item_family and item_family != entity_family:
+                return False
+            return True
+
+        def _log_and_return() -> List[Dict[str, Any]]:
+            logger.info(
+                "🧠 Typed candidate pool: query=%s family=%s typed_candidates=%s supplemented=%s",
+                query_text[:120],
+                entity_family or "other",
+                len(typed_pool),
+                supplemented,
+            )
+            return typed_pool
 
         for item in self._collect_branch_candidates(branch_paths, limit=max(typed_limit * 2, typed_limit)):
-            item_family = self._entity_family(item.get("entity_type", ""))
-            if entity_family and item_family and item_family != entity_family:
+            if not _matches_typed_family(item):
                 continue
             row_idx = int(item.get("row_idx", -1))
             if row_idx in seen:
@@ -773,21 +848,21 @@ class ReMoMatcher:
             typed_pool.append(item)
             seen.add(row_idx)
             if len(typed_pool) >= typed_limit:
-                return typed_pool
+                return _log_and_return()
 
         general_candidates = self._select_candidates(query_text, limit=max(limit * 2, typed_limit))
         for item in general_candidates:
-            item_family = self._entity_family(item.get("entity_type", ""))
-            if entity_family and item_family and item_family != entity_family:
+            if not _matches_typed_family(item):
                 continue
             row_idx = int(item.get("row_idx", -1))
             if row_idx in seen:
                 continue
             typed_pool.append(item)
             seen.add(row_idx)
+            supplemented += 1
             if len(typed_pool) >= typed_limit:
                 break
-        return typed_pool
+        return _log_and_return()
 
     def _init_cache_db(self) -> None:
         conn = sqlite3.connect(self.cache_db)
@@ -1941,6 +2016,27 @@ class ReMoMatcher:
                 gemini_visible_candidates=visible_candidates,
                 gemini_truncated_candidates=truncated_candidates,
             )
+        if matched_item and not self._is_gemini_result_family_valid(query_features, matched_item):
+            query_family = self._entity_family(query_features.get("entity_type", ""))
+            result_family = self._entity_family(matched_item.get("entity_type", ""))
+            logger.info(
+                "🧠 Gemini result rejected by family gate: query=%s query_family=%s result_family=%s",
+                query[:120],
+                query_family or "other",
+                result_family or "other",
+            )
+            rejected = self._build_missing_result(
+                query,
+                "Gemini выбрал кандидата из несовместимого товарного семейства; позиция отклонена.",
+                compatibility_status="rejected_incompatible_gemini",
+                incompatibility_reason="gemini_family_gate_rejected",
+                gemini_shortlist_count=len(shortlist),
+                gemini_visible_candidates=visible_candidates,
+                gemini_truncated_candidates=truncated_candidates,
+            )
+            if strictness == "strict":
+                return rejected
+            return None
         if matched_item and self._is_hard_incompatible_match(query_features, matched_item):
             reason = self._hard_incompatibility_reason(query_features, matched_item) or "gemini_selected_incompatible_candidate"
             logger.info("Skipping Gemini result due to hard incompatibility: query=%s found=%s reason=%s", query, result.get("found_name"), reason)
@@ -2166,6 +2262,25 @@ class ReMoMatcher:
                         compatibility_status="unresolved_no_compatible_candidates",
                         incompatibility_reason="strict_class_no_compatible_candidate",
                     )
+            if best_compatible is not None and not self._is_strict_fallback_allowed(query_features, best_compatible["item"]):
+                query_family = self._entity_family(query_features.get("entity_type", ""))
+                candidate_family = self._entity_family(best_compatible["item"].get("entity_type", ""))
+                logger.info(
+                    "🧠 Strict fallback rejected: query=%s query_family=%s candidate_family=%s reason=%s",
+                    query_text[:120],
+                    query_family or "other",
+                    candidate_family or "other",
+                    "strict_fallback_family_mismatch",
+                )
+                if strictness == "strict":
+                    return self._build_missing_result(
+                        query_text,
+                        "Локальный fallback отклонен: лучший кандидат относится к несовместимому товарному семейству.",
+                        alternatives=self._format_alternatives(scored_entries),
+                        compatibility_status="unresolved_no_compatible_candidates",
+                        incompatibility_reason="strict_fallback_family_mismatch",
+                    )
+                best_compatible = None
             if best_compatible is not None:
                 result = self._build_result_from_item(
                     best_compatible["item"],
