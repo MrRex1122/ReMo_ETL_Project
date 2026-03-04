@@ -126,6 +126,18 @@ class MatchTaxonomyTests(unittest.TestCase):
 
         self.assertTrue(self.matcher._is_hard_incompatible_match(features, item))
 
+    def test_hard_incompatibility_blocks_ats_to_soft_starter(self):
+        features = self.matcher._extract_query_features("Статический переключатель ATS/STS 30(32)A")
+        item = {
+            "name": "Устройство плавного пуска STS22 30 кВт",
+            "normalized_name": "устройство плавного пуска sts22 30 квт",
+            "branch_path": "электрика > приводы",
+            "entity_type": "soft_starter",
+        }
+
+        self.assertTrue(self.matcher._is_hard_incompatible_match(features, item))
+        self.assertEqual(self.matcher._hard_incompatibility_reason(features, item), "ats_sts_vs_soft_starter")
+
 
     def test_hard_incompatibility_blocks_temperature_sensor_to_reed(self):
         features = self.matcher._extract_query_features("Датчик температуры и влажности")
@@ -178,6 +190,20 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.assertEqual(self.matcher._match_strictness_for_query(features), "strict")
         self.assertTrue(self.matcher._is_hard_incompatible_match(features, item))
         self.assertEqual(self.matcher._hard_incompatibility_reason(features, item), "optical_cross_family_mismatch")
+
+    def test_airflow_blanking_panel_rejects_generic_module_blank(self):
+        features = self.matcher._extract_query_features("Заглушка для управления потоком воздуха 1U")
+        item = {
+            "name": "Заглушка на 4 модуля для встраиваемых щитков",
+            "normalized_name": "заглушка на 4 модуля для встраиваемых щитков",
+            "branch_path": "электрика > щитки",
+            "entity_type": "rack_blank_panel",
+            "item_markers": {"mount_kind": "blank_panel"},
+        }
+
+        self.assertEqual(self.matcher._match_strictness_for_query(features), "strict")
+        self.assertTrue(self.matcher._is_hard_incompatible_match(features, item))
+        self.assertEqual(self.matcher._hard_incompatibility_reason(features, item), "airflow_blanking_family_mismatch")
 
     def test_patch_panel_blocks_non_panel_items(self):
         features = self.matcher._extract_query_features(

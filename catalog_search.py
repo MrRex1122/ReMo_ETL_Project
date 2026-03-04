@@ -182,9 +182,25 @@ def _detect_connector_pair(normalized: str) -> str:
     return ""
 
 
+def _has_airflow_blanking_signal(normalized: str) -> bool:
+    return (
+        ("поток" in normalized and "воздух" in normalized)
+        or "airflow" in normalized
+        or "blanking panel" in normalized
+        or "свободных юнит" in normalized
+    )
+
+
 def classify_item_type(text: str, synonyms: Mapping[str, str] | None = None) -> str:
     normalized = normalize_query_terms(text, synonyms=synonyms)
     phrase_normalized = normalized.replace("-", " ")
+    if "soft starter" in normalized or ("плавн" in normalized and "пуск" in normalized):
+        return "soft_starter"
+    if (
+        ("заглуш" in normalized or "панел" in normalized)
+        and _has_airflow_blanking_signal(normalized)
+    ):
+        return "airflow_blanking_panel"
     if (
         "ats" in normalized
         or "sts" in normalized
@@ -279,6 +295,8 @@ def derive_branch_from_text(
         return "телеком > питание > pdu"
     if entity_type == "ats_sts":
         return "телеком > питание > ats"
+    if entity_type == "airflow_blanking_panel":
+        return "телеком > аксессуары > шкафные аксессуары > заглушки"
     if entity_type == "patch_panel":
         return "телеком > коммутация > патч панели"
     if entity_type == "optical_cross":
@@ -443,6 +461,9 @@ def extract_item_markers(
         markers["mount_kind"] = "brush_panel"
     elif "заглуш" in normalized:
         markers["mount_kind"] = "blank_panel"
+
+    if _has_airflow_blanking_signal(normalized):
+        markers["airflow"] = "yes"
 
     if "лючок" in normalized or ("напольн" in normalized and "короб" in normalized):
         markers["installation_kind"] = "floor_box"

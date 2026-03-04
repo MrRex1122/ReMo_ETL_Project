@@ -87,6 +87,14 @@ class CatalogSearchTests(unittest.TestCase):
         self.assertEqual(classify_item_type("Оптический патч-корд LC-LC duplex OS2 2м"), "optical_patch_cord")
         self.assertEqual(derive_branch_from_text("Оптический кросс на 48 волокон 1U"), "телеком > оптика > кроссы")
 
+    def test_classify_item_type_marks_soft_starter_and_airflow_blanking_panel(self):
+        self.assertEqual(classify_item_type("Устройство плавного пуска STS22 30 кВт"), "soft_starter")
+        self.assertEqual(classify_item_type("Заглушка для управления потоком воздуха 1U"), "airflow_blanking_panel")
+        self.assertEqual(
+            derive_branch_from_text("Заглушка для управления потоком воздуха 1U"),
+            "телеком > аксессуары > шкафные аксессуары > заглушки",
+        )
+
     def test_search_catalog_readiness_tracks_missing_ready_and_stale_states(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

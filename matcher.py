@@ -520,12 +520,14 @@ class ReMoMatcher:
             "temperature_sensor": "sensor",
             "temperature_humidity_sensor": "sensor",
             "reed_sensor": "sensor",
+            "soft_starter": "soft_starter",
             "optical_patch_cord": "optical_patch_cord",
             "optical_cross": "optical_cross",
             "iec_power_cable": "iec_power_cable",
             "keystone_module": "keystone",
             "rj45_connector": "rj45_connector",
             "rj45_outlet": "rj45_outlet",
+            "airflow_blanking_panel": "airflow_blanking_panel",
             "rack_blank_panel": "rack_accessory_strict",
             "rack_brush_panel": "rack_accessory_strict",
             "rack_shelf": "rack_shelf",
@@ -555,6 +557,7 @@ class ReMoMatcher:
             "optical_cross",
             "iec_power_cable",
             "ats_sts",
+            "airflow_blanking_panel",
             "rack_accessory_strict",
             "rack_shelf",
             "floor_box",
@@ -597,6 +600,7 @@ class ReMoMatcher:
             "rj45_connector",
             "rj45_outlet",
             "floor_box",
+            "airflow_blanking_panel",
             "rack_shelf",
             "rack_rail",
             "ground_bar",
@@ -619,6 +623,13 @@ class ReMoMatcher:
             optical_haystack = f"{candidate_normalized} {candidate_branch}".strip()
             if not any(marker in optical_haystack for marker in optical_markers):
                 return "optical_cross_family_mismatch"
+        if query_type == "ats_sts" and candidate_type == "soft_starter":
+            return "ats_sts_vs_soft_starter"
+        if query_type == "airflow_blanking_panel":
+            if candidate_type != "airflow_blanking_panel":
+                return "airflow_blanking_family_mismatch"
+            if self._clean_text_value(item_markers.get("airflow")) != "yes":
+                return "airflow_blanking_family_mismatch"
         if query_type in strong_family_mismatch and candidate_type and candidate_type != query_type:
             if not (query_type == "sensor" and candidate_type == "sensor") and (
                 query_type,
@@ -660,10 +671,18 @@ class ReMoMatcher:
             if item_cable_environment != "outdoor":
                 return "cable_environment_mismatch"
 
-        if query_type == "ats_sts" and not any(
-            marker in candidate_normalized for marker in ("ats", "sts", "переключател", "transfer switch")
-        ):
-            return "ats_sts_mismatch"
+        if query_type == "ats_sts":
+            if not any(
+                marker in candidate_normalized
+                for marker in (
+                    "переключател",
+                    "transfer switch",
+                    "automatic transfer",
+                    "static transfer",
+                    "статическ",
+                )
+            ) and not ("ats" in candidate_normalized and "sts" in candidate_normalized):
+                return "ats_sts_mismatch"
 
         query_sensor = self._clean_text_value(query_markers.get("sensor_kind"))
         item_sensor = self._clean_text_value(item_markers.get("sensor_kind"))
@@ -810,7 +829,7 @@ class ReMoMatcher:
             ("keystone", "rj45_outlet"),
             ("rj45_outlet", "keystone"),
         }
-        if query_family in {"patch_panel", "optical_cross"}:
+        if query_family in {"patch_panel", "optical_cross", "ats_sts", "airflow_blanking_panel"}:
             return candidate_family == query_family
         if candidate_family == query_family:
             return True
@@ -823,7 +842,7 @@ class ReMoMatcher:
             ("keystone", "rj45_outlet"),
             ("rj45_outlet", "keystone"),
         }
-        if query_family in {"patch_panel", "optical_cross"}:
+        if query_family in {"patch_panel", "optical_cross", "ats_sts", "airflow_blanking_panel"}:
             return candidate_family == query_family
         if (query_family, candidate_family) in allowed_pairs:
             return True
@@ -857,6 +876,34 @@ class ReMoMatcher:
                     f"{self._clean_text_value(item.get('name'))} {self._clean_text_value(item.get('branch_path'))}"
                 )
                 return any(token in search_text for token in ("оптическ", "кросс", "волокон", "fiber", "odf"))
+            if entity_family == "ats_sts":
+                if item_family == "ats_sts":
+                    return True
+                search_text = self._normalize_text(
+                    f"{self._clean_text_value(item.get('name'))} {self._clean_text_value(item.get('branch_path'))}"
+                )
+                if "soft starter" in search_text or ("плавн" in search_text and "пуск" in search_text):
+                    return False
+                return (
+                    any(token in search_text for token in ("переключател", "transfer switch", "automatic transfer"))
+                    or ("статическ" in search_text and "переключател" in search_text)
+                    or ("ats" in search_text and "sts" in search_text)
+                )
+            if entity_family == "airflow_blanking_panel":
+                if item_family == "airflow_blanking_panel":
+                    return True
+                search_text = self._normalize_text(
+                    f"{self._clean_text_value(item.get('name'))} {self._clean_text_value(item.get('branch_path'))}"
+                )
+                return (
+                    "заглуш" in search_text
+                    and (
+                        ("поток" in search_text and "воздух" in search_text)
+                        or any(token in search_text for token in ("airflow", "blanking panel", "свободных юнит"))
+                    )
+                    and "модул" not in search_text
+                    and "щитк" not in search_text
+                )
             if entity_family == "bulk_twisted_pair":
                 if item_family != "bulk_twisted_pair":
                     return False
