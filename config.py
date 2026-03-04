@@ -24,6 +24,11 @@ DEFAULT_MATCHER_LOCAL_MARGIN_THRESHOLD = 0.08
 DEFAULT_MATCHER_CONTEXT_CHUNK_SIZE = 500
 DEFAULT_MATCHER_MAX_CONTEXT_CHUNKS = 6
 DEFAULT_MATCHER_RETRIEVAL_CANDIDATES = 3000
+DEFAULT_MATCHER_GEMINI_SHORTLIST_LIMIT = 96
+DEFAULT_MATCHER_GEMINI_CHUNK_SIZE = 12
+DEFAULT_MATCHER_GEMINI_MAX_CHUNKS = 8
+DEFAULT_MATCHER_LOCAL_RECALL_POOL = 300
+DEFAULT_MATCHER_SKIP_WEAK_SHORTLIST = False
 
 
 def _normalize_path(raw: str | Path) -> Path:
@@ -149,3 +154,51 @@ def get_matcher_retrieval_candidates() -> int:
         return min(10000, max(100, value))
     except ValueError:
         return DEFAULT_MATCHER_RETRIEVAL_CANDIDATES
+
+
+def get_matcher_gemini_shortlist_limit() -> int:
+    raw = os.getenv("REMO_MATCHER_GEMINI_SHORTLIST_LIMIT", str(DEFAULT_MATCHER_GEMINI_SHORTLIST_LIMIT))
+    try:
+        value = int(raw)
+        return min(200, max(24, value))
+    except ValueError:
+        return DEFAULT_MATCHER_GEMINI_SHORTLIST_LIMIT
+
+
+def get_matcher_gemini_chunk_size() -> int:
+    raw = os.getenv("REMO_MATCHER_GEMINI_CHUNK_SIZE", str(DEFAULT_MATCHER_GEMINI_CHUNK_SIZE))
+    try:
+        value = int(raw)
+        return min(20, max(6, value))
+    except ValueError:
+        return DEFAULT_MATCHER_GEMINI_CHUNK_SIZE
+
+
+def get_matcher_gemini_max_chunks() -> int:
+    raw = os.getenv("REMO_MATCHER_GEMINI_MAX_CHUNKS", str(DEFAULT_MATCHER_GEMINI_MAX_CHUNKS))
+    try:
+        value = int(raw)
+        return min(12, max(1, value))
+    except ValueError:
+        return DEFAULT_MATCHER_GEMINI_MAX_CHUNKS
+
+
+def get_matcher_local_recall_pool() -> int:
+    raw = os.getenv("REMO_MATCHER_LOCAL_RECALL_POOL", str(DEFAULT_MATCHER_LOCAL_RECALL_POOL))
+    try:
+        value = int(raw)
+        return min(1000, max(100, value))
+    except ValueError:
+        return DEFAULT_MATCHER_LOCAL_RECALL_POOL
+
+
+def get_matcher_skip_weak_shortlist() -> bool:
+    raw = os.getenv("REMO_MATCHER_SKIP_WEAK_SHORTLIST")
+    if raw is None:
+        return DEFAULT_MATCHER_SKIP_WEAK_SHORTLIST
+    normalized = str(raw).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return DEFAULT_MATCHER_SKIP_WEAK_SHORTLIST

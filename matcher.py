@@ -41,12 +41,17 @@ from config import (
     get_catalog_csv_path,
     get_matcher_cache_db_path,
     get_matcher_context_chunk_size,
+    get_matcher_gemini_chunk_size,
+    get_matcher_gemini_max_chunks,
+    get_matcher_gemini_shortlist_limit,
     get_matcher_local_confidence_threshold,
+    get_matcher_local_recall_pool,
     get_matcher_local_margin_threshold,
     get_matcher_max_context_chunks,
     get_matcher_models,
     get_matcher_parallel_requests,
     get_matcher_retrieval_candidates,
+    get_matcher_skip_weak_shortlist,
 )
 
 logging.basicConfig(
@@ -212,8 +217,13 @@ class ReMoMatcher:
         db_csv_path: str,
         cache_db: str = "matcher_cache.db",
         parallel_requests: int | None = None,
-        catalog_sample_items: int = 500,
+        catalog_sample_items: int = 300,
         match_mode: str = MATCH_MODE_EXACT,
+        gemini_shortlist_limit: int | None = None,
+        gemini_chunk_size: int | None = None,
+        gemini_max_chunks: int | None = None,
+        local_recall_pool: int | None = None,
+        skip_weak_shortlist: bool | None = None,
     ):
         self.api_key = gemini_api_key
         self.db_csv_path = self._resolve_catalog_csv_path(db_csv_path)
@@ -238,6 +248,33 @@ class ReMoMatcher:
         self.parallel_requests = min(10, max(1, int(parallel_requests or get_matcher_parallel_requests())))
         self.catalog_sample_items = max(50, int(catalog_sample_items))
         self.match_mode = self._sanitize_match_mode(match_mode)
+        self.gemini_shortlist_limit = self._sanitize_int_setting(
+            gemini_shortlist_limit if gemini_shortlist_limit is not None else get_matcher_gemini_shortlist_limit(),
+            minimum=24,
+            maximum=200,
+            fallback=96,
+        )
+        self.gemini_chunk_size = self._sanitize_int_setting(
+            gemini_chunk_size if gemini_chunk_size is not None else get_matcher_gemini_chunk_size(),
+            minimum=6,
+            maximum=20,
+            fallback=12,
+        )
+        self.gemini_max_chunks = self._sanitize_int_setting(
+            gemini_max_chunks if gemini_max_chunks is not None else get_matcher_gemini_max_chunks(),
+            minimum=1,
+            maximum=12,
+            fallback=8,
+        )
+        self.local_recall_pool = self._sanitize_int_setting(
+            local_recall_pool if local_recall_pool is not None else get_matcher_local_recall_pool(),
+            minimum=100,
+            maximum=1000,
+            fallback=300,
+        )
+        self.skip_weak_shortlist = self._sanitize_bool_setting(
+            skip_weak_shortlist if skip_weak_shortlist is not None else get_matcher_skip_weak_shortlist()
+        )
         self.context_chunk_size = get_matcher_context_chunk_size()
         self.max_context_chunks = get_matcher_max_context_chunks()
         self.retrieval_candidates_limit = get_matcher_retrieval_candidates()
@@ -313,6 +350,31 @@ class ReMoMatcher:
         if mode in {MATCH_MODE_EXACT, MATCH_MODE_ANALOG}:
             return mode
         return MATCH_MODE_EXACT
+
+    @staticmethod
+    def _sanitize_int_setting(
+        value: Any,
+        *,
+        minimum: int,
+        maximum: int,
+        fallback: int,
+    ) -> int:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            parsed = fallback
+        return min(maximum, max(minimum, parsed))
+
+    @staticmethod
+    def _sanitize_bool_setting(value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        normalized = str(value or "").strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+        return False
 
     def _catalog_load_chunksize(self) -> int:
         raw_value = os.getenv("REMO_MATCHER_LOAD_CHUNKSIZE", str(MATCHER_LOAD_CHUNKSIZE))
@@ -1220,6 +1282,24 @@ class ReMoMatcher:
             return "medium"
         return "low"
 
+    @staticmethod
+    def _top_branch_gap(ranked_branches: List[Dict[str, Any]]) -> float:
+        if len(ranked_branches) > 1:
+            return float(ranked_branches[0]["score"]) - float(ranked_branches[1]["score"])
+        if ranked_branches:
+            return float(ranked_branches[0]["score"])
+        return 0.0
+
+    def _is_weak_shortlist(self, scored_entries: List[Dict[str, Any]], ranked_branches: List[Dict[str, Any]]) -> bool:
+        if not scored_entries:
+            return True
+        best_score = float(scored_entries[0]["score"])
+        if len(scored_entries) >= 3 or best_score >= 0.45:
+            return False
+        branch_scores_present = bool(ranked_branches and float(ranked_branches[0].get("score", 0.0)) > 0.0)
+        top_branch_gap = self._top_branch_gap(ranked_branches)
+        return (not branch_scores_present) or top_branch_gap < 0.05
+
     def _format_alternatives(self, scored_entries: List[Dict[str, Any]], skip_first: bool = False, limit: int = 3) -> str:
         if not scored_entries:
             return ""
@@ -1311,12 +1391,16 @@ class ReMoMatcher:
         branches: List[str],
         candidates: List[Dict[str, Any]],
         query_features: Dict[str, Any] | None = None,
+        query: str | None = None,
     ) -> List[str]:
         if not candidates:
             return []
-        chunk_size = 10
+        chunk_size = max(1, int(getattr(self, "gemini_chunk_size", 12)))
+        max_chunks = max(1, int(getattr(self, "gemini_max_chunks", 8)))
         chunks: List[str] = []
         for offset in range(0, len(candidates), chunk_size):
+            if len(chunks) >= max_chunks:
+                break
             chunk = candidates[offset : offset + chunk_size]
             lines = []
             if branches:
@@ -1332,8 +1416,17 @@ class ReMoMatcher:
                     f"Цена: {item.get('price', 'N/A')} | Категория: {item.get('branch_path', 'N/A')}"
                 )
             chunks.append("\n".join(lines))
-            if len(chunks) >= max(1, int(getattr(self, "max_context_chunks", 3))):
-                break
+        visible_candidates = min(len(candidates), chunk_size * max_chunks)
+        truncated_candidates = max(0, len(candidates) - visible_candidates)
+        logger.info(
+            "Gemini chunks prepared: query=%s chunk_size=%s max_chunks=%s chunks=%s visible_candidates=%s truncated=%s",
+            self._clean_text_value(query)[:120] if query is not None else "",
+            chunk_size,
+            max_chunks,
+            len(chunks),
+            visible_candidates,
+            truncated_candidates,
+        )
         return chunks
 
     def _parse_gemini_result(
@@ -1381,10 +1474,18 @@ class ReMoMatcher:
         candidates: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         if candidates:
-            context_chunks = self._build_narrow_candidate_chunks(branches or [], candidates, query_features)
+            context_chunks = self._build_narrow_candidate_chunks(
+                branches or [],
+                candidates,
+                query_features,
+                query=query,
+            )
             source = "local_tree+gemini"
         else:
-            context_chunks = self._build_context_chunks(query)
+            context_chunks = self._build_context_chunks(
+                query,
+                max_chunks=max(1, int(getattr(self, "gemini_max_chunks", 8))),
+            )
             source = "gemini"
 
         if not context_chunks:
@@ -1471,7 +1572,10 @@ class ReMoMatcher:
         branches: List[str],
         scored_entries: List[Dict[str, Any]],
     ) -> Optional[Dict[str, Any]]:
-        shortlist = [entry["item"] for entry in scored_entries[: min(48, len(scored_entries))]]
+        shortlist = [
+            entry["item"]
+            for entry in scored_entries[: min(int(getattr(self, "gemini_shortlist_limit", 96)), len(scored_entries))]
+        ]
         if not shortlist:
             return None
         try:
@@ -1548,13 +1652,16 @@ class ReMoMatcher:
             ranked_branches = self._rank_branches(query_features)
             query_features["ranked_branches"] = ranked_branches
             branch_paths = [entry["path"] for entry in ranked_branches if entry.get("path")]
-            branch_candidates = self._collect_branch_candidates(branch_paths)
+            local_recall_limit = int(getattr(self, "local_recall_pool", 300))
+            branch_candidates = self._collect_branch_candidates(branch_paths, limit=local_recall_limit)
             if not branch_candidates:
-                branch_candidates = self._select_candidates(query_text, limit=120)
+                branch_candidates = self._select_candidates(query_text, limit=local_recall_limit)
 
+            local_candidate_pool = branch_candidates
             scored_entries = self._score_candidates_locally(query_features, branch_candidates)
             if not scored_entries and getattr(self, "catalog_items", []):
-                scored_entries = self._score_candidates_locally(query_features, self._select_candidates(query_text, limit=60))
+                local_candidate_pool = self._select_candidates(query_text, limit=local_recall_limit)
+                scored_entries = self._score_candidates_locally(query_features, local_candidate_pool)
             if preferred_entry:
                 preferred_key = int(preferred_entry["item"].get("row_idx", -1))
                 seen_preferred = any(int(entry["item"].get("row_idx", -2)) == preferred_key for entry in scored_entries)
@@ -1601,19 +1708,37 @@ class ReMoMatcher:
                     alternatives=self._format_alternatives(scored_entries),
                 )
 
-            gemini_result = self._resolve_ambiguous_candidates_with_gemini(query_text, query_features, branch_paths, scored_entries)
-            if gemini_result:
-                return gemini_result
-
             best_entry = scored_entries[0]
             best_score = float(best_entry["score"])
             second_score = float(scored_entries[1]["score"]) if len(scored_entries) > 1 else 0.0
             margin = best_score - second_score
-            top_branch_gap = 0.0
-            if len(ranked_branches) > 1:
-                top_branch_gap = float(ranked_branches[0]["score"]) - float(ranked_branches[1]["score"])
-            elif ranked_branches:
-                top_branch_gap = float(ranked_branches[0]["score"])
+            top_branch_gap = self._top_branch_gap(ranked_branches)
+
+            shortlist_count = min(len(scored_entries), int(getattr(self, "gemini_shortlist_limit", 96)))
+            logger.info(
+                "Gemini shortlist prepared: query=%s local_pool=%s scored=%s shortlist=%s",
+                query_text[:120],
+                len(local_candidate_pool),
+                len(scored_entries),
+                shortlist_count,
+            )
+
+            weak_shortlist = self._is_weak_shortlist(scored_entries, ranked_branches)
+            gemini_result: Optional[Dict[str, Any]] = None
+            if weak_shortlist and bool(getattr(self, "skip_weak_shortlist", False)):
+                logger.info(
+                    "Gemini skipped for weak shortlist: query=%s reason=weak_shortlist",
+                    query_text[:120],
+                )
+            else:
+                gemini_result = self._resolve_ambiguous_candidates_with_gemini(
+                    query_text,
+                    query_features,
+                    branch_paths,
+                    scored_entries,
+                )
+            if gemini_result:
+                return gemini_result
 
             strong_local = (
                 best_score >= getattr(self, "local_confidence_threshold", 0.92)

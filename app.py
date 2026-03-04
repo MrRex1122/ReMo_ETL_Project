@@ -17,7 +17,16 @@ import io
 import json
 from cloudflare_r2_export import upload_file_to_r2
 from catalog_search import get_search_catalog_readiness, refresh_search_catalog
-from config import get_catalog_csv_path, get_upload_dir, get_matcher_cache_db_path
+from config import (
+    get_catalog_csv_path,
+    get_matcher_cache_db_path,
+    get_matcher_gemini_chunk_size,
+    get_matcher_gemini_max_chunks,
+    get_matcher_gemini_shortlist_limit,
+    get_matcher_local_recall_pool,
+    get_matcher_skip_weak_shortlist,
+    get_upload_dir,
+)
 from catalog_merge import get_catalog_readiness, get_merged_catalog_path, refresh_merged_catalog
 from catalog_snapshot import prepare_catalog_duplicate_report, prepare_catalog_snapshot
 from google_drive_sync import sync_drive_folder_csvs, upload_file_to_drive
@@ -92,10 +101,18 @@ if 'matcher_db_csv' not in st.session_state:
     st.session_state.matcher_db_csv = None
 if 'matcher_parallel_requests' not in st.session_state:
     st.session_state.matcher_parallel_requests = 1
-if 'matcher_catalog_sample_items' not in st.session_state:
-    st.session_state.matcher_catalog_sample_items = 1500
 if 'matcher_mode' not in st.session_state:
     st.session_state.matcher_mode = 'exact'
+if 'matcher_gemini_shortlist_limit' not in st.session_state:
+    st.session_state.matcher_gemini_shortlist_limit = get_matcher_gemini_shortlist_limit()
+if 'matcher_gemini_chunk_size' not in st.session_state:
+    st.session_state.matcher_gemini_chunk_size = get_matcher_gemini_chunk_size()
+if 'matcher_gemini_max_chunks' not in st.session_state:
+    st.session_state.matcher_gemini_max_chunks = get_matcher_gemini_max_chunks()
+if 'matcher_local_recall_pool' not in st.session_state:
+    st.session_state.matcher_local_recall_pool = get_matcher_local_recall_pool()
+if 'matcher_skip_weak_shortlist' not in st.session_state:
+    st.session_state.matcher_skip_weak_shortlist = get_matcher_skip_weak_shortlist()
 if 'matcher_settings_signature' not in st.session_state:
     st.session_state.matcher_settings_signature = None
 if 'show_results' not in st.session_state:
@@ -292,8 +309,12 @@ def get_matcher() -> ReMoMatcher:
     db_csv = str(_matcher_catalog_source_path())
     settings_signature = (
         int(st.session_state.get('matcher_parallel_requests', 1)),
-        int(st.session_state.get('matcher_catalog_sample_items', 500)),
         str(st.session_state.get('matcher_mode', 'exact')),
+        int(st.session_state.get('matcher_gemini_shortlist_limit', get_matcher_gemini_shortlist_limit())),
+        int(st.session_state.get('matcher_gemini_chunk_size', get_matcher_gemini_chunk_size())),
+        int(st.session_state.get('matcher_gemini_max_chunks', get_matcher_gemini_max_chunks())),
+        int(st.session_state.get('matcher_local_recall_pool', get_matcher_local_recall_pool())),
+        bool(st.session_state.get('matcher_skip_weak_shortlist', get_matcher_skip_weak_shortlist())),
     )
     needs_reinit = (
         st.session_state.matcher is None
@@ -337,8 +358,22 @@ def get_matcher() -> ReMoMatcher:
                     api_key,
                     db_csv,
                     parallel_requests=int(st.session_state.get('matcher_parallel_requests', 1)),
-                    catalog_sample_items=int(st.session_state.get('matcher_catalog_sample_items', 500)),
                     match_mode=str(st.session_state.get('matcher_mode', 'exact')),
+                    gemini_shortlist_limit=int(
+                        st.session_state.get('matcher_gemini_shortlist_limit', get_matcher_gemini_shortlist_limit())
+                    ),
+                    gemini_chunk_size=int(
+                        st.session_state.get('matcher_gemini_chunk_size', get_matcher_gemini_chunk_size())
+                    ),
+                    gemini_max_chunks=int(
+                        st.session_state.get('matcher_gemini_max_chunks', get_matcher_gemini_max_chunks())
+                    ),
+                    local_recall_pool=int(
+                        st.session_state.get('matcher_local_recall_pool', get_matcher_local_recall_pool())
+                    ),
+                    skip_weak_shortlist=bool(
+                        st.session_state.get('matcher_skip_weak_shortlist', get_matcher_skip_weak_shortlist())
+                    ),
                 )
                 st.session_state.matcher_db_csv = db_csv
                 st.session_state.matcher_settings_signature = settings_signature
@@ -1112,14 +1147,57 @@ def main():
             "Параллелизм установлен на максимум: одновременно отправляется число запросов, "
             "равное числу позиций в файле."
         )
-        st.slider(
-            "Размер сэмпла каталога для контекста",
-            min_value=100,
-            max_value=5000,
-            step=50,
-            key="matcher_catalog_sample_items",
-            help="Больше контекста обычно повышает точность сопоставления, но замедляет обработку и увеличивает токены.",
+        st.caption(
+            "Эти параметры управляют тем, сколько локальных кандидатов будет отобрано "
+            "и сколько из них увидит Gemini."
         )
+        st.slider(
+            "Кандидатов для Gemini",
+            min_value=24,
+            max_value=200,
+            step=12,
+            key="matcher_gemini_shortlist_limit",
+            help="Сколько лучших кандидатов максимум может увидеть Gemini для одной позиции.",
+        )
+        st.slider(
+            "Кандидатов в 1 запрос Gemini",
+            min_value=6,
+            max_value=20,
+            step=2,
+            key="matcher_gemini_chunk_size",
+            help="Сколько кандидатов включать в один вызов модели.",
+        )
+        st.slider(
+            "Максимум запросов Gemini на позицию",
+            min_value=1,
+            max_value=12,
+            step=1,
+            key="matcher_gemini_max_chunks",
+            help="Ограничение по числу последовательных Gemini-вызовов для одной строки.",
+        )
+        st.slider(
+            "Глубина локального поиска",
+            min_value=100,
+            max_value=1000,
+            step=50,
+            key="matcher_local_recall_pool",
+            help="Сколько кандидатов сначала отбирается локально из каталога до передачи лучших в Gemini.",
+        )
+        st.checkbox(
+            "Пропускать Gemini для слабого shortlist",
+            key="matcher_skip_weak_shortlist",
+            help="Если включено, слишком слабый локальный shortlist не отправляется в Gemini. По умолчанию выключено.",
+        )
+
+        shortlist_limit = int(st.session_state.get("matcher_gemini_shortlist_limit", get_matcher_gemini_shortlist_limit()))
+        chunk_size = int(st.session_state.get("matcher_gemini_chunk_size", get_matcher_gemini_chunk_size()))
+        max_chunks = int(st.session_state.get("matcher_gemini_max_chunks", get_matcher_gemini_max_chunks()))
+        st.caption(
+            f"Максимальный охват Gemini: до {shortlist_limit} кандидатов. "
+            f"Запросов на строку: до {max_chunks}. "
+            f"Кандидатов за один запрос: {chunk_size}."
+        )
+        st.warning("Рост этих значений увеличивает время обработки и стоимость вызовов Gemini.")
 
         mode_options = ["exact", "analog"]
         current_mode = str(st.session_state.get("matcher_mode", "exact"))

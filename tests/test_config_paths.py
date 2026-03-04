@@ -22,6 +22,11 @@ class ConfigPathTests(unittest.TestCase):
             "REMO_MATCHER_CONTEXT_CHUNK_SIZE",
             "REMO_MATCHER_MAX_CONTEXT_CHUNKS",
             "REMO_MATCHER_RETRIEVAL_CANDIDATES",
+            "REMO_MATCHER_GEMINI_SHORTLIST_LIMIT",
+            "REMO_MATCHER_GEMINI_CHUNK_SIZE",
+            "REMO_MATCHER_GEMINI_MAX_CHUNKS",
+            "REMO_MATCHER_LOCAL_RECALL_POOL",
+            "REMO_MATCHER_SKIP_WEAK_SHORTLIST",
         )}
 
     def tearDown(self):
@@ -119,6 +124,49 @@ class ConfigPathTests(unittest.TestCase):
         self.assertEqual(
             config.get_matcher_retrieval_candidates(),
             config.DEFAULT_MATCHER_RETRIEVAL_CANDIDATES,
+        )
+
+    def test_matcher_gemini_tuning_clamped(self):
+        os.environ["REMO_MATCHER_GEMINI_SHORTLIST_LIMIT"] = "999"
+        os.environ["REMO_MATCHER_GEMINI_CHUNK_SIZE"] = "2"
+        os.environ["REMO_MATCHER_GEMINI_MAX_CHUNKS"] = "99"
+        os.environ["REMO_MATCHER_LOCAL_RECALL_POOL"] = "5"
+        self.assertEqual(config.get_matcher_gemini_shortlist_limit(), 200)
+        self.assertEqual(config.get_matcher_gemini_chunk_size(), 6)
+        self.assertEqual(config.get_matcher_gemini_max_chunks(), 12)
+        self.assertEqual(config.get_matcher_local_recall_pool(), 100)
+
+    def test_matcher_gemini_tuning_fallback_on_invalid(self):
+        os.environ["REMO_MATCHER_GEMINI_SHORTLIST_LIMIT"] = "oops"
+        os.environ["REMO_MATCHER_GEMINI_CHUNK_SIZE"] = "oops"
+        os.environ["REMO_MATCHER_GEMINI_MAX_CHUNKS"] = "oops"
+        os.environ["REMO_MATCHER_LOCAL_RECALL_POOL"] = "oops"
+        self.assertEqual(
+            config.get_matcher_gemini_shortlist_limit(),
+            config.DEFAULT_MATCHER_GEMINI_SHORTLIST_LIMIT,
+        )
+        self.assertEqual(
+            config.get_matcher_gemini_chunk_size(),
+            config.DEFAULT_MATCHER_GEMINI_CHUNK_SIZE,
+        )
+        self.assertEqual(
+            config.get_matcher_gemini_max_chunks(),
+            config.DEFAULT_MATCHER_GEMINI_MAX_CHUNKS,
+        )
+        self.assertEqual(
+            config.get_matcher_local_recall_pool(),
+            config.DEFAULT_MATCHER_LOCAL_RECALL_POOL,
+        )
+
+    def test_matcher_skip_weak_shortlist_bool_parsing(self):
+        os.environ["REMO_MATCHER_SKIP_WEAK_SHORTLIST"] = "true"
+        self.assertTrue(config.get_matcher_skip_weak_shortlist())
+        os.environ["REMO_MATCHER_SKIP_WEAK_SHORTLIST"] = "off"
+        self.assertFalse(config.get_matcher_skip_weak_shortlist())
+        os.environ["REMO_MATCHER_SKIP_WEAK_SHORTLIST"] = "oops"
+        self.assertEqual(
+            config.get_matcher_skip_weak_shortlist(),
+            config.DEFAULT_MATCHER_SKIP_WEAK_SHORTLIST,
         )
 
     def test_matcher_models_parsed_from_env(self):
