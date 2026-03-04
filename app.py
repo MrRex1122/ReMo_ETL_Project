@@ -4,6 +4,7 @@ Streamlit интерфейс для семантического сопоста�
 """
 
 import streamlit as st
+import streamlit.components.v1 as components
 from streamlit.errors import StreamlitSecretNotFoundError
 import pandas as pd
 import os
@@ -72,6 +73,7 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+ACTIVE_RUN_AUTOREFRESH_MS = 5000
 
 # ============ КОНФИГУРАЦИЯ ============
 st.set_page_config(
@@ -756,6 +758,45 @@ def _load_run_progress_safe(run_id: str) -> dict[str, Any] | None:
     except Exception as exc:
         logger.warning("⚠️ Failed to load run progress for %s: %s", run_id, exc)
         return None
+
+
+def _schedule_active_run_autorefresh(run_id: str | None, *, interval_ms: int = ACTIVE_RUN_AUTOREFRESH_MS) -> None:
+    if run_id:
+        script = f"""
+        <script>
+        const root = window.parent;
+        const key = "run:{run_id}";
+        if (!root.__remoAutoRefreshTimers) {{
+          root.__remoAutoRefreshTimers = {{}};
+        }}
+        Object.keys(root.__remoAutoRefreshTimers).forEach((existingKey) => {{
+          if (existingKey !== key) {{
+            clearTimeout(root.__remoAutoRefreshTimers[existingKey]);
+            delete root.__remoAutoRefreshTimers[existingKey];
+          }}
+        }});
+        if (root.__remoAutoRefreshTimers[key]) {{
+          clearTimeout(root.__remoAutoRefreshTimers[key]);
+        }}
+        root.__remoAutoRefreshTimers[key] = setTimeout(() => {{
+          delete root.__remoAutoRefreshTimers[key];
+          root.location.reload();
+        }}, {int(interval_ms)});
+        </script>
+        """
+    else:
+        script = """
+        <script>
+        const root = window.parent;
+        if (root.__remoAutoRefreshTimers) {
+          Object.keys(root.__remoAutoRefreshTimers).forEach((existingKey) => {
+            clearTimeout(root.__remoAutoRefreshTimers[existingKey]);
+            delete root.__remoAutoRefreshTimers[existingKey];
+          });
+        }
+        </script>
+        """
+    components.html(script, height=0, width=0)
 
 
 def _load_run_results_into_session(run) -> tuple[pd.DataFrame, dict[str, Any]]:
@@ -1490,6 +1531,10 @@ def main():
                 "failed": "Ошибка",
                 "interrupted": "Прерван",
             }
+            if run_for_display.status in ("queued", "running"):
+                _schedule_active_run_autorefresh(run_for_display.run_id)
+            else:
+                _schedule_active_run_autorefresh(None)
             st.subheader("Текущий прогон")
             st.write(f"**ID:** `{run_for_display.run_id}`")
             st.write(f"**Файл:** {run_for_display.input_filename}")
@@ -1529,6 +1574,8 @@ def main():
                     st.caption(f"Прогресс: {int(current)} / {int(total)}")
                 if progress_message:
                     st.caption(progress_message)
+                if run_for_display.status in ("queued", "running"):
+                    st.caption("Страница обновляется автоматически каждые 5 секунд.")
             if run_for_display.status == "completed":
                 st.caption(
                     "Статистика: "
@@ -1555,6 +1602,8 @@ def main():
                     st.session_state.active_run_status = None
                     _clear_loaded_run_cache()
                     st.success("Выбор активного прогона очищен")
+        else:
+            _schedule_active_run_autorefresh(None)
         
         uploaded_file = st.file_uploader(
             "Выберите Excel файл коммерческого предложения",

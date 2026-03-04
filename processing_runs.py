@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import threading
 import uuid
@@ -15,6 +16,8 @@ from config import get_matcher_cache_db_path, get_upload_dir
 
 RUN_STATUS = Literal["queued", "running", "completed", "failed", "interrupted"]
 ACTIVE_STATUSES = ("queued", "running")
+
+logger = logging.getLogger(__name__)
 
 _ACTIVE_RUN_THREADS: dict[str, threading.Thread] = {}
 _ACTIVE_RUN_THREADS_LOCK = threading.Lock()
@@ -452,6 +455,15 @@ def write_processing_run_progress(
     }
     _write_json_atomic(artifacts.progress_json_path, payload)
     touch_processing_run(run_id)
+    logger.info(
+        "📈 Run progress updated: run=%s stage=%s current=%s total=%s percent=%s message=%s",
+        run_id,
+        payload["stage"],
+        payload["current"],
+        payload["total"],
+        payload["percent"],
+        payload["message"],
+    )
     return artifacts.progress_json_path
 
 
