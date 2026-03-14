@@ -21,7 +21,7 @@ from matcher import MATCH_MODE_EXACT, ReMoMatcher
 
 logger = logging.getLogger(__name__)
 
-CATALOG_COVERAGE_AUDIT_VERSION = 2
+CATALOG_COVERAGE_AUDIT_VERSION = 3
 
 TARGET_FAMILY_GROUPS = {
     "patch_panel": "patch_panel",
@@ -65,6 +65,7 @@ class CoverageAuditSummary:
     catalog_missing_family: int
     catalog_has_family_but_no_compatible_specs: int
     catalog_has_compatible_candidates: int
+    gap_reason_counts: dict[str, int]
 
 
 @dataclass(frozen=True)
@@ -74,6 +75,9 @@ class CoverageAuditRow:
     query_family: str
     query_family_group: str
     diagnosis: str
+    gap_reason_code: str
+    gap_reason_counts: dict[str, int]
+    top_gap_reasons: list[dict[str, Any]]
     current_resolution_source: str
     current_compatibility_status: str
     same_family_candidates_count: int
@@ -94,6 +98,8 @@ class _QueryAuditContext:
     compatible_candidates_count: int = 0
     compatible_examples: list[tuple[float, dict[str, str]]] = field(default_factory=list)
     related_examples: list[tuple[float, dict[str, str]]] = field(default_factory=list)
+    gap_reason_counts: Counter[str] = field(default_factory=Counter)
+    gap_reason_examples: dict[str, tuple[float, dict[str, str]]] = field(default_factory=dict)
 
 
 def _safe_catalog_mtime(path: Path) -> float | None:
@@ -276,6 +282,63 @@ def _store_example(
     del pool[max_items:]
 
 
+def _gap_reason_from_incompatibility(reason: str) -> str:
+    normalized = clean_text_value(reason)
+    if not normalized:
+        return "other_spec_mismatch"
+    if normalized == "catalog_missing_family":
+        return "missing_family"
+    if "category" in normalized:
+        return "category_mismatch"
+    if "shield" in normalized:
+        return "shielding_mismatch"
+    if "connector" in normalized:
+        return "connector_mismatch"
+    if "component" in normalized:
+        return "component_kind_mismatch"
+    if "installation" in normalized or normalized == "floor_box_vs_power_item":
+        return "installation_kind_mismatch"
+    if "port_count" in normalized:
+        return "port_count_mismatch"
+    if "fiber" in normalized or "optical_marker" in normalized:
+        return "fiber_mode_mismatch"
+    if "environment" in normalized:
+        return "environment_mismatch"
+    if "rack" in normalized or "form_factor" in normalized or "airflow" in normalized:
+        return "rack_form_factor_mismatch"
+    return "other_spec_mismatch"
+
+
+def _build_gap_reason_details(context: _QueryAuditContext) -> tuple[str, dict[str, int], list[dict[str, Any]]]:
+    if context.same_family_candidates_count == 0:
+        return "missing_family", {"missing_family": 1}, []
+
+    if not context.gap_reason_counts:
+        return "other_spec_mismatch", {}, []
+
+    sorted_reasons = sorted(
+        context.gap_reason_counts.items(),
+        key=lambda item: (-int(item[1]), str(item[0])),
+    )
+    top_count = int(sorted_reasons[0][1])
+    top_reason_codes = [reason_code for reason_code, count in sorted_reasons if int(count) == top_count]
+    primary_reason = top_reason_codes[0] if len(top_reason_codes) == 1 else "multiple_spec_mismatches"
+
+    top_gap_reasons: list[dict[str, Any]] = []
+    for reason_code, count in sorted_reasons[:3]:
+        example_entry = context.gap_reason_examples.get(reason_code)
+        example = dict(example_entry[1]) if example_entry else {}
+        top_gap_reasons.append(
+            {
+                "reason_code": reason_code,
+                "count": int(count),
+                "example": example,
+            }
+        )
+
+    return primary_reason, {reason_code: int(count) for reason_code, count in sorted_reasons}, top_gap_reasons
+
+
 def _iter_catalog_rows(
     catalog_source_path: Path,
     *,
@@ -346,12 +409,20 @@ def _build_audit_row(
 
     example_pool = context.compatible_examples if context.compatible_examples else context.related_examples
     examples = [example for _, example in example_pool[:example_limit]]
+    gap_reason_code, gap_reason_counts, top_gap_reasons = _build_gap_reason_details(context)
+    if diagnosis == "catalog_has_compatible_candidates":
+        gap_reason_code = ""
+        gap_reason_counts = {}
+        top_gap_reasons = []
     return CoverageAuditRow(
         run_row_number=context.run_row_number,
         query_text=context.query_text,
         query_family=context.query_family,
         query_family_group=context.query_family_group or "",
         diagnosis=diagnosis,
+        gap_reason_code=gap_reason_code,
+        gap_reason_counts=gap_reason_counts,
+        top_gap_reasons=top_gap_reasons,
         current_resolution_source=context.current_resolution_source,
         current_compatibility_status=context.current_compatibility_status,
         same_family_candidates_count=context.same_family_candidates_count,
@@ -363,6 +434,11 @@ def _build_audit_row(
 def _build_summary(rows: list[CoverageAuditRow]) -> tuple[CoverageAuditSummary, dict[str, dict[str, int]]]:
     relevant_rows = [row for row in rows if row.diagnosis != "non_target_family"]
     diagnosis_counter = Counter(row.diagnosis for row in relevant_rows)
+    gap_reason_counter = Counter(
+        row.gap_reason_code
+        for row in relevant_rows
+        if row.diagnosis in {"catalog_missing_family", "catalog_has_family_but_no_compatible_specs"} and row.gap_reason_code
+    )
     family_breakdown: dict[str, dict[str, int]] = {}
     for row in relevant_rows:
         family_key = row.query_family_group or row.query_family
@@ -387,6 +463,7 @@ def _build_summary(rows: list[CoverageAuditRow]) -> tuple[CoverageAuditSummary, 
             0,
         ),
         catalog_has_compatible_candidates=diagnosis_counter.get("catalog_has_compatible_candidates", 0),
+        gap_reason_counts=dict(sorted(gap_reason_counter.items())),
     )
     return summary, family_breakdown
 
@@ -446,6 +523,11 @@ def build_catalog_coverage_audit(
                             max_items=max(3, example_limit),
                         )
                     else:
+                        gap_reason_code = _gap_reason_from_incompatibility(incompatibility_reason)
+                        context.gap_reason_counts[gap_reason_code] += 1
+                        current_gap_example = context.gap_reason_examples.get(gap_reason_code)
+                        if current_gap_example is None or score > float(current_gap_example[0]):
+                            context.gap_reason_examples[gap_reason_code] = (score, dict(example))
                         _store_example(
                             context.related_examples,
                             score=score,
@@ -502,6 +584,22 @@ def prepare_catalog_coverage_audit_table(payload: dict[str, Any]) -> pd.DataFram
                 if reason:
                     parts.append(reason)
                 example_strings.append(" | ".join(parts))
+        gap_reason_strings: list[str] = []
+        top_gap_reasons = row.get("top_gap_reasons", [])
+        if isinstance(top_gap_reasons, list):
+            for gap_reason in top_gap_reasons:
+                if not isinstance(gap_reason, dict):
+                    continue
+                reason_code = clean_text_value(gap_reason.get("reason_code"))
+                count = int(gap_reason.get("count", 0) or 0)
+                example = gap_reason.get("example") or {}
+                example_name = clean_text_value(example.get("name")) if isinstance(example, dict) else ""
+                parts = [reason_code]
+                if count:
+                    parts.append(str(count))
+                if example_name:
+                    parts.append(example_name)
+                gap_reason_strings.append(" | ".join(parts))
         prepared_rows.append(
             {
                 "Строка": row.get("run_row_number"),
@@ -512,10 +610,12 @@ def prepare_catalog_coverage_audit_table(payload: dict[str, Any]) -> pd.DataFram
                     clean_text_value(row.get("query_family_group")),
                 ),
                 "Диагноз": row.get("diagnosis"),
+                "Gap reason": row.get("gap_reason_code"),
                 "Источник решения": row.get("current_resolution_source"),
                 "Совместимость решения": row.get("current_compatibility_status"),
                 "Кандидатов того же семейства": row.get("same_family_candidates_count"),
                 "Совместимых кандидатов": row.get("compatible_candidates_count"),
+                "Top mismatch reasons": "\n".join(gap_reason_strings),
                 "Примеры кандидатов": "\n".join(example_strings),
             }
         )
@@ -542,3 +642,19 @@ def prepare_catalog_coverage_family_table(payload: dict[str, Any]) -> pd.DataFra
     if not rows:
         return pd.DataFrame()
     return pd.DataFrame(rows).sort_values(by=["Строк", "Семейство"], ascending=[False, True], ignore_index=True)
+
+
+def prepare_catalog_gap_reason_table(payload: dict[str, Any]) -> pd.DataFrame:
+    summary = payload.get("summary", {})
+    if not isinstance(summary, dict):
+        return pd.DataFrame()
+    gap_reason_counts = summary.get("gap_reason_counts", {})
+    if not isinstance(gap_reason_counts, dict):
+        return pd.DataFrame()
+    rows = [
+        {"Gap reason": str(reason_code), "Строк": int(count)}
+        for reason_code, count in gap_reason_counts.items()
+    ]
+    if not rows:
+        return pd.DataFrame()
+    return pd.DataFrame(rows).sort_values(by=["Строк", "Gap reason"], ascending=[False, True], ignore_index=True)

@@ -9,6 +9,7 @@ from catalog_coverage_audit import (
     build_catalog_coverage_audit,
     is_catalog_coverage_audit_fresh,
     prepare_catalog_coverage_audit_table,
+    prepare_catalog_gap_reason_table,
 )
 from catalog_schema import CANONICAL_ARTICLE_COLUMN, CANONICAL_NAME_COLUMN
 
@@ -119,6 +120,7 @@ class CatalogCoverageAuditTests(unittest.TestCase):
             row = self._first_row(payload)
             self.assertEqual(row["diagnosis"], "catalog_missing_family")
             self.assertEqual(row["same_family_candidates_count"], 0)
+            self.assertEqual(row["gap_reason_code"], "missing_family")
 
     def test_iec_power_cable_is_included_as_target_family(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -178,6 +180,42 @@ class CatalogCoverageAuditTests(unittest.TestCase):
             self.assertEqual(row["diagnosis"], "catalog_has_family_but_no_compatible_specs")
             self.assertGreaterEqual(row["same_family_candidates_count"], 1)
             self.assertEqual(row["compatible_candidates_count"], 0)
+            self.assertEqual(row["gap_reason_code"], "other_spec_mismatch")
+
+    def test_catalog_gap_reason_uses_multiple_spec_mismatches_when_top_reasons_tie(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            catalog_path = Path(tmp_dir) / "catalog.csv"
+            _write_catalog_csv(
+                catalog_path,
+                [
+                    {
+                        CANONICAL_NAME_COLUMN: "Патч-панель 1U категории 5E UTP 24 порта",
+                        CANONICAL_ARTICLE_COLUMN: "PP-C5E",
+                        "Название класса": "Патч-панели",
+                        "Тип изделия": "Патч-панель",
+                        "Тип исполнения кабельного изделия": "",
+                    },
+                    {
+                        CANONICAL_NAME_COLUMN: "Патч-панель 1U категории 6 UTP 48 портов",
+                        CANONICAL_ARTICLE_COLUMN: "PP-48",
+                        "Название класса": "Патч-панели",
+                        "Тип изделия": "Патч-панель",
+                        "Тип исполнения кабельного изделия": "",
+                    },
+                ],
+            )
+
+            payload = build_catalog_coverage_audit(
+                _build_result_df("Панель коммутационная неэкранированная 24 порта, категория 6"),
+                run_id="run-multi-gap",
+                catalog_source_path=catalog_path,
+                catalog_source_kind="merged",
+            )
+
+            row = self._first_row(payload)
+            self.assertEqual(row["diagnosis"], "catalog_has_family_but_no_compatible_specs")
+            self.assertEqual(row["gap_reason_code"], "multiple_spec_mismatches")
+            self.assertTrue(row["top_gap_reasons"])
 
     def test_ats_audit_does_not_report_false_compatible_candidates(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -319,8 +357,12 @@ class CatalogCoverageAuditTests(unittest.TestCase):
                 )
             )
             detail_table = prepare_catalog_coverage_audit_table(payload)
+            gap_reason_table = prepare_catalog_gap_reason_table(payload)
             self.assertFalse(detail_table.empty)
+            self.assertIn("Gap reason", detail_table.columns)
+            self.assertIn("Top mismatch reasons", detail_table.columns)
             self.assertIn("Примеры кандидатов", detail_table.columns)
+            self.assertIn("Gap reason", gap_reason_table.columns if not gap_reason_table.empty else ["Gap reason"])
 
     def test_airflow_audit_does_not_count_generic_blank_panels_as_same_family(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

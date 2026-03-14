@@ -7,6 +7,7 @@ from match_diagnostics import (
     enrich_match_diagnostics_payload,
     is_match_diagnostics_fresh,
     prepare_match_diagnostics_reason_table,
+    prepare_match_diagnostics_root_cause_table,
     prepare_match_diagnostics_stage_table,
     prepare_match_diagnostics_table,
     reconstruct_match_diagnostics,
@@ -14,7 +15,7 @@ from match_diagnostics import (
 
 
 class MatchDiagnosticsTests(unittest.TestCase):
-    def test_runtime_payload_builds_summary(self):
+    def test_runtime_payload_builds_pipeline_and_root_cause_summary(self):
         payload = build_match_diagnostics_payload(
             [
                 {
@@ -40,7 +41,8 @@ class MatchDiagnosticsTests(unittest.TestCase):
 
         self.assertEqual(payload["summary"]["rows_total"], 1)
         self.assertEqual(payload["summary"]["rows_unresolved"], 1)
-        self.assertEqual(payload["summary"]["stage_counts"]["compatibility_filter"], 1)
+        self.assertEqual(payload["summary"]["pipeline_stage_counts"]["compatibility_filter"], 1)
+        self.assertEqual(payload["summary"]["root_cause_class_counts"]["matcher_retrieval_or_ranking"], 1)
         self.assertTrue(is_match_diagnostics_fresh(payload, run_id="run-1"))
 
     def test_reconstructed_payload_marks_section_like_rows_as_query_input(self):
@@ -60,10 +62,11 @@ class MatchDiagnosticsTests(unittest.TestCase):
         payload = reconstruct_match_diagnostics(df, run_id="run-1")
         row = payload["rows"][0]
         self.assertTrue(payload["reconstructed"])
-        self.assertEqual(row["stage_of_failure"], "query_input")
-        self.assertEqual(row["reason_code"], "section_row_detected")
+        self.assertEqual(row["pipeline_stage"], "query_input")
+        self.assertEqual(row["pipeline_reason_code"], "section_row_detected")
+        self.assertEqual(row["root_cause_code"], "section_row_detected")
 
-    def test_coverage_audit_enrichment_promotes_catalog_gap(self):
+    def test_coverage_audit_enrichment_keeps_pipeline_stage_and_sets_catalog_gap_root_cause(self):
         diagnostics = build_match_diagnostics_payload(
             [
                 {
@@ -91,6 +94,7 @@ class MatchDiagnosticsTests(unittest.TestCase):
                 {
                     "run_row_number": 5,
                     "diagnosis": "catalog_missing_family",
+                    "gap_reason_code": "missing_family",
                     "same_family_candidates_count": 0,
                     "compatible_candidates_count": 0,
                     "candidate_examples": [],
@@ -100,11 +104,12 @@ class MatchDiagnosticsTests(unittest.TestCase):
 
         enriched = enrich_match_diagnostics_payload(diagnostics, coverage_audit_payload=coverage_audit)
         row = enriched["rows"][0]
-        self.assertEqual(row["stage_of_failure"], "catalog_gap")
-        self.assertEqual(row["reason_class"], "catalog_gap")
+        self.assertEqual(row["pipeline_stage"], "local_recall")
+        self.assertEqual(row["root_cause_class"], "catalog_gap")
+        self.assertEqual(row["root_cause_code"], "missing_family")
         self.assertEqual(row["catalog_audit_diagnosis"], "catalog_missing_family")
 
-    def test_coverage_audit_enrichment_keeps_matcher_class_when_compatible_candidates_exist(self):
+    def test_coverage_audit_enrichment_marks_retrieval_when_compatible_candidates_exist(self):
         diagnostics = build_match_diagnostics_payload(
             [
                 {
@@ -141,7 +146,9 @@ class MatchDiagnosticsTests(unittest.TestCase):
 
         enriched = enrich_match_diagnostics_payload(diagnostics, coverage_audit_payload=coverage_audit)
         row = enriched["rows"][0]
-        self.assertEqual(row["reason_class"], "matcher_retrieval_or_ranking")
+        self.assertEqual(row["pipeline_stage"], "local_recall")
+        self.assertEqual(row["root_cause_class"], "matcher_retrieval_or_ranking")
+        self.assertEqual(row["coverage_scope"], "audited_family")
         self.assertEqual(row["catalog_audit_diagnosis"], "catalog_has_compatible_candidates")
 
     def test_reconstructed_unresolved_without_reason_defaults_to_no_compatible_candidates(self):
@@ -160,10 +167,10 @@ class MatchDiagnosticsTests(unittest.TestCase):
 
         payload = reconstruct_match_diagnostics(df, run_id="run-1")
         row = payload["rows"][0]
-        self.assertEqual(row["stage_of_failure"], "local_recall")
-        self.assertEqual(row["reason_code"], "no_compatible_candidates")
+        self.assertEqual(row["pipeline_stage"], "local_recall")
+        self.assertEqual(row["pipeline_reason_code"], "no_compatible_candidates")
 
-    def test_coverage_audit_reclassifies_gemini_rejection_without_compatible_candidates_as_catalog_gap(self):
+    def test_coverage_audit_reclassifies_gemini_rejection_with_no_compatible_specs(self):
         diagnostics = build_match_diagnostics_payload(
             [
                 {
@@ -191,6 +198,7 @@ class MatchDiagnosticsTests(unittest.TestCase):
                 {
                     "run_row_number": 15,
                     "diagnosis": "catalog_has_family_but_no_compatible_specs",
+                    "gap_reason_code": "connector_mismatch",
                     "same_family_candidates_count": 33,
                     "compatible_candidates_count": 0,
                     "candidate_examples": [],
@@ -200,9 +208,46 @@ class MatchDiagnosticsTests(unittest.TestCase):
 
         enriched = enrich_match_diagnostics_payload(diagnostics, coverage_audit_payload=coverage_audit)
         row = enriched["rows"][0]
-        self.assertEqual(row["stage_of_failure"], "catalog_gap")
-        self.assertEqual(row["reason_class"], "catalog_gap")
+        self.assertEqual(row["pipeline_stage"], "gemini_selection")
+        self.assertEqual(row["root_cause_class"], "catalog_gap")
+        self.assertEqual(row["root_cause_code"], "connector_mismatch")
         self.assertEqual(row["catalog_audit_diagnosis"], "catalog_has_family_but_no_compatible_specs")
+
+    def test_non_target_family_is_marked_as_not_audited(self):
+        diagnostics = build_match_diagnostics_payload(
+            [
+                {
+                    "run_row_number": 3,
+                    "query_text": "Шкафы телекоммуникационные",
+                    "query_family": "rack",
+                    "resolution_source": "unresolved",
+                    "compatibility_status": "unresolved_no_compatible_candidates",
+                    "stage_of_failure": "local_recall",
+                    "reason_code": "no_compatible_candidates",
+                    "pipeline_counts": {},
+                    "candidate_snapshots": {},
+                    "gemini": {"attempted": False},
+                    "trace_steps": [],
+                }
+            ],
+            run_id="run-1",
+        )
+        coverage_audit = {
+            "rows": [
+                {
+                    "run_row_number": 3,
+                    "diagnosis": "non_target_family",
+                    "same_family_candidates_count": 0,
+                    "compatible_candidates_count": 0,
+                }
+            ]
+        }
+
+        enriched = enrich_match_diagnostics_payload(diagnostics, coverage_audit_payload=coverage_audit)
+        row = enriched["rows"][0]
+        self.assertEqual(row["coverage_scope"], "non_target_family")
+        self.assertEqual(row["root_cause_class"], "not_audited_family")
+        self.assertEqual(row["root_cause_code"], "non_target_family")
 
     def test_prepare_tables_return_expected_columns(self):
         payload = build_match_diagnostics_payload(
@@ -232,11 +277,14 @@ class MatchDiagnosticsTests(unittest.TestCase):
 
         detail = prepare_match_diagnostics_table(payload)
         stages = prepare_match_diagnostics_stage_table(payload)
+        root_causes = prepare_match_diagnostics_root_cause_table(payload)
         reasons = prepare_match_diagnostics_reason_table(payload)
-        self.assertIn("Этап отказа", detail.columns)
-        self.assertIn("Код причины", detail.columns)
-        self.assertIn("Этап отказа", stages.columns)
-        self.assertIn("Код причины", reasons.columns)
+        self.assertIn("Pipeline stage", detail.columns)
+        self.assertIn("Root cause code", detail.columns)
+        self.assertIn("Coverage scope", detail.columns)
+        self.assertIn("Pipeline stage", stages.columns)
+        self.assertIn("Root cause class", root_causes.columns)
+        self.assertIn("Root cause code", reasons.columns)
 
 
 if __name__ == "__main__":

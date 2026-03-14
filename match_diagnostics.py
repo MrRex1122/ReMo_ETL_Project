@@ -6,7 +6,7 @@ from typing import Any
 
 import pandas as pd
 
-MATCH_DIAGNOSTICS_VERSION = 2
+MATCH_DIAGNOSTICS_VERSION = 3
 MISSING_POSITION_TEXT = "Позиция отсутствует"
 
 HEADER_QUERY_VALUES = {
@@ -43,8 +43,24 @@ REASON_CLASS_LABELS = {
     "matcher_retrieval_or_ranking": "retrieval/ranking",
     "gemini_or_decision_policy": "Gemini/policy",
     "input_or_query_shape": "input/query shape",
+    "not_audited_family": "not audited family",
     "runtime_error": "runtime error",
     "resolved": "resolved",
+}
+
+AUDITED_QUERY_FAMILIES = {
+    "patch_panel",
+    "patch_cord",
+    "keystone",
+    "rj45_connector",
+    "rj45_outlet",
+    "bulk_twisted_pair",
+    "iec_power_cable",
+    "optical_cross",
+    "optical_patch_cord",
+    "ats_sts",
+    "airflow_blanking_panel",
+    "rack_accessory_strict",
 }
 
 
@@ -83,6 +99,43 @@ def infer_reason_class(stage_of_failure: str, reason_code: str) -> str:
     if stage == "runtime_error" or code == "runtime_exception":
         return "runtime_error"
     return "matcher_retrieval_or_ranking"
+
+
+def _infer_coverage_scope(query_family: str) -> str:
+    normalized_family = _clean_text_value(query_family)
+    if normalized_family in AUDITED_QUERY_FAMILIES:
+        return "audited_family"
+    return "non_target_family"
+
+
+def _build_canonical_fields(row: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(row)
+    pipeline_stage = _clean_text_value(normalized.get("pipeline_stage")) or _clean_text_value(normalized.get("stage_of_failure")) or "runtime_error"
+    pipeline_reason_code = _normalize_reason_code(
+        normalized.get("pipeline_reason_code") or normalized.get("reason_code")
+    )
+    root_cause_class = _clean_text_value(normalized.get("root_cause_class")) or _clean_text_value(normalized.get("reason_class"))
+    if not root_cause_class:
+        root_cause_class = infer_reason_class(pipeline_stage, pipeline_reason_code)
+    root_cause_code = _normalize_reason_code(
+        normalized.get("root_cause_code") or normalized.get("reason_code") or pipeline_reason_code
+    )
+    coverage_scope = _clean_text_value(normalized.get("coverage_scope")) or _infer_coverage_scope(
+        _clean_text_value(normalized.get("query_family"))
+    )
+
+    normalized["pipeline_stage"] = pipeline_stage
+    normalized["pipeline_reason_code"] = pipeline_reason_code
+    normalized["root_cause_class"] = root_cause_class
+    normalized["root_cause_code"] = root_cause_code
+    normalized["coverage_scope"] = coverage_scope
+    normalized["catalog_gap_reason_code"] = _clean_text_value(normalized.get("catalog_gap_reason_code"))
+
+    # Backward-compatible aliases used by older UI/exports.
+    normalized["stage_of_failure"] = pipeline_stage
+    normalized["reason_code"] = root_cause_code
+    normalized["reason_class"] = root_cause_class
+    return normalized
 
 
 def is_match_diagnostics_fresh(payload: dict[str, Any] | None, *, run_id: str) -> bool:
@@ -126,13 +179,23 @@ def _row_display_examples(candidate_snapshots: dict[str, Any], coverage_row: dic
 
 
 def _enrich_row_with_coverage_audit(row: dict[str, Any], coverage_row: dict[str, Any] | None) -> dict[str, Any]:
-    enriched = dict(row)
+    enriched = _build_canonical_fields(row)
     if not isinstance(coverage_row, dict):
         enriched.setdefault("catalog_audit_diagnosis", "")
+        if (
+            enriched.get("coverage_scope") == "non_target_family"
+            and enriched.get("pipeline_stage") not in {"resolved", "query_input", "query_classification", "runtime_error"}
+        ):
+            enriched["root_cause_class"] = "not_audited_family"
+            enriched["root_cause_code"] = "non_target_family"
+            enriched["reason_class"] = enriched["root_cause_class"]
+            enriched["reason_code"] = enriched["root_cause_code"]
         return enriched
 
     diagnosis = _clean_text_value(coverage_row.get("diagnosis"))
     enriched["catalog_audit_diagnosis"] = diagnosis
+    enriched["catalog_gap_reason_code"] = _clean_text_value(coverage_row.get("gap_reason_code"))
+    enriched["coverage_scope"] = "non_target_family" if diagnosis == "non_target_family" else "audited_family"
 
     pipeline_counts = dict(enriched.get("pipeline_counts") or {})
     if "same_family_count" not in pipeline_counts:
@@ -141,44 +204,59 @@ def _enrich_row_with_coverage_audit(row: dict[str, Any], coverage_row: dict[str,
         pipeline_counts["compatible_count"] = _safe_int(coverage_row.get("compatible_candidates_count"))
     enriched["pipeline_counts"] = pipeline_counts
 
-    stage = _clean_text_value(enriched.get("stage_of_failure"))
-    reason_code = _normalize_reason_code(enriched.get("reason_code"))
+    pipeline_stage = _clean_text_value(enriched.get("pipeline_stage"))
+    pipeline_reason_code = _normalize_reason_code(enriched.get("pipeline_reason_code"))
     same_family_count = _safe_int(pipeline_counts.get("same_family_count"))
     compatible_count = _safe_int(pipeline_counts.get("compatible_count"))
 
-    if stage not in {"resolved", "query_input", "runtime_error"} and reason_code == "resolved":
-        if stage in {"gemini_selection", "fallback_policy"}:
-            enriched["reason_code"] = "gemini_returned_no_valid_candidate"
+    if pipeline_stage not in {"resolved", "query_input", "runtime_error"} and pipeline_reason_code == "resolved":
+        if pipeline_stage in {"gemini_selection", "fallback_policy"}:
+            pipeline_reason_code = "gemini_returned_no_valid_candidate"
         else:
-            enriched["reason_code"] = "no_compatible_candidates"
-        reason_code = _normalize_reason_code(enriched.get("reason_code"))
+            pipeline_reason_code = "no_compatible_candidates"
+        enriched["pipeline_reason_code"] = pipeline_reason_code
 
-    if (
+    if diagnosis == "non_target_family":
+        if pipeline_stage == "resolved":
+            enriched["root_cause_class"] = "resolved"
+            enriched["root_cause_code"] = "resolved"
+        else:
+            enriched["root_cause_class"] = "not_audited_family"
+            enriched["root_cause_code"] = "non_target_family"
+    elif (
         diagnosis in {"catalog_missing_family", "catalog_has_family_but_no_compatible_specs"}
-        and stage != "resolved"
+        and pipeline_stage != "resolved"
         and compatible_count <= 0
     ):
-        enriched["stage_of_failure"] = "catalog_gap"
-        enriched["reason_class"] = "catalog_gap"
+        enriched["root_cause_class"] = "catalog_gap"
         if diagnosis == "catalog_missing_family" and (
-            reason_code in GENERIC_CATALOG_GAP_CODES or same_family_count <= 0
+            pipeline_reason_code in GENERIC_CATALOG_GAP_CODES or same_family_count <= 0
         ):
-            enriched["reason_code"] = "catalog_missing_family"
+            enriched["root_cause_code"] = "missing_family"
         elif diagnosis == "catalog_has_family_but_no_compatible_specs" and (
-            reason_code in GENERIC_CATALOG_GAP_CODES or compatible_count <= 0
+            pipeline_reason_code in GENERIC_CATALOG_GAP_CODES or compatible_count <= 0
         ):
-            enriched["reason_code"] = "catalog_has_family_but_no_compatible_specs"
-    elif diagnosis == "catalog_has_compatible_candidates" and stage in EARLY_FAILURE_STAGES:
-        enriched["reason_class"] = "matcher_retrieval_or_ranking"
-        if reason_code == "resolved":
+            enriched["root_cause_code"] = _clean_text_value(coverage_row.get("gap_reason_code")) or "other_spec_mismatch"
+    elif diagnosis == "catalog_has_compatible_candidates" and pipeline_stage in EARLY_FAILURE_STAGES:
+        enriched["root_cause_class"] = "matcher_retrieval_or_ranking"
+        if _normalize_reason_code(enriched.get("root_cause_code")) == "resolved":
             if same_family_count <= 0:
-                enriched["reason_code"] = "compatible_candidates_exist_but_not_retrieved"
+                enriched["root_cause_code"] = "compatible_candidates_exist_but_not_retrieved"
             elif compatible_count <= 0:
-                enriched["reason_code"] = "compatible_candidates_retrieved_but_filtered_out"
+                enriched["root_cause_code"] = "compatible_candidates_retrieved_but_filtered_out"
+    elif pipeline_stage in {"gemini_selection", "fallback_policy"} and compatible_count > 0 and diagnosis != "non_target_family":
+        enriched["root_cause_class"] = "gemini_or_decision_policy"
+        enriched["root_cause_code"] = pipeline_reason_code
+    elif enriched.get("coverage_scope") == "non_target_family" and pipeline_stage != "resolved":
+        enriched["root_cause_class"] = "not_audited_family"
+        enriched["root_cause_code"] = "non_target_family"
 
     candidate_snapshots = dict(enriched.get("candidate_snapshots") or {})
     candidate_snapshots.setdefault("display_examples", _row_display_examples(candidate_snapshots, coverage_row))
     enriched["candidate_snapshots"] = candidate_snapshots
+    enriched["stage_of_failure"] = enriched["pipeline_stage"]
+    enriched["reason_code"] = enriched["root_cause_code"]
+    enriched["reason_class"] = enriched["root_cause_class"]
     return enriched
 
 
@@ -198,10 +276,15 @@ def enrich_match_diagnostics_payload(
             continue
         run_row_number = _safe_int(row.get("run_row_number"))
         enriched = _enrich_row_with_coverage_audit(row, audit_rows.get(run_row_number))
-        enriched["reason_class"] = infer_reason_class(
-            _clean_text_value(enriched.get("stage_of_failure")),
-            _normalize_reason_code(enriched.get("reason_code")),
-        ) if _clean_text_value(enriched.get("reason_class")) == "" else _clean_text_value(enriched.get("reason_class"))
+        if _clean_text_value(enriched.get("root_cause_class")) == "":
+            enriched["root_cause_class"] = infer_reason_class(
+                _clean_text_value(enriched.get("pipeline_stage")),
+                _normalize_reason_code(enriched.get("pipeline_reason_code")),
+            )
+        if _normalize_reason_code(enriched.get("root_cause_code")) == "resolved" and enriched.get("root_cause_class") != "resolved":
+            enriched["root_cause_code"] = _normalize_reason_code(enriched.get("pipeline_reason_code"))
+        enriched["reason_class"] = _clean_text_value(enriched.get("root_cause_class"))
+        enriched["reason_code"] = _normalize_reason_code(enriched.get("root_cause_code"))
         enriched_rows.append(enriched)
 
     summary = _build_summary(enriched_rows)
@@ -212,20 +295,24 @@ def enrich_match_diagnostics_payload(
 
 
 def _build_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    stage_counts = Counter()
-    reason_class_counts = Counter()
-    reason_code_counts = Counter()
+    pipeline_stage_counts = Counter()
+    root_cause_class_counts = Counter()
+    root_cause_code_counts = Counter()
     rows_resolved = 0
     rows_unresolved = 0
 
     for row in rows:
-        stage = _clean_text_value(row.get("stage_of_failure")) or "runtime_error"
-        reason_class = _clean_text_value(row.get("reason_class")) or infer_reason_class(stage, _normalize_reason_code(row.get("reason_code")))
-        reason_code = _normalize_reason_code(row.get("reason_code"))
-        stage_counts[stage] += 1
-        reason_class_counts[reason_class] += 1
-        reason_code_counts[reason_code] += 1
-        if stage == "resolved":
+        pipeline_stage = _clean_text_value(row.get("pipeline_stage") or row.get("stage_of_failure")) or "runtime_error"
+        pipeline_reason_code = _normalize_reason_code(row.get("pipeline_reason_code") or row.get("reason_code"))
+        root_cause_class = _clean_text_value(row.get("root_cause_class") or row.get("reason_class")) or infer_reason_class(
+            pipeline_stage,
+            pipeline_reason_code,
+        )
+        root_cause_code = _normalize_reason_code(row.get("root_cause_code") or row.get("reason_code") or pipeline_reason_code)
+        pipeline_stage_counts[pipeline_stage] += 1
+        root_cause_class_counts[root_cause_class] += 1
+        root_cause_code_counts[root_cause_code] += 1
+        if pipeline_stage == "resolved":
             rows_resolved += 1
         else:
             rows_unresolved += 1
@@ -234,9 +321,13 @@ def _build_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "rows_total": len(rows),
         "rows_resolved": rows_resolved,
         "rows_unresolved": rows_unresolved,
-        "stage_counts": dict(sorted(stage_counts.items())),
-        "reason_class_counts": dict(sorted(reason_class_counts.items())),
-        "reason_code_counts": dict(sorted(reason_code_counts.items())),
+        "pipeline_stage_counts": dict(sorted(pipeline_stage_counts.items())),
+        "root_cause_class_counts": dict(sorted(root_cause_class_counts.items())),
+        "root_cause_code_counts": dict(sorted(root_cause_code_counts.items())),
+        # Backward-compatible aliases.
+        "stage_counts": dict(sorted(pipeline_stage_counts.items())),
+        "reason_class_counts": dict(sorted(root_cause_class_counts.items())),
+        "reason_code_counts": dict(sorted(root_cause_code_counts.items())),
     }
 
 
@@ -251,12 +342,16 @@ def build_match_diagnostics_payload(
     for row in rows:
         if not isinstance(row, dict):
             continue
-        normalized = dict(row)
-        normalized["reason_code"] = _normalize_reason_code(normalized.get("reason_code"))
-        normalized["reason_class"] = _clean_text_value(normalized.get("reason_class")) or infer_reason_class(
-            _clean_text_value(normalized.get("stage_of_failure")),
-            normalized["reason_code"],
-        )
+        normalized = _build_canonical_fields(row)
+        if _clean_text_value(normalized.get("root_cause_class")) == "":
+            normalized["root_cause_class"] = infer_reason_class(
+                _clean_text_value(normalized.get("pipeline_stage")),
+                _normalize_reason_code(normalized.get("pipeline_reason_code")),
+            )
+        if _normalize_reason_code(normalized.get("root_cause_code")) == "resolved" and normalized["root_cause_class"] != "resolved":
+            normalized["root_cause_code"] = _normalize_reason_code(normalized.get("pipeline_reason_code"))
+        normalized["reason_code"] = _normalize_reason_code(normalized.get("root_cause_code"))
+        normalized["reason_class"] = _clean_text_value(normalized.get("root_cause_class"))
         normalized_rows.append(normalized)
 
     payload = {
@@ -363,9 +458,11 @@ def reconstruct_match_diagnostics(
                 "resolution_source": _clean_text_value(row.get("Источник решения")),
                 "compatibility_status": _clean_text_value(row.get("Совместимость решения")),
                 "incompatibility_reason": _clean_text_value(row.get("Причина несовместимости")),
-                "stage_of_failure": stage_of_failure,
-                "reason_code": reason_code,
-                "reason_class": infer_reason_class(stage_of_failure, reason_code),
+                "pipeline_stage": stage_of_failure,
+                "pipeline_reason_code": reason_code,
+                "root_cause_class": infer_reason_class(stage_of_failure, reason_code),
+                "root_cause_code": reason_code,
+                "coverage_scope": _infer_coverage_scope(query_family),
                 "pipeline_counts": pipeline_counts,
                 "candidate_snapshots": {
                     "display_examples": _row_display_examples({}, coverage_row),
@@ -430,10 +527,13 @@ def prepare_match_diagnostics_table(payload: dict[str, Any]) -> pd.DataFrame:
                 "Строка": row.get("run_row_number"),
                 "Запрос": row.get("query_text"),
                 "Family": row.get("query_family"),
-                "Этап отказа": row.get("stage_of_failure"),
-                "Код причины": row.get("reason_code"),
-                "Класс причины": row.get("reason_class"),
-                "Каталог-аудит": row.get("catalog_audit_diagnosis"),
+                "Pipeline stage": row.get("pipeline_stage") or row.get("stage_of_failure"),
+                "Pipeline reason": row.get("pipeline_reason_code") or row.get("reason_code"),
+                "Root cause class": row.get("root_cause_class") or row.get("reason_class"),
+                "Root cause code": row.get("root_cause_code") or row.get("reason_code"),
+                "Coverage scope": row.get("coverage_scope"),
+                "Catalog audit diagnosis": row.get("catalog_audit_diagnosis"),
+                "Catalog gap reason": row.get("catalog_gap_reason_code"),
                 "Local pool": pipeline_counts.get("local_pool_count"),
                 "Scored": pipeline_counts.get("scored_count"),
                 "Same family": pipeline_counts.get("same_family_count"),
@@ -449,19 +549,29 @@ def prepare_match_diagnostics_table(payload: dict[str, Any]) -> pd.DataFrame:
 
 def prepare_match_diagnostics_stage_table(payload: dict[str, Any]) -> pd.DataFrame:
     summary = payload.get("summary") or {}
-    stage_counts = summary.get("stage_counts")
+    stage_counts = summary.get("pipeline_stage_counts") or summary.get("stage_counts")
     if not isinstance(stage_counts, dict):
         return pd.DataFrame()
     return pd.DataFrame(
-        [{"Этап отказа": stage, "Строк": _safe_int(count)} for stage, count in stage_counts.items()]
+        [{"Pipeline stage": stage, "Строк": _safe_int(count)} for stage, count in stage_counts.items()]
     )
 
 
 def prepare_match_diagnostics_reason_table(payload: dict[str, Any]) -> pd.DataFrame:
     summary = payload.get("summary") or {}
-    reason_counts = summary.get("reason_code_counts")
+    reason_counts = summary.get("root_cause_code_counts") or summary.get("reason_code_counts")
     if not isinstance(reason_counts, dict):
         return pd.DataFrame()
     return pd.DataFrame(
-        [{"Код причины": reason_code, "Строк": _safe_int(count)} for reason_code, count in reason_counts.items()]
+        [{"Root cause code": reason_code, "Строк": _safe_int(count)} for reason_code, count in reason_counts.items()]
+    )
+
+
+def prepare_match_diagnostics_root_cause_table(payload: dict[str, Any]) -> pd.DataFrame:
+    summary = payload.get("summary") or {}
+    root_cause_counts = summary.get("root_cause_class_counts") or summary.get("reason_class_counts")
+    if not isinstance(root_cause_counts, dict):
+        return pd.DataFrame()
+    return pd.DataFrame(
+        [{"Root cause class": reason_class, "Строк": _safe_int(count)} for reason_class, count in root_cause_counts.items()]
     )

@@ -24,12 +24,14 @@ from catalog_coverage_audit import (
     is_catalog_coverage_audit_fresh,
     prepare_catalog_coverage_audit_table,
     prepare_catalog_coverage_family_table,
+    prepare_catalog_gap_reason_table,
 )
 from match_diagnostics import (
     build_match_diagnostics_payload,
     enrich_match_diagnostics_payload,
     is_match_diagnostics_fresh,
     prepare_match_diagnostics_reason_table,
+    prepare_match_diagnostics_root_cause_table,
     prepare_match_diagnostics_stage_table,
     prepare_match_diagnostics_table,
     reconstruct_match_diagnostics,
@@ -1027,18 +1029,19 @@ def _render_match_diagnostics(run, df: pd.DataFrame) -> None:
             st.caption(f"Используется сохраненная runtime-диагностика: {generated_at}")
 
     summary = diagnostics_payload.get("summary", {}) if isinstance(diagnostics_payload, dict) else {}
-    reason_class_counts = summary.get("reason_class_counts", {}) if isinstance(summary, dict) else {}
+    root_cause_class_counts = summary.get("root_cause_class_counts", {}) if isinstance(summary, dict) else {}
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("catalog gap", int(reason_class_counts.get("catalog_gap", 0)))
+        st.metric("catalog gap", int(root_cause_class_counts.get("catalog_gap", 0)))
     with col2:
-        st.metric("retrieval/ranking", int(reason_class_counts.get("matcher_retrieval_or_ranking", 0)))
+        st.metric("retrieval/ranking", int(root_cause_class_counts.get("matcher_retrieval_or_ranking", 0)))
     with col3:
-        st.metric("Gemini/policy", int(reason_class_counts.get("gemini_or_decision_policy", 0)))
+        st.metric("Gemini/policy", int(root_cause_class_counts.get("gemini_or_decision_policy", 0)))
     with col4:
-        st.metric("input/query shape", int(reason_class_counts.get("input_or_query_shape", 0)))
+        st.metric("input/query shape", int(root_cause_class_counts.get("input_or_query_shape", 0)))
 
     stage_table = prepare_match_diagnostics_stage_table(diagnostics_payload)
+    root_cause_table = prepare_match_diagnostics_root_cause_table(diagnostics_payload)
     reason_table = prepare_match_diagnostics_reason_table(diagnostics_payload)
     detail_table = prepare_match_diagnostics_table(diagnostics_payload)
 
@@ -1047,10 +1050,11 @@ def _render_match_diagnostics(run, df: pd.DataFrame) -> None:
             "rows_total": summary.get("rows_total", 0),
             "rows_resolved": summary.get("rows_resolved", 0),
             "rows_unresolved": summary.get("rows_unresolved", 0),
-            "catalog_gap": reason_class_counts.get("catalog_gap", 0),
-            "retrieval_ranking": reason_class_counts.get("matcher_retrieval_or_ranking", 0),
-            "gemini_policy": reason_class_counts.get("gemini_or_decision_policy", 0),
-            "input_query_shape": reason_class_counts.get("input_or_query_shape", 0),
+            "catalog_gap": root_cause_class_counts.get("catalog_gap", 0),
+            "retrieval_ranking": root_cause_class_counts.get("matcher_retrieval_or_ranking", 0),
+            "gemini_policy": root_cause_class_counts.get("gemini_or_decision_policy", 0),
+            "input_query_shape": root_cause_class_counts.get("input_or_query_shape", 0),
+            "not_audited_family": root_cause_class_counts.get("not_audited_family", 0),
             "reconstructed": "yes" if reconstructed else "no",
             "generated_at": str(diagnostics_payload.get("generated_at") or "").strip(),
         },
@@ -1062,6 +1066,7 @@ def _render_match_diagnostics(run, df: pd.DataFrame) -> None:
             "retrieval_ranking": "retrieval/ranking",
             "gemini_policy": "Gemini/policy",
             "input_query_shape": "input/query shape",
+            "not_audited_family": "not audited family",
             "reconstructed": "Post-hoc reconstruction",
             "generated_at": "Сгенерировано",
         },
@@ -1069,8 +1074,9 @@ def _render_match_diagnostics(run, df: pd.DataFrame) -> None:
     diagnostics_export = _build_excel_workbook_bytes(
         [
             ("summary", diagnostics_summary_table),
-            ("stages", stage_table),
-            ("reason_codes", reason_table),
+            ("root_cause_summary", root_cause_table),
+            ("pipeline_summary", stage_table),
+            ("root_cause_codes", reason_table),
             ("details", detail_table),
         ]
     )
@@ -1082,12 +1088,16 @@ def _render_match_diagnostics(run, df: pd.DataFrame) -> None:
         key=f"download_match_diagnostics_{run.run_id}",
     )
 
+    if not root_cause_table.empty:
+        st.markdown("**Сводка по root cause**")
+        st.dataframe(_prepare_df_for_display(root_cause_table), width="stretch")
+
     if not stage_table.empty:
-        st.markdown("**Сводка по этапам отказа**")
+        st.markdown("**Сводка по pipeline stage**")
         st.dataframe(_prepare_df_for_display(stage_table), width="stretch")
 
     if not reason_table.empty:
-        st.markdown("**Сводка по кодам причин**")
+        st.markdown("**Сводка по root cause code**")
         st.dataframe(_prepare_df_for_display(reason_table), width="stretch")
 
     if not detail_table.empty:
@@ -1172,6 +1182,7 @@ def _render_catalog_coverage_audit(run, df: pd.DataFrame) -> None:
     )
 
     family_table = prepare_catalog_coverage_family_table(audit_payload)
+    gap_reason_table = prepare_catalog_gap_reason_table(audit_payload)
     detail_table = prepare_catalog_coverage_audit_table(audit_payload)
     audit_export = _build_excel_workbook_bytes(
         [
@@ -1197,6 +1208,7 @@ def _render_catalog_coverage_audit(run, df: pd.DataFrame) -> None:
                 ),
             ),
             ("families", family_table),
+            ("gap_reasons", gap_reason_table),
             ("details", detail_table),
         ]
     )
@@ -1211,6 +1223,10 @@ def _render_catalog_coverage_audit(run, df: pd.DataFrame) -> None:
     if not family_table.empty:
         st.markdown("**Сводка по семействам**")
         st.dataframe(_prepare_df_for_display(family_table), width="stretch")
+
+    if not gap_reason_table.empty:
+        st.markdown("**Сводка по gap reason**")
+        st.dataframe(_prepare_df_for_display(gap_reason_table), width="stretch")
 
     if not detail_table.empty:
         st.markdown("**Детали по строкам**")
