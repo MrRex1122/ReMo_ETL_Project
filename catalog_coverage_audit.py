@@ -21,6 +21,8 @@ from matcher import MATCH_MODE_EXACT, ReMoMatcher
 
 logger = logging.getLogger(__name__)
 
+CATALOG_COVERAGE_AUDIT_VERSION = 2
+
 TARGET_FAMILY_GROUPS = {
     "patch_panel": "patch_panel",
     "patch_cord": "patch_cord",
@@ -120,6 +122,8 @@ def is_catalog_coverage_audit_fresh(
     if not payload:
         return False
     return (
+        int(payload.get("audit_version") or 0) == CATALOG_COVERAGE_AUDIT_VERSION
+        and
         str(payload.get("run_id") or "") == str(run_id)
         and str(payload.get("catalog_source_path") or "") == str(Path(catalog_source_path))
         and str(payload.get("catalog_source_kind") or "") == str(catalog_source_kind)
@@ -446,6 +450,7 @@ def build_catalog_coverage_audit(
     rows = [_build_audit_row(context, example_limit=example_limit) for context in contexts]
     summary, family_breakdown = _build_summary(rows)
     payload = {
+        "audit_version": CATALOG_COVERAGE_AUDIT_VERSION,
         "run_id": run_id,
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "catalog_source_path": str(Path(catalog_source_path)),

@@ -271,6 +271,16 @@ class CatalogCoverageAuditTests(unittest.TestCase):
                     catalog_source_kind="merged",
                 )
             )
+            stale_payload = dict(payload)
+            stale_payload["audit_version"] = 0
+            self.assertFalse(
+                is_catalog_coverage_audit_fresh(
+                    stale_payload,
+                    run_id="run-6",
+                    catalog_source_path=catalog_path,
+                    catalog_source_kind="merged",
+                )
+            )
             detail_table = prepare_catalog_coverage_audit_table(payload)
             self.assertFalse(detail_table.empty)
             self.assertIn("Примеры кандидатов", detail_table.columns)
