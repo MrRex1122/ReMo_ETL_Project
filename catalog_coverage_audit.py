@@ -159,23 +159,29 @@ class _AuditMatcherAdapter:
         if not name:
             return None
 
-        if prefer_precomputed and clean_text_value(row.get("search_entity_type")):
-            entity_type = clean_text_value(row.get("search_entity_type"))
-            branch_path = clean_text_value(row.get("search_branch_path"))
-            normalized_name = clean_text_value(row.get("search_normalized_name")) or self.matcher._normalize_text(name)
+        projected = build_search_projection_row(row, taxonomy_rules=self.taxonomy_rules)
+        entity_type = clean_text_value(projected.get("search_entity_type"))
+        branch_path = clean_text_value(projected.get("search_branch_path"))
+        normalized_name = clean_text_value(projected.get("search_normalized_name"))
+        try:
+            item_markers = json.loads(clean_text_value(projected.get("search_item_markers_json")) or "{}")
+        except json.JSONDecodeError:
+            item_markers = {}
+
+        if prefer_precomputed:
+            precomputed_entity_type = clean_text_value(row.get("search_entity_type"))
+            precomputed_branch_path = clean_text_value(row.get("search_branch_path"))
+            precomputed_normalized_name = clean_text_value(row.get("search_normalized_name"))
             try:
-                item_markers = json.loads(clean_text_value(row.get("search_item_markers_json")) or "{}")
+                precomputed_item_markers = json.loads(clean_text_value(row.get("search_item_markers_json")) or "{}")
             except json.JSONDecodeError:
-                item_markers = {}
-        else:
-            projected = build_search_projection_row(row, taxonomy_rules=self.taxonomy_rules)
-            entity_type = clean_text_value(projected.get("search_entity_type"))
-            branch_path = clean_text_value(projected.get("search_branch_path"))
-            normalized_name = clean_text_value(projected.get("search_normalized_name"))
-            try:
-                item_markers = json.loads(clean_text_value(projected.get("search_item_markers_json")) or "{}")
-            except json.JSONDecodeError:
-                item_markers = {}
+                precomputed_item_markers = {}
+
+            entity_type = entity_type or precomputed_entity_type
+            branch_path = branch_path or precomputed_branch_path
+            normalized_name = normalized_name or precomputed_normalized_name or self.matcher._normalize_text(name)
+            if not item_markers and isinstance(precomputed_item_markers, dict):
+                item_markers = precomputed_item_markers
 
         return {
             "name": name,

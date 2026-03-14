@@ -216,11 +216,11 @@ class CatalogCoverageAuditTests(unittest.TestCase):
                 catalog_path,
                 [
                     {
-                        CANONICAL_NAME_COLUMN: "X",
+                        CANONICAL_NAME_COLUMN: "patch panel 24 port cat6",
                         CANONICAL_ARTICLE_COLUMN: "PP-PRE",
-                        "Название класса": "",
-                        "Тип изделия": "",
-                        "Тип исполнения кабельного изделия": "",
+                        "???????? ??????": "patch panels",
+                        "??? ???????": "patch panel",
+                        "??? ?????????? ?????????? ???????": "",
                         "search_branch_path": "телеком > коммутация > патч панели",
                         "search_normalized_name": "патч панель 24 порта категория 6",
                         "search_entity_type": "patch_panel",
@@ -239,6 +239,40 @@ class CatalogCoverageAuditTests(unittest.TestCase):
             row = self._first_row(payload)
             self.assertEqual(row["diagnosis"], "catalog_has_compatible_candidates")
             self.assertEqual(row["compatible_candidates_count"], 1)
+
+    def test_search_catalog_recomputes_family_when_precomputed_type_is_stale(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            catalog_path = Path(tmp_dir) / "search_catalog.csv"
+            _write_catalog_csv(
+                catalog_path,
+                [
+                    {
+                        CANONICAL_NAME_COLUMN: (
+                            "Ð˜ÑÑ‚Ð¾Ñ‡Ð½Ð¸Ðº Ð±ÐµÑÐ¿ÐµÑ€ÐµÐ±Ð¾Ð¹Ð½Ð¾Ð³Ð¾ Ð¿Ð¸Ñ‚Ð°Ð½Ð¸Ñ Online 2000Ð’Ð, "
+                            "Ð²Ñ…Ð¾Ð´ IEC-320-C20, Ð²Ñ‹Ñ…Ð¾Ð´ IEC-320-C13 (3 ÑˆÑ‚.), IEC-320-C19 (1 ÑˆÑ‚.)"
+                        ),
+                        CANONICAL_ARTICLE_COLUMN: "UPS-IEC",
+                        "ÐÐ°Ð·Ð²Ð°Ð½Ð¸Ðµ ÐºÐ»Ð°ÑÑÐ°": "Ð˜Ð‘ÐŸ",
+                        "Ð¢Ð¸Ð¿ Ð¸Ð·Ð´ÐµÐ»Ð¸Ñ": "Ð˜ÑÑ‚Ð¾Ñ‡Ð½Ð¸Ðº Ð±ÐµÑÐ¿ÐµÑ€ÐµÐ±Ð¾Ð¹Ð½Ð¾Ð³Ð¾ Ð¿Ð¸Ñ‚Ð°Ð½Ð¸Ñ",
+                        "Ð¢Ð¸Ð¿ Ð¸ÑÐ¿Ð¾Ð»Ð½ÐµÐ½Ð¸Ñ ÐºÐ°Ð±ÐµÐ»ÑŒÐ½Ð¾Ð³Ð¾ Ð¸Ð·Ð´ÐµÐ»Ð¸Ñ": "",
+                        "search_branch_path": "Ñ‚ÐµÐ»ÐµÐºÐ¾Ð¼ > Ð¿Ð¸Ñ‚Ð°Ð½Ð¸Ðµ > pdu",
+                        "search_normalized_name": "Ð¸Ð±Ð¿ iec c20 c13 c19",
+                        "search_entity_type": "iec_power_cable",
+                        "search_item_markers_json": json.dumps({"connector_pair": "c19-c20"}, ensure_ascii=False),
+                    }
+                ],
+            )
+
+            payload = build_catalog_coverage_audit(
+                _build_result_df("power cord IEC320 C19-C20 1.8m"),
+                run_id="run-search-stale-iec",
+                catalog_source_path=catalog_path,
+                catalog_source_kind="search",
+            )
+
+            row = self._first_row(payload)
+            self.assertIn(row["diagnosis"], {"catalog_missing_family", "catalog_has_family_but_no_compatible_specs"})
+            self.assertEqual(row["compatible_candidates_count"], 0)
 
     def test_coverage_audit_table_and_freshness_work_with_persisted_payload(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
