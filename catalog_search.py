@@ -191,10 +191,79 @@ def _has_airflow_blanking_signal(normalized: str) -> bool:
     )
 
 
+def _looks_like_ats_sts_device_precise(normalized: str) -> bool:
+    static_switch_markers = ("\u0441\u0442\u0430\u0442\u0438\u0447\u0435\u0441\u043a", "\u043f\u0435\u0440\u0435\u043a\u043b\u044e\u0447\u0430\u0442\u0435\u043b")
+    if all(marker in normalized for marker in static_switch_markers):
+        return True
+    if "switch" in normalized and any(marker in normalized for marker in ("ats", "sts", "transfer")):
+        return True
+    if not re.search(r"\b(?:ats|sts)\b", normalized, flags=re.IGNORECASE):
+        return False
+    connector_noise_markers = (
+        "\u043a\u043e\u043d\u043d\u0435\u043a\u0442\u043e\u0440",
+        "pin",
+        "rgb",
+        "mono",
+        "germ",
+        "hip-",
+        "arl-",
+    )
+    if any(marker in normalized for marker in connector_noise_markers):
+        return False
+    power_context_markers = (
+        "\u043f\u0435\u0440\u0435\u043a\u043b\u044e\u0447",
+        "\u0432\u0432\u043e\u0434 \u0440\u0435\u0437\u0435\u0440\u0432\u0430",
+        "bypass",
+        "\u0431\u0430\u0439\u043f\u0430\u0441",
+        "transfer",
+        "power",
+        "pdu",
+        "\u043d\u043e\u043c\u0438\u043d\u0430\u043b",
+        "16a",
+        "30a",
+        "32a",
+    )
+    return any(marker in normalized for marker in power_context_markers)
+
+
+def _has_iec_power_cable_context(normalized: str) -> bool:
+    if not any(marker in normalized for marker in ("iec320", "c13", "c14", "c19", "c20")):
+        return False
+    cable_context_markers = (
+        "\u043a\u0430\u0431\u0435\u043b\u044c",
+        "\u0448\u043d\u0443\u0440",
+        "\u0441\u043e\u0435\u0434\u0438\u043d\u0438\u0442\u0435\u043b\u044c\u043d",
+        "\u043f\u0438\u0442\u0430\u043d\u0438\u044f",
+        "cord",
+        "power cord",
+    )
+    return any(marker in normalized for marker in cable_context_markers)
+
+
+def _looks_like_ats_sts_device(normalized: str) -> bool:
+    if "ÑÑ‚Ð°Ñ‚Ð¸Ñ‡ÐµÑÐº" in normalized and "Ð¿ÐµÑ€ÐµÐºÐ»ÑŽÑ‡Ð°Ñ‚ÐµÐ»" in normalized:
+        return True
+    if "switch" in normalized and any(marker in normalized for marker in ("ats", "sts", "transfer")):
+        return True
+    if not re.search(r"\b(?:ats|sts)\b", normalized, flags=re.IGNORECASE):
+        return False
+    if any(marker in normalized for marker in ("ÐºÐ¾Ð½Ð½ÐµÐºÑ‚Ð¾Ñ€", "pin", "rgb", "mono", "germ", "hip-", "arl-")):
+        return False
+    return any(
+        marker in normalized
+        for marker in ("Ð¿ÐµÑ€ÐµÐºÐ»ÑŽÑ‡", "Ð²Ð²Ð¾Ð´ Ñ€ÐµÐ·ÐµÑ€Ð²Ð°", "bypass", "Ð±Ð°Ð¹Ð¿Ð°Ñ", "transfer", "power", "pdu", "Ð½Ð¾Ð¼Ð¸Ð½Ð°Ð»", "16a", "32a")
+    )
+
+
 def classify_item_type(text: str, synonyms: Mapping[str, str] | None = None) -> str:
     normalized = normalize_query_terms(text, synonyms=synonyms)
     phrase_normalized = normalized.replace("-", " ")
-    has_iec_connector_markers = any(marker in normalized for marker in ("iec320", "c13", "c14", "c19", "c20"))
+    has_iec_connector_markers = _has_iec_power_cable_context(normalized)
+    ats_sts_device = _looks_like_ats_sts_device_precise(normalized)
+    if ("ats" in normalized or "sts" in normalized) and not ats_sts_device:
+        normalized = normalized.replace("ats", " __signal_noise__ ").replace("sts", " __signal_noise__ ")
+        phrase_normalized = normalized.replace("-", " ")
+        has_iec_connector_markers = _has_iec_power_cable_context(normalized)
     if "soft starter" in normalized or ("плавн" in normalized and "пуск" in normalized):
         return "soft_starter"
     if (

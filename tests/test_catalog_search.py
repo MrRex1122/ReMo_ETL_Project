@@ -145,6 +145,21 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(search_path, get_search_catalog_path(root))
             self.assertTrue(search_path.exists())
 
+    def test_classify_item_type_does_not_treat_ups_with_iec_ports_as_power_cable(self):
+        self.assertNotEqual(
+            classify_item_type(
+                "Ð˜ÑÑ‚Ð¾Ñ‡Ð½Ð¸Ðº Ð±ÐµÑÐ¿ÐµÑ€ÐµÐ±Ð¾Ð¹Ð½Ð¾Ð³Ð¾ Ð¿Ð¸Ñ‚Ð°Ð½Ð¸Ñ Online 2000Ð’Ð, Ð²Ñ…Ð¾Ð´ IEC-320-C20, "
+                "Ð²Ñ‹Ñ…Ð¾Ð´ IEC-320-C13 (3 ÑˆÑ‚.), IEC-320-C19 (1 ÑˆÑ‚.)"
+            ),
+            "iec_power_cable",
+        )
+
+    def test_classify_item_type_does_not_treat_sts_connector_as_ats_device(self):
+        self.assertNotEqual(
+            classify_item_type("ÐšÐ¾Ð½Ð½ÐµÐºÑ‚Ð¾Ñ€ HIP-GERM-MONO-8-2pin-STS"),
+            "ats_sts",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

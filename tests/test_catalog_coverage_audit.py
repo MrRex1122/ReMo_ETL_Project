@@ -303,6 +303,63 @@ class CatalogCoverageAuditTests(unittest.TestCase):
             self.assertEqual(row["diagnosis"], "catalog_missing_family")
             self.assertEqual(row["same_family_candidates_count"], 0)
 
+    def test_iec_audit_does_not_count_ups_with_iec_ports_as_compatible_cable(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            catalog_path = Path(tmp_dir) / "catalog.csv"
+            _write_catalog_csv(
+                catalog_path,
+                [
+                    {
+                        CANONICAL_NAME_COLUMN: (
+                            "Ð˜ÑÑ‚Ð¾Ñ‡Ð½Ð¸Ðº Ð±ÐµÑÐ¿ÐµÑ€ÐµÐ±Ð¾Ð¹Ð½Ð¾Ð³Ð¾ Ð¿Ð¸Ñ‚Ð°Ð½Ð¸Ñ Online 2000Ð’Ð, "
+                            "Ð²Ñ…Ð¾Ð´ IEC-320-C20, Ð²Ñ‹Ñ…Ð¾Ð´ IEC-320-C13 (3 ÑˆÑ‚.), IEC-320-C19 (1 ÑˆÑ‚.)"
+                        ),
+                        CANONICAL_ARTICLE_COLUMN: "UPS-IEC",
+                        "ÐÐ°Ð·Ð²Ð°Ð½Ð¸Ðµ ÐºÐ»Ð°ÑÑÐ°": "Ð˜Ð‘ÐŸ",
+                        "Ð¢Ð¸Ð¿ Ð¸Ð·Ð´ÐµÐ»Ð¸Ñ": "Ð˜ÑÑ‚Ð¾Ñ‡Ð½Ð¸Ðº Ð±ÐµÑÐ¿ÐµÑ€ÐµÐ±Ð¾Ð¹Ð½Ð¾Ð³Ð¾ Ð¿Ð¸Ñ‚Ð°Ð½Ð¸Ñ",
+                        "Ð¢Ð¸Ð¿ Ð¸ÑÐ¿Ð¾Ð»Ð½ÐµÐ½Ð¸Ñ ÐºÐ°Ð±ÐµÐ»ÑŒÐ½Ð¾Ð³Ð¾ Ð¸Ð·Ð´ÐµÐ»Ð¸Ñ": "",
+                    }
+                ],
+            )
+
+            payload = build_catalog_coverage_audit(
+                _build_result_df("power cord IEC320 C19-C20 1.8m"),
+                run_id="run-iec-noise",
+                catalog_source_path=catalog_path,
+                catalog_source_kind="merged",
+            )
+
+            row = self._first_row(payload)
+            self.assertIn(row["diagnosis"], {"catalog_missing_family", "catalog_has_family_but_no_compatible_specs"})
+            self.assertEqual(row["compatible_candidates_count"], 0)
+
+    def test_ats_audit_does_not_count_sts_connector_suffix_as_same_family(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            catalog_path = Path(tmp_dir) / "catalog.csv"
+            _write_catalog_csv(
+                catalog_path,
+                [
+                    {
+                        CANONICAL_NAME_COLUMN: "Connector HIP-GERM-MONO-8-2pin-STS",
+                        CANONICAL_ARTICLE_COLUMN: "STS-CONN",
+                        "ÐÐ°Ð·Ð²Ð°Ð½Ð¸Ðµ ÐºÐ»Ð°ÑÑÐ°": "ÐšÐ¾Ð½Ð½ÐµÐºÑ‚Ð¾Ñ€Ñ‹",
+                        "Ð¢Ð¸Ð¿ Ð¸Ð·Ð´ÐµÐ»Ð¸Ñ": "ÐšÐ¾Ð½Ð½ÐµÐºÑ‚Ð¾Ñ€",
+                        "Ð¢Ð¸Ð¿ Ð¸ÑÐ¿Ð¾Ð»Ð½ÐµÐ½Ð¸Ñ ÐºÐ°Ð±ÐµÐ»ÑŒÐ½Ð¾Ð³Ð¾ Ð¸Ð·Ð´ÐµÐ»Ð¸Ñ": "",
+                    }
+                ],
+            )
+
+            payload = build_catalog_coverage_audit(
+                _build_result_df("static transfer switch ATS/STS 32A"),
+                run_id="run-ats-noise",
+                catalog_source_path=catalog_path,
+                catalog_source_kind="merged",
+            )
+
+            row = self._first_row(payload)
+            self.assertEqual(row["same_family_candidates_count"], 0)
+            self.assertEqual(row["compatible_candidates_count"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()
