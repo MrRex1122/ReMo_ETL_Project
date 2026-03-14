@@ -248,6 +248,7 @@ class MatchDiagnosticsTests(unittest.TestCase):
         self.assertEqual(row["coverage_scope"], "non_target_family")
         self.assertEqual(row["root_cause_class"], "not_audited_family")
         self.assertEqual(row["root_cause_code"], "non_target_family")
+        self.assertEqual(row["catalog_gap_reason_code"], "")
 
     def test_prepare_tables_return_expected_columns(self):
         payload = build_match_diagnostics_payload(

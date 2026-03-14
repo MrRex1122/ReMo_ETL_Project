@@ -6,7 +6,7 @@ from typing import Any
 
 import pandas as pd
 
-MATCH_DIAGNOSTICS_VERSION = 3
+MATCH_DIAGNOSTICS_VERSION = 4
 MISSING_POSITION_TEXT = "Позиция отсутствует"
 
 HEADER_QUERY_VALUES = {
@@ -194,7 +194,7 @@ def _enrich_row_with_coverage_audit(row: dict[str, Any], coverage_row: dict[str,
 
     diagnosis = _clean_text_value(coverage_row.get("diagnosis"))
     enriched["catalog_audit_diagnosis"] = diagnosis
-    enriched["catalog_gap_reason_code"] = _clean_text_value(coverage_row.get("gap_reason_code"))
+    enriched["catalog_gap_reason_code"] = ""
     enriched["coverage_scope"] = "non_target_family" if diagnosis == "non_target_family" else "audited_family"
 
     pipeline_counts = dict(enriched.get("pipeline_counts") or {})
@@ -223,7 +223,9 @@ def _enrich_row_with_coverage_audit(row: dict[str, Any], coverage_row: dict[str,
         else:
             enriched["root_cause_class"] = "not_audited_family"
             enriched["root_cause_code"] = "non_target_family"
-    elif (
+    else:
+        enriched["catalog_gap_reason_code"] = _clean_text_value(coverage_row.get("gap_reason_code"))
+    if (
         diagnosis in {"catalog_missing_family", "catalog_has_family_but_no_compatible_specs"}
         and pipeline_stage != "resolved"
         and compatible_count <= 0

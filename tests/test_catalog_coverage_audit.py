@@ -122,6 +122,36 @@ class CatalogCoverageAuditTests(unittest.TestCase):
             self.assertEqual(row["same_family_candidates_count"], 0)
             self.assertEqual(row["gap_reason_code"], "missing_family")
 
+    def test_non_target_rows_do_not_get_gap_reason_and_are_hidden_from_detail_table(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            catalog_path = Path(tmp_dir) / "catalog.csv"
+            _write_catalog_csv(
+                catalog_path,
+                [
+                    {
+                        CANONICAL_NAME_COLUMN: "Шкаф настенный 19 дюймов",
+                        CANONICAL_ARTICLE_COLUMN: "RACK-1",
+                        "Название класса": "Шкафы телекоммуникационные",
+                        "Тип изделия": "Шкаф",
+                        "Тип исполнения кабельного изделия": "",
+                    }
+                ],
+            )
+
+            payload = build_catalog_coverage_audit(
+                _build_result_df("Шкафы телекоммуникационные"),
+                run_id="run-non-target",
+                catalog_source_path=catalog_path,
+                catalog_source_kind="merged",
+            )
+
+            row = self._first_row(payload)
+            self.assertEqual(row["diagnosis"], "non_target_family")
+            self.assertEqual(row["gap_reason_code"], "")
+
+            detail_table = prepare_catalog_coverage_audit_table(payload)
+            self.assertTrue(detail_table.empty)
+
     def test_iec_power_cable_is_included_as_target_family(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             catalog_path = Path(tmp_dir) / "catalog.csv"

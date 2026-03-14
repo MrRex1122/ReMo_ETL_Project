@@ -21,7 +21,7 @@ from matcher import MATCH_MODE_EXACT, ReMoMatcher
 
 logger = logging.getLogger(__name__)
 
-CATALOG_COVERAGE_AUDIT_VERSION = 3
+CATALOG_COVERAGE_AUDIT_VERSION = 4
 
 TARGET_FAMILY_GROUPS = {
     "patch_panel": "patch_panel",
@@ -410,7 +410,7 @@ def _build_audit_row(
     example_pool = context.compatible_examples if context.compatible_examples else context.related_examples
     examples = [example for _, example in example_pool[:example_limit]]
     gap_reason_code, gap_reason_counts, top_gap_reasons = _build_gap_reason_details(context)
-    if diagnosis == "catalog_has_compatible_candidates":
+    if diagnosis not in {"catalog_missing_family", "catalog_has_family_but_no_compatible_specs"}:
         gap_reason_code = ""
         gap_reason_counts = {}
         top_gap_reasons = []
@@ -565,6 +565,8 @@ def prepare_catalog_coverage_audit_table(payload: dict[str, Any]) -> pd.DataFram
     prepared_rows: list[dict[str, Any]] = []
     for row in rows:
         if not isinstance(row, dict):
+            continue
+        if clean_text_value(row.get("diagnosis")) == "non_target_family":
             continue
         examples = row.get("candidate_examples", [])
         example_strings: list[str] = []
