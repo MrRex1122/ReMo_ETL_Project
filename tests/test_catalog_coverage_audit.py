@@ -461,6 +461,60 @@ class CatalogCoverageAuditTests(unittest.TestCase):
             self.assertEqual(row["compatible_candidates_count"], 0)
             self.assertEqual(row["diagnosis"], "catalog_has_family_but_no_compatible_specs")
 
+    def test_rj45_outlet_audit_does_not_count_floor_box_faceplates_as_compatible_assembly(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            catalog_path = Path(tmp_dir) / "catalog.csv"
+            _write_catalog_csv(
+                catalog_path,
+                [
+                    {
+                        CANONICAL_NAME_COLUMN: "Накладка для информационных функций типа Keystone",
+                        CANONICAL_ARTICLE_COLUMN: "RJ45-COVER",
+                        "Название класса": "Накладки",
+                        "Тип изделия": "Накладка для Keystone",
+                        "Тип исполнения кабельного изделия": "",
+                    }
+                ],
+            )
+
+            payload = build_catalog_coverage_audit(
+                _build_result_df("Конструктив сетевой розетки для одного порта RJ-45 в лючок напольный в сборе"),
+                run_id="run-rj45-floorbox-assembly",
+                catalog_source_path=catalog_path,
+                catalog_source_kind="merged",
+            )
+
+            row = self._first_row(payload)
+            self.assertEqual(row["compatible_candidates_count"], 0)
+            self.assertEqual(row["diagnosis"], "catalog_has_family_but_no_compatible_specs")
+
+    def test_rj45_outlet_audit_does_not_count_single_port_outlet_as_two_port_cable_channel_assembly(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            catalog_path = Path(tmp_dir) / "catalog.csv"
+            _write_catalog_csv(
+                catalog_path,
+                [
+                    {
+                        CANONICAL_NAME_COLUMN: "Розетка компьютерная 1-местная RJ-45",
+                        CANONICAL_ARTICLE_COLUMN: "RJ45-1PORT",
+                        "Название класса": "Розетки компьютерные",
+                        "Тип изделия": "Розетка компьютерная",
+                        "Тип исполнения кабельного изделия": "",
+                    }
+                ],
+            )
+
+            payload = build_catalog_coverage_audit(
+                _build_result_df("Конструктив сетевой розетки для двух портов RJ-45 в кабель-канал, в сборе"),
+                run_id="run-rj45-cable-channel-assembly",
+                catalog_source_path=catalog_path,
+                catalog_source_kind="merged",
+            )
+
+            row = self._first_row(payload)
+            self.assertEqual(row["compatible_candidates_count"], 0)
+            self.assertEqual(row["diagnosis"], "catalog_has_family_but_no_compatible_specs")
+
 
 if __name__ == "__main__":
     unittest.main()

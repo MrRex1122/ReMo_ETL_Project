@@ -744,6 +744,20 @@ class ReMoMatcher:
         if query_type == "rj45_outlet":
             if item_component in {"adapter", "faceplate", "connector"}:
                 return "rj45_component_mismatch"
+            if query_component == "assembly" and item_component and item_component != "assembly":
+                return "rj45_component_mismatch"
+
+        query_installation = self._clean_text_value(query_markers.get("installation_kind"))
+        item_installation = self._clean_text_value(item_markers.get("installation_kind"))
+        if query_type == "rj45_outlet" and query_installation in {"floor_box", "cable_channel"}:
+            if item_installation != query_installation:
+                return "rj45_installation_mismatch"
+
+        if query_type == "rj45_outlet":
+            query_port_count = self._clean_text_value(query_markers.get("port_count"))
+            item_port_count = self._clean_text_value(item_markers.get("port_count"))
+            if query_port_count and item_port_count and query_port_count != item_port_count:
+                return "port_count_mismatch"
 
         if query_type == "floor_box":
             if self._clean_text_value(item_markers.get("installation_kind")) != "floor_box":

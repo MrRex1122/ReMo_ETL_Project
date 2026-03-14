@@ -356,6 +356,36 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.assertTrue(self.matcher._is_hard_incompatible_match(features, item))
         self.assertEqual(self.matcher._hard_incompatibility_reason(features, item), "rj45_component_mismatch")
 
+    def test_rj45_outlet_blocks_wrong_installation_kind_for_floor_box_assembly(self):
+        features = self.matcher._extract_query_features(
+            "Конструктив сетевой розетки для одного порта RJ-45 в лючок напольный в сборе"
+        )
+        item = {
+            "name": "Розетка компьютерная 1-местная RJ-45",
+            "normalized_name": "розетка компьютерная 1 местная rj 45",
+            "branch_path": "телеком > коммутация > модули",
+            "entity_type": "rj45_outlet",
+            "item_markers": {"component_kind": "outlet", "installation_kind": "outlet_module", "port_count": "1"},
+        }
+
+        self.assertTrue(self.matcher._is_hard_incompatible_match(features, item))
+        self.assertEqual(self.matcher._hard_incompatibility_reason(features, item), "rj45_component_mismatch")
+
+    def test_rj45_outlet_blocks_single_port_for_two_port_cable_channel_assembly(self):
+        features = self.matcher._extract_query_features(
+            "Конструктив сетевой розетки для двух портов RJ-45 в кабель-канал, в сборе"
+        )
+        item = {
+            "name": "Розетка компьютерная 1-местная RJ-45",
+            "normalized_name": "розетка компьютерная 1 местная rj 45",
+            "branch_path": "телеком > коммутация > модули",
+            "entity_type": "rj45_outlet",
+            "item_markers": {"component_kind": "outlet", "installation_kind": "outlet_module", "port_count": "1"},
+        }
+
+        self.assertTrue(self.matcher._is_hard_incompatible_match(features, item))
+        self.assertEqual(self.matcher._hard_incompatibility_reason(features, item), "rj45_component_mismatch")
+
 
 if __name__ == "__main__":
     unittest.main()

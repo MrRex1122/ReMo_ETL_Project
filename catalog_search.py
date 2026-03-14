@@ -259,6 +259,48 @@ def _looks_like_patch_panel(normalized: str, phrase_normalized: str) -> bool:
     return any(marker in normalized for marker in telecom_markers)
 
 
+def _detect_port_count(normalized: str) -> str:
+    direct_match = re.search(
+        r"\b(\d{1,3})\s*(?:Ð¿Ð¾Ñ€Ñ‚|Ð¿Ð¾Ñ€Ñ‚Ð°|Ð¿Ð¾Ñ€Ñ‚Ð¾Ð²|Ð¿Ð¾ÑÑ‚|Ð¿Ð¾ÑÑ‚Ð°|Ð¿Ð¾ÑÑ‚Ð¾Ð²|Ð¼ÐµÑÑ‚|Ð¼ÐµÑÑ‚Ð°|Ð¼ÐµÑÑ‚Ð½Ð°Ñ)\b",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    if direct_match:
+        return direct_match.group(1)
+
+    word_patterns = (
+        (r"\bÐ¾Ð´Ð½(?:Ð¾Ð³Ð¾|Ð°|Ð¾|Ð¾Ð¼ÐµÑÑ‚Ð½\w*)\s*(?:Ð¿Ð¾Ñ€Ñ‚|Ð¿Ð¾Ñ€Ñ‚Ð°|Ð¿Ð¾Ñ€Ñ‚Ð¾Ð²)?", "1"),
+        (r"\bÐ´Ð²(?:Ð°|ÑƒÑ…|ÑƒÑ…Ð¿Ð¾Ñ€Ñ‚\w*|ÑƒÑ…Ð¼ÐµÑÑ‚\w*)\s*(?:Ð¿Ð¾Ñ€Ñ‚|Ð¿Ð¾Ñ€Ñ‚Ð°|Ð¿Ð¾Ñ€Ñ‚Ð¾Ð²)?", "2"),
+        (r"\bÑ‚Ñ€(?:Ð¸|ÐµÑ…)\s*(?:Ð¿Ð¾Ñ€Ñ‚|Ð¿Ð¾Ñ€Ñ‚Ð°|Ð¿Ð¾Ñ€Ñ‚Ð¾Ð²)?", "3"),
+        (r"\bÑ‡ÐµÑ‚Ñ‹Ñ€(?:Ðµ|ÐµÑ…)\s*(?:Ð¿Ð¾Ñ€Ñ‚|Ð¿Ð¾Ñ€Ñ‚Ð°|Ð¿Ð¾Ñ€Ñ‚Ð¾Ð²)?", "4"),
+    )
+    for pattern, value in word_patterns:
+        if re.search(pattern, normalized, flags=re.IGNORECASE):
+            return value
+    return ""
+
+
+def _detect_port_count_precise(normalized: str) -> str:
+    direct_match = re.search(
+        r"\b(\d{1,3})\s*(?:\u043f\u043e\u0440\u0442|\u043f\u043e\u0440\u0442\u0430|\u043f\u043e\u0440\u0442\u043e\u0432|\u043f\u043e\u0441\u0442|\u043f\u043e\u0441\u0442\u0430|\u043f\u043e\u0441\u0442\u043e\u0432|\u043c\u0435\u0441\u0442|\u043c\u0435\u0441\u0442\u0430|\u043c\u0435\u0441\u0442\u043d\u0430\u044f)\b",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    if direct_match:
+        return direct_match.group(1)
+
+    word_patterns = (
+        (r"\b\u043e\u0434\u043d(?:\u043e\u0433\u043e|\u0430|\u043e|\u043e\u043c\u0435\u0441\u0442\u043d\w*)\s*(?:\u043f\u043e\u0440\u0442|\u043f\u043e\u0440\u0442\u0430|\u043f\u043e\u0440\u0442\u043e\u0432)?", "1"),
+        (r"\b\u0434\u0432(?:\u0430|\u0443\u0445|\u0443\u0445\u043f\u043e\u0440\u0442\w*|\u0443\u0445\u043c\u0435\u0441\u0442\w*)\s*(?:\u043f\u043e\u0440\u0442|\u043f\u043e\u0440\u0442\u0430|\u043f\u043e\u0440\u0442\u043e\u0432)?", "2"),
+        (r"\b\u0442\u0440(?:\u0438|\u0435\u0445)\s*(?:\u043f\u043e\u0440\u0442|\u043f\u043e\u0440\u0442\u0430|\u043f\u043e\u0440\u0442\u043e\u0432)?", "3"),
+        (r"\b\u0447\u0435\u0442\u044b\u0440(?:\u0435|\u0435\u0445)\s*(?:\u043f\u043e\u0440\u0442|\u043f\u043e\u0440\u0442\u0430|\u043f\u043e\u0440\u0442\u043e\u0432)?", "4"),
+    )
+    for pattern, value in word_patterns:
+        if re.search(pattern, normalized, flags=re.IGNORECASE):
+            return value
+    return ""
+
+
 def _looks_like_ats_sts_device(normalized: str) -> bool:
     if "ÑÑ‚Ð°Ñ‚Ð¸Ñ‡ÐµÑÐº" in normalized and "Ð¿ÐµÑ€ÐµÐºÐ»ÑŽÑ‡Ð°Ñ‚ÐµÐ»" in normalized:
         return True
@@ -599,6 +641,30 @@ def extract_item_markers(
     if "19 inch" in normalized:
         markers["rack_size"] = "19 inch"
         markers["rack_mount_19"] = "yes"
+
+    if "ÐºÐ°Ð±ÐµÐ»ÑŒ ÐºÐ°Ð½Ð°Ð»" in normalized or "ÐºÐ°Ð±ÐµÐ»ÑŒ-ÐºÐ°Ð½Ð°Ð»" in original.lower():
+        markers["installation_kind"] = "cable_channel"
+
+    if "ÐºÐ¾Ð½ÑÑ‚Ñ€ÑƒÐºÑ‚Ð¸Ð²" in normalized or "Ð² ÑÐ±Ð¾Ñ€Ðµ" in normalized:
+        markers["component_kind"] = "assembly"
+    elif "Ð½Ð°ÐºÐ»Ð°Ð´Ðº" in normalized:
+        markers["component_kind"] = "adapter"
+
+    detected_port_count = _detect_port_count(normalized)
+    if detected_port_count:
+        markers["port_count"] = detected_port_count
+
+    if "\u043a\u0430\u0431\u0435\u043b\u044c \u043a\u0430\u043d\u0430\u043b" in normalized or "\u043a\u0430\u0431\u0435\u043b\u044c-\u043a\u0430\u043d\u0430\u043b" in original.lower():
+        markers["installation_kind"] = "cable_channel"
+
+    if "\u043a\u043e\u043d\u0441\u0442\u0440\u0443\u043a\u0442\u0438\u0432" in normalized or "\u0432 \u0441\u0431\u043e\u0440\u0435" in normalized:
+        markers["component_kind"] = "assembly"
+    elif "\u043d\u0430\u043a\u043b\u0430\u0434\u043a" in normalized:
+        markers["component_kind"] = "adapter"
+
+    detected_port_count_precise = _detect_port_count_precise(normalized)
+    if detected_port_count_precise:
+        markers["port_count"] = detected_port_count_precise
 
     return markers
 

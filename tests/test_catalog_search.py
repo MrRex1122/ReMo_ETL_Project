@@ -195,6 +195,29 @@ class CatalogSearchTests(unittest.TestCase):
         self.assertEqual(adapter_markers.get("component_kind"), "adapter")
         self.assertEqual(faceplate_markers.get("component_kind"), "faceplate")
 
+    def test_extract_item_markers_marks_rj45_outlet_assemblies_and_port_counts(self):
+        floor_box_markers = extract_item_markers(
+            "Конструктив сетевой розетки для одного порта RJ-45 в лючок напольный в сборе"
+        )
+        cable_channel_markers = extract_item_markers(
+            "Конструктив сетевой розетки для двух портов RJ-45 в кабель-канал, в сборе"
+        )
+        single_outlet_markers = extract_item_markers(
+            "Розетка компьютерная 1-местная RJ-45"
+        )
+        cover_markers = extract_item_markers(
+            "Накладка для информационных функций типа Keystone"
+        )
+
+        self.assertEqual(floor_box_markers.get("component_kind"), "assembly")
+        self.assertEqual(floor_box_markers.get("installation_kind"), "floor_box")
+        self.assertEqual(floor_box_markers.get("port_count"), "1")
+        self.assertEqual(cable_channel_markers.get("component_kind"), "assembly")
+        self.assertEqual(cable_channel_markers.get("installation_kind"), "cable_channel")
+        self.assertEqual(cable_channel_markers.get("port_count"), "2")
+        self.assertEqual(single_outlet_markers.get("port_count"), "1")
+        self.assertEqual(cover_markers.get("component_kind"), "adapter")
+
 
 if __name__ == "__main__":
     unittest.main()
