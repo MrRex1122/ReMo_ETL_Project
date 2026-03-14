@@ -1039,16 +1039,57 @@ def _render_match_diagnostics(run, df: pd.DataFrame) -> None:
         st.metric("input/query shape", int(reason_class_counts.get("input_or_query_shape", 0)))
 
     stage_table = prepare_match_diagnostics_stage_table(diagnostics_payload)
+    reason_table = prepare_match_diagnostics_reason_table(diagnostics_payload)
+    detail_table = prepare_match_diagnostics_table(diagnostics_payload)
+
+    diagnostics_summary_table = _summary_mapping_to_df(
+        {
+            "rows_total": summary.get("rows_total", 0),
+            "rows_resolved": summary.get("rows_resolved", 0),
+            "rows_unresolved": summary.get("rows_unresolved", 0),
+            "catalog_gap": reason_class_counts.get("catalog_gap", 0),
+            "retrieval_ranking": reason_class_counts.get("matcher_retrieval_or_ranking", 0),
+            "gemini_policy": reason_class_counts.get("gemini_or_decision_policy", 0),
+            "input_query_shape": reason_class_counts.get("input_or_query_shape", 0),
+            "reconstructed": "yes" if reconstructed else "no",
+            "generated_at": str(diagnostics_payload.get("generated_at") or "").strip(),
+        },
+        labels={
+            "rows_total": "Строк всего",
+            "rows_resolved": "Resolved",
+            "rows_unresolved": "Unresolved",
+            "catalog_gap": "catalog gap",
+            "retrieval_ranking": "retrieval/ranking",
+            "gemini_policy": "Gemini/policy",
+            "input_query_shape": "input/query shape",
+            "reconstructed": "Post-hoc reconstruction",
+            "generated_at": "Сгенерировано",
+        },
+    )
+    diagnostics_export = _build_excel_workbook_bytes(
+        [
+            ("summary", diagnostics_summary_table),
+            ("stages", stage_table),
+            ("reason_codes", reason_table),
+            ("details", detail_table),
+        ]
+    )
+    st.download_button(
+        "📥 Скачать всю диагностику",
+        diagnostics_export,
+        file_name=f"match_diagnostics_{run.run_id}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key=f"download_match_diagnostics_{run.run_id}",
+    )
+
     if not stage_table.empty:
         st.markdown("**Сводка по этапам отказа**")
         st.dataframe(_prepare_df_for_display(stage_table), width="stretch")
 
-    reason_table = prepare_match_diagnostics_reason_table(diagnostics_payload)
     if not reason_table.empty:
         st.markdown("**Сводка по кодам причин**")
         st.dataframe(_prepare_df_for_display(reason_table), width="stretch")
 
-    detail_table = prepare_match_diagnostics_table(diagnostics_payload)
     if not detail_table.empty:
         st.markdown("**Детали по строкам**")
         st.dataframe(_prepare_df_for_display(detail_table), width="stretch")
@@ -1131,11 +1172,46 @@ def _render_catalog_coverage_audit(run, df: pd.DataFrame) -> None:
     )
 
     family_table = prepare_catalog_coverage_family_table(audit_payload)
+    detail_table = prepare_catalog_coverage_audit_table(audit_payload)
+    audit_export = _build_excel_workbook_bytes(
+        [
+            (
+                "summary",
+                _summary_mapping_to_df(
+                    {
+                        "rows_analyzed": summary.get("rows_analyzed", 0),
+                        "catalog_missing_family": summary.get("catalog_missing_family", 0),
+                        "catalog_has_family_but_no_compatible_specs": summary.get("catalog_has_family_but_no_compatible_specs", 0),
+                        "catalog_has_compatible_candidates": summary.get("catalog_has_compatible_candidates", 0),
+                        "families_total": summary.get("families_total", 0),
+                        "generated_at": str(audit_payload.get("generated_at") or "").strip(),
+                    },
+                    labels={
+                        "rows_analyzed": "Строк в аудите",
+                        "catalog_missing_family": "Пробел каталога",
+                        "catalog_has_family_but_no_compatible_specs": "Есть family, нет specs",
+                        "catalog_has_compatible_candidates": "Есть совместимые кандидаты",
+                        "families_total": "Семейств в аудите",
+                        "generated_at": "Сгенерировано",
+                    },
+                ),
+            ),
+            ("families", family_table),
+            ("details", detail_table),
+        ]
+    )
+    st.download_button(
+        "📥 Скачать весь аудит",
+        audit_export,
+        file_name=f"catalog_coverage_audit_{run.run_id}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key=f"download_catalog_audit_{run.run_id}",
+    )
+
     if not family_table.empty:
         st.markdown("**Сводка по семействам**")
         st.dataframe(_prepare_df_for_display(family_table), width="stretch")
 
-    detail_table = prepare_catalog_coverage_audit_table(audit_payload)
     if not detail_table.empty:
         st.markdown("**Детали по строкам**")
         st.dataframe(_prepare_df_for_display(detail_table), width="stretch")
@@ -1164,6 +1240,30 @@ def _prepare_df_for_display(df: pd.DataFrame) -> pd.DataFrame:
         if display_df[col].dtype == object:
             display_df[col] = display_df[col].astype(str)
     return display_df
+
+
+def _summary_mapping_to_df(summary: dict[str, Any], *, labels: dict[str, str] | None = None) -> pd.DataFrame:
+    prepared_rows = []
+    for key, value in summary.items():
+        prepared_rows.append(
+            {
+                "Метрика": (labels or {}).get(str(key), str(key)),
+                "Значение": value,
+            }
+        )
+    return pd.DataFrame(prepared_rows)
+
+
+def _build_excel_workbook_bytes(sheets: list[tuple[str, pd.DataFrame]]) -> bytes:
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        for sheet_name, df in sheets:
+            export_df = df.copy()
+            if export_df.empty:
+                export_df = pd.DataFrame({"Статус": ["Нет данных"]})
+            export_df.to_excel(writer, index=False, sheet_name=sheet_name[:31])
+    buffer.seek(0)
+    return buffer.getvalue()
 
 
 def show_corrections_table(df):
