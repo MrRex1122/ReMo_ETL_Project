@@ -653,6 +653,11 @@ class ReMoMatcher:
         item_category = self._clean_text_value(item_markers.get("category"))
         if query_type in {"bulk_twisted_pair", "patch_cord"} and query_category and item_category != query_category:
             return "category_mismatch"
+        if query_type in {"patch_panel", "keystone", "rj45_connector"} and query_category:
+            if item_category and item_category != query_category:
+                return "category_mismatch"
+            if not item_category:
+                return "category_mismatch"
 
         query_shielding = self._clean_text_value(query_markers.get("shielding"))
         item_shielding = self._clean_text_value(item_markers.get("shielding"))
@@ -664,6 +669,19 @@ class ReMoMatcher:
                 return "shielding_mismatch"
             if not item_shielding and query_shielding in {"ftp", "sftp", "shielded"}:
                 return "shielding_mismatch"
+        if query_type in {"patch_panel", "keystone", "rj45_connector"} and query_shielding:
+            if item_shielding and item_shielding != query_shielding:
+                return "shielding_mismatch"
+            if not item_shielding and query_shielding in {"ftp", "sftp", "shielded", "utp"}:
+                return "shielding_mismatch"
+
+        query_port_count = self._clean_text_value(query_markers.get("port_count"))
+        item_port_count = self._clean_text_value(item_markers.get("port_count"))
+        if query_type == "patch_panel" and query_port_count:
+            if item_port_count and item_port_count != query_port_count:
+                return "port_count_mismatch"
+            if not item_port_count:
+                return "port_count_mismatch"
 
         query_cable_environment = self._clean_text_value(query_markers.get("cable_environment"))
         item_cable_environment = self._clean_text_value(item_markers.get("cable_environment"))
@@ -714,6 +732,18 @@ class ReMoMatcher:
             return "rj45_family_mismatch"
         if query_type == "rj45_outlet" and candidate_type not in {"rj45_outlet", "keystone"}:
             return "rj45_family_mismatch"
+
+        query_component = self._clean_text_value(query_markers.get("component_kind"))
+        item_component = self._clean_text_value(item_markers.get("component_kind"))
+        if query_type == "keystone":
+            if item_component in {"adapter", "faceplate", "outlet", "connector"}:
+                return "rj45_component_mismatch"
+        if query_type == "rj45_connector":
+            if item_component and item_component != "connector":
+                return "rj45_component_mismatch"
+        if query_type == "rj45_outlet":
+            if item_component in {"adapter", "faceplate", "connector"}:
+                return "rj45_component_mismatch"
 
         if query_type == "floor_box":
             if self._clean_text_value(item_markers.get("installation_kind")) != "floor_box":

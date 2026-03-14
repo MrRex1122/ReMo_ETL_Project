@@ -235,7 +235,7 @@ class MatchTaxonomyTests(unittest.TestCase):
             "normalized_name": "патч панель 1u категории 6 utp 24 порта",
             "branch_path": "телеком > коммутация > патч панели",
             "entity_type": "patch_panel",
-            "item_markers": {"category": "cat6", "rack_unit": "1"},
+            "item_markers": {"category": "cat6", "shielding": "utp", "port_count": "24", "rack_unit": "1"},
         }
 
         self.assertFalse(self.matcher._is_strict_fallback_allowed(features, wrong_item))
@@ -311,6 +311,50 @@ class MatchTaxonomyTests(unittest.TestCase):
 
         self.assertTrue(self.matcher._is_hard_incompatible_match(features, item))
         self.assertEqual(self.matcher._hard_incompatibility_reason(features, item), "cable_environment_mismatch")
+
+
+    def test_patch_panel_blocks_missing_category_and_ports(self):
+        features = self.matcher._extract_query_features(
+            "Панель коммутационная неэкранированной 24 порта, блочная, категория 6"
+        )
+        item = {
+            "name": "Панель 19 1U",
+            "normalized_name": "панель 19 1u",
+            "branch_path": "телеком > аксессуары > шкафные аксессуары",
+            "entity_type": "patch_panel",
+            "item_markers": {"rack_unit": "1"},
+        }
+
+        self.assertTrue(self.matcher._is_hard_incompatible_match(features, item))
+        self.assertEqual(self.matcher._hard_incompatibility_reason(features, item), "category_mismatch")
+
+    def test_keystone_blocks_adapter_and_missing_category(self):
+        features = self.matcher._extract_query_features("Модуль Keystone, экранированный, категория 6a")
+        item = {
+            "name": "Avanti Адаптер для Keystone 1 модуль",
+            "normalized_name": "avanti адаптер для keystone 1 модуль",
+            "branch_path": "телеком > коммутация > модули",
+            "entity_type": "keystone_module",
+            "item_markers": {"component_kind": "adapter"},
+        }
+
+        self.assertTrue(self.matcher._is_hard_incompatible_match(features, item))
+        self.assertEqual(self.matcher._hard_incompatibility_reason(features, item), "category_mismatch")
+
+    def test_rj45_outlet_blocks_faceplate_only_items(self):
+        features = self.matcher._extract_query_features(
+            "Конструктив сетевой розетки для одного порта RJ-45 в лючок напольный в сборе"
+        )
+        item = {
+            "name": "Лицевая панель для информационных розеток Keystone 2 модуля",
+            "normalized_name": "лицевая панель для информационных розеток keystone 2 модуля",
+            "branch_path": "телеком > коммутация > модули",
+            "entity_type": "keystone_module",
+            "item_markers": {"component_kind": "faceplate"},
+        }
+
+        self.assertTrue(self.matcher._is_hard_incompatible_match(features, item))
+        self.assertEqual(self.matcher._hard_incompatibility_reason(features, item), "rj45_component_mismatch")
 
 
 if __name__ == "__main__":

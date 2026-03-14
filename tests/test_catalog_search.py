@@ -10,6 +10,7 @@ from catalog_search import (
     build_search_catalog_from_merged,
     classify_item_type,
     derive_branch_from_text,
+    extract_item_markers,
     get_search_catalog_path,
     get_search_catalog_readiness,
     refresh_search_catalog,
@@ -171,6 +172,28 @@ class CatalogSearchTests(unittest.TestCase):
             classify_item_type("online ups 2000va input IEC-320-C20 output IEC-320-C13 IEC-320-C19"),
             "iec_power_cable",
         )
+
+    def test_classify_item_type_does_not_treat_non_telecom_commutation_panel_as_patch_panel(self):
+        self.assertNotEqual(
+            classify_item_type("Панель коммутационная Ridan WD на 8 каналов и 14 приводов"),
+            "patch_panel",
+        )
+
+    def test_extract_item_markers_normalizes_category_and_panel_markers(self):
+        markers = extract_item_markers("Патч-панель категория 5е UTP 24 порта")
+        self.assertEqual(markers.get("category"), "cat5e")
+        self.assertEqual(markers.get("port_count"), "24")
+
+        markers = extract_item_markers("Модуль Keystone экранированный категория 6а")
+        self.assertEqual(markers.get("category"), "cat6a")
+        self.assertEqual(markers.get("component_kind"), "module")
+
+    def test_extract_item_markers_marks_keystone_adapters_and_faceplates(self):
+        adapter_markers = extract_item_markers("Avanti Адаптер для Keystone 1 модуль")
+        faceplate_markers = extract_item_markers("Лицевая панель для информационных розеток Keystone 2 модуля")
+
+        self.assertEqual(adapter_markers.get("component_kind"), "adapter")
+        self.assertEqual(faceplate_markers.get("component_kind"), "faceplate")
 
 
 if __name__ == "__main__":

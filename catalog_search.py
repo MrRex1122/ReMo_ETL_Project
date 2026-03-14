@@ -239,6 +239,26 @@ def _has_iec_power_cable_context(normalized: str) -> bool:
     return any(marker in normalized for marker in cable_context_markers)
 
 
+def _looks_like_patch_panel(normalized: str, phrase_normalized: str) -> bool:
+    if "патч панел" in phrase_normalized or "patch panel" in phrase_normalized:
+        return True
+    if "панел" not in normalized or "коммутац" not in normalized:
+        return False
+    telecom_markers = (
+        "порт",
+        "rj45",
+        "rj 45",
+        "cat",
+        "категор",
+        "ethernet",
+        "keystone",
+        "кейстоун",
+        "krone",
+        "19 inch",
+    )
+    return any(marker in normalized for marker in telecom_markers)
+
+
 def _looks_like_ats_sts_device(normalized: str) -> bool:
     if "ÑÑ‚Ð°Ñ‚Ð¸Ñ‡ÐµÑÐº" in normalized and "Ð¿ÐµÑ€ÐµÐºÐ»ÑŽÑ‡Ð°Ñ‚ÐµÐ»" in normalized:
         return True
@@ -314,9 +334,7 @@ def classify_item_type(text: str, synonyms: Mapping[str, str] | None = None) -> 
         return "ground_bar"
     if has_iec_connector_markers:
         return "iec_power_cable"
-    if "патч панел" in phrase_normalized or "patch panel" in phrase_normalized or (
-        "панел" in normalized and "коммутац" in normalized
-    ):
+    if _looks_like_patch_panel(normalized, phrase_normalized):
         return "patch_panel"
     if "патч корд" in phrase_normalized:
         return "patch_cord"
@@ -480,12 +498,17 @@ def extract_item_markers(
                 break
 
     category_match = re.search(
-        r"\b(?:cat|кат|категор(?:ия|ии)?)\s*(5e|6a|6а|6)\b",
+        r"\b(?:cat|кат|категор(?:ия|ии)?)\s*(5e|5е|6a|6а|6)\b",
         normalized,
         flags=re.IGNORECASE,
     )
     if category_match:
-        category_value = category_match.group(1).replace("а", "a").lower()
+        category_value = (
+            category_match.group(1)
+            .replace("а", "a")
+            .replace("е", "e")
+            .lower()
+        )
         markers["category"] = f"cat{category_value}"
 
     if "неэкранир" in normalized:
@@ -540,6 +563,21 @@ def extract_item_markers(
         markers["installation_kind"] = "floor_box"
     elif re.search(r"\brj[\s-]?45\b", normalized, flags=re.IGNORECASE) and "розетк" in normalized:
         markers["installation_kind"] = "outlet_module"
+
+    if "адаптер" in normalized:
+        markers["component_kind"] = "adapter"
+    elif "лицевая панель" in normalized or ("панел" in normalized and "keystone" in normalized):
+        markers["component_kind"] = "faceplate"
+    elif "коннектор" in normalized and re.search(r"\brj[\s-]?45\b", normalized, flags=re.IGNORECASE):
+        markers["component_kind"] = "connector"
+    elif "розетк" in normalized and re.search(r"\brj[\s-]?45\b", normalized, flags=re.IGNORECASE):
+        markers["component_kind"] = "outlet"
+    elif "keystone" in normalized or "кейстоун" in normalized:
+        markers["component_kind"] = "module"
+
+    port_count_match = re.search(r"\b(\d{1,3})\s*порт", normalized, flags=re.IGNORECASE)
+    if port_count_match:
+        markers["port_count"] = port_count_match.group(1)
 
     length_match = re.search(r"(\d+(?:[.,]\d+)?)\s*м\b", normalized)
     if length_match:

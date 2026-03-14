@@ -216,7 +216,7 @@ class CatalogCoverageAuditTests(unittest.TestCase):
                 catalog_path,
                 [
                     {
-                        CANONICAL_NAME_COLUMN: "patch panel 24 port cat6",
+                        CANONICAL_NAME_COLUMN: "Патч-панель 24 порта cat6",
                         CANONICAL_ARTICLE_COLUMN: "PP-PRE",
                         "???????? ??????": "patch panels",
                         "??? ???????": "patch panel",
@@ -224,7 +224,10 @@ class CatalogCoverageAuditTests(unittest.TestCase):
                         "search_branch_path": "телеком > коммутация > патч панели",
                         "search_normalized_name": "патч панель 24 порта категория 6",
                         "search_entity_type": "patch_panel",
-                        "search_item_markers_json": json.dumps({"category": "cat6"}, ensure_ascii=False),
+                        "search_item_markers_json": json.dumps(
+                            {"category": "cat6", "port_count": "24"},
+                            ensure_ascii=False,
+                        ),
                     }
                 ],
             )
@@ -403,6 +406,60 @@ class CatalogCoverageAuditTests(unittest.TestCase):
             row = self._first_row(payload)
             self.assertEqual(row["same_family_candidates_count"], 0)
             self.assertEqual(row["compatible_candidates_count"], 0)
+
+    def test_patch_panel_audit_does_not_count_non_telecom_commutation_panels_as_compatible(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            catalog_path = Path(tmp_dir) / "catalog.csv"
+            _write_catalog_csv(
+                catalog_path,
+                [
+                    {
+                        CANONICAL_NAME_COLUMN: "Панель коммутационная Ridan WD на 8 каналов и 14 приводов",
+                        CANONICAL_ARTICLE_COLUMN: "RIDAN-PANEL",
+                        "Название класса": "Панели управления",
+                        "Тип изделия": "Панель коммутационная",
+                        "Тип исполнения кабельного изделия": "",
+                    }
+                ],
+            )
+
+            payload = build_catalog_coverage_audit(
+                _build_result_df("Панель коммутационная неэкранированной 24 порта, блочная, категория 6"),
+                run_id="run-patch-panel-noise",
+                catalog_source_path=catalog_path,
+                catalog_source_kind="merged",
+            )
+
+            row = self._first_row(payload)
+            self.assertIn(row["diagnosis"], {"catalog_missing_family", "catalog_has_family_but_no_compatible_specs"})
+            self.assertEqual(row["compatible_candidates_count"], 0)
+
+    def test_keystone_audit_does_not_count_adapters_as_compatible_modules(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            catalog_path = Path(tmp_dir) / "catalog.csv"
+            _write_catalog_csv(
+                catalog_path,
+                [
+                    {
+                        CANONICAL_NAME_COLUMN: "Avanti Адаптер для Keystone 1 модуль",
+                        CANONICAL_ARTICLE_COLUMN: "KEY-ADAPTER",
+                        "Название класса": "Адаптеры",
+                        "Тип изделия": "Адаптер для Keystone",
+                        "Тип исполнения кабельного изделия": "",
+                    }
+                ],
+            )
+
+            payload = build_catalog_coverage_audit(
+                _build_result_df("Модуль Keystone, экранированный, категория 6a"),
+                run_id="run-keystone-adapter",
+                catalog_source_path=catalog_path,
+                catalog_source_kind="merged",
+            )
+
+            row = self._first_row(payload)
+            self.assertEqual(row["compatible_candidates_count"], 0)
+            self.assertEqual(row["diagnosis"], "catalog_has_family_but_no_compatible_specs")
 
 
 if __name__ == "__main__":
