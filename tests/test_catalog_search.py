@@ -160,6 +160,18 @@ class CatalogSearchTests(unittest.TestCase):
             "ats_sts",
         )
 
+    def test_classify_item_type_marks_ascii_power_cord_as_iec_power_cable(self):
+        self.assertEqual(
+            classify_item_type("power cord IEC320 C19-C20 1.8m"),
+            "iec_power_cable",
+        )
+
+    def test_classify_item_type_does_not_treat_ascii_ups_ports_as_iec_power_cable(self):
+        self.assertNotEqual(
+            classify_item_type("online ups 2000va input IEC-320-C20 output IEC-320-C13 IEC-320-C19"),
+            "iec_power_cable",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

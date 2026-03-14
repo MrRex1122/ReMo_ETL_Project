@@ -233,7 +233,6 @@ def _has_iec_power_cable_context(normalized: str) -> bool:
         "\u043a\u0430\u0431\u0435\u043b\u044c",
         "\u0448\u043d\u0443\u0440",
         "\u0441\u043e\u0435\u0434\u0438\u043d\u0438\u0442\u0435\u043b\u044c\u043d",
-        "\u043f\u0438\u0442\u0430\u043d\u0438\u044f",
         "cord",
         "power cord",
     )
