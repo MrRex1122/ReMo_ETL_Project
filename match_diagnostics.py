@@ -6,7 +6,7 @@ from typing import Any
 
 import pandas as pd
 
-MATCH_DIAGNOSTICS_VERSION = 1
+MATCH_DIAGNOSTICS_VERSION = 2
 MISSING_POSITION_TEXT = "Позиция отсутствует"
 
 HEADER_QUERY_VALUES = {
@@ -27,6 +27,15 @@ GEMINI_REASON_CODES = {
 FALLBACK_REASON_CODES = {
     "strict_fallback_family_mismatch",
     "strict_class_requires_compatible_match",
+}
+GENERIC_CATALOG_GAP_CODES = {
+    "resolved",
+    "no_compatible_candidates",
+    "strict_class_no_compatible_candidate",
+    "strict_class_requires_compatible_match",
+    "no_confirmed_compatible_candidate",
+    "gemini_rejected_all_candidates",
+    "gemini_returned_no_valid_candidate",
 }
 
 REASON_CLASS_LABELS = {
@@ -125,24 +134,47 @@ def _enrich_row_with_coverage_audit(row: dict[str, Any], coverage_row: dict[str,
     diagnosis = _clean_text_value(coverage_row.get("diagnosis"))
     enriched["catalog_audit_diagnosis"] = diagnosis
 
-    stage = _clean_text_value(enriched.get("stage_of_failure"))
-    reason_code = _normalize_reason_code(enriched.get("reason_code"))
-    if diagnosis in {"catalog_missing_family", "catalog_has_family_but_no_compatible_specs"} and stage in EARLY_FAILURE_STAGES:
-        enriched["stage_of_failure"] = "catalog_gap"
-        enriched["reason_class"] = "catalog_gap"
-        if diagnosis == "catalog_missing_family" and reason_code == "resolved":
-            enriched["reason_code"] = "catalog_missing_family"
-        elif diagnosis == "catalog_has_family_but_no_compatible_specs" and reason_code == "resolved":
-            enriched["reason_code"] = "catalog_has_family_but_no_compatible_specs"
-    elif diagnosis == "catalog_has_compatible_candidates" and stage in EARLY_FAILURE_STAGES:
-        enriched["reason_class"] = "matcher_retrieval_or_ranking"
-
     pipeline_counts = dict(enriched.get("pipeline_counts") or {})
     if "same_family_count" not in pipeline_counts:
         pipeline_counts["same_family_count"] = _safe_int(coverage_row.get("same_family_candidates_count"))
     if "compatible_count" not in pipeline_counts:
         pipeline_counts["compatible_count"] = _safe_int(coverage_row.get("compatible_candidates_count"))
     enriched["pipeline_counts"] = pipeline_counts
+
+    stage = _clean_text_value(enriched.get("stage_of_failure"))
+    reason_code = _normalize_reason_code(enriched.get("reason_code"))
+    same_family_count = _safe_int(pipeline_counts.get("same_family_count"))
+    compatible_count = _safe_int(pipeline_counts.get("compatible_count"))
+
+    if stage not in {"resolved", "query_input", "runtime_error"} and reason_code == "resolved":
+        if stage in {"gemini_selection", "fallback_policy"}:
+            enriched["reason_code"] = "gemini_returned_no_valid_candidate"
+        else:
+            enriched["reason_code"] = "no_compatible_candidates"
+        reason_code = _normalize_reason_code(enriched.get("reason_code"))
+
+    if (
+        diagnosis in {"catalog_missing_family", "catalog_has_family_but_no_compatible_specs"}
+        and stage != "resolved"
+        and compatible_count <= 0
+    ):
+        enriched["stage_of_failure"] = "catalog_gap"
+        enriched["reason_class"] = "catalog_gap"
+        if diagnosis == "catalog_missing_family" and (
+            reason_code in GENERIC_CATALOG_GAP_CODES or same_family_count <= 0
+        ):
+            enriched["reason_code"] = "catalog_missing_family"
+        elif diagnosis == "catalog_has_family_but_no_compatible_specs" and (
+            reason_code in GENERIC_CATALOG_GAP_CODES or compatible_count <= 0
+        ):
+            enriched["reason_code"] = "catalog_has_family_but_no_compatible_specs"
+    elif diagnosis == "catalog_has_compatible_candidates" and stage in EARLY_FAILURE_STAGES:
+        enriched["reason_class"] = "matcher_retrieval_or_ranking"
+        if reason_code == "resolved":
+            if same_family_count <= 0:
+                enriched["reason_code"] = "compatible_candidates_exist_but_not_retrieved"
+            elif compatible_count <= 0:
+                enriched["reason_code"] = "compatible_candidates_retrieved_but_filtered_out"
 
     candidate_snapshots = dict(enriched.get("candidate_snapshots") or {})
     candidate_snapshots.setdefault("display_examples", _row_display_examples(candidate_snapshots, coverage_row))
@@ -276,6 +308,10 @@ def _base_stage_from_result(row: pd.Series) -> tuple[str, str]:
         return "query_input", incompatibility_reason
     if incompatibility_reason in FALLBACK_REASON_CODES:
         return "fallback_policy", incompatibility_reason
+    if incompatibility_reason == "resolved":
+        if compatibility_status == "rejected_incompatible_gemini" or gemini_shortlist > 0:
+            return "gemini_selection", "gemini_rejected_all_candidates"
+        return "local_recall", "no_compatible_candidates"
     if compatibility_status == "rejected_incompatible_gemini" or gemini_shortlist > 0:
         if incompatibility_reason == "resolved":
             return "gemini_selection", "gemini_returned_no_valid_candidate"

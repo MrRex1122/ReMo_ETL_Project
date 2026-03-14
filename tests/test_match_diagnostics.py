@@ -144,6 +144,66 @@ class MatchDiagnosticsTests(unittest.TestCase):
         self.assertEqual(row["reason_class"], "matcher_retrieval_or_ranking")
         self.assertEqual(row["catalog_audit_diagnosis"], "catalog_has_compatible_candidates")
 
+    def test_reconstructed_unresolved_without_reason_defaults_to_no_compatible_candidates(self):
+        df = pd.DataFrame(
+            {
+                "Наименование оборудования, материалов и кабелей": ["Шкафы телекоммуникационные"],
+                "Найденная номенклатура": ["Позиция отсутствует"],
+                "Источник решения": ["unresolved"],
+                "Совместимость решения": ["unresolved_no_compatible_candidates"],
+                "Причина несовместимости": [""],
+                "Gemini shortlist": [0],
+                "Gemini visible candidates": [0],
+                "Gemini truncated": [0],
+            }
+        )
+
+        payload = reconstruct_match_diagnostics(df, run_id="run-1")
+        row = payload["rows"][0]
+        self.assertEqual(row["stage_of_failure"], "local_recall")
+        self.assertEqual(row["reason_code"], "no_compatible_candidates")
+
+    def test_coverage_audit_reclassifies_gemini_rejection_without_compatible_candidates_as_catalog_gap(self):
+        diagnostics = build_match_diagnostics_payload(
+            [
+                {
+                    "run_row_number": 15,
+                    "query_text": "Кабель IEC C19-C20",
+                    "row_type": "item",
+                    "entity_type": "iec_power_cable",
+                    "query_family": "iec_power_cable",
+                    "resolution_source": "unresolved",
+                    "compatibility_status": "rejected_incompatible_gemini",
+                    "incompatibility_reason": "connector_mismatch",
+                    "stage_of_failure": "gemini_selection",
+                    "reason_code": "connector_mismatch",
+                    "reason_class": "gemini_or_decision_policy",
+                    "pipeline_counts": {"same_family_count": 33, "compatible_count": 0},
+                    "candidate_snapshots": {},
+                    "gemini": {"attempted": True, "shortlist_count": 3},
+                    "trace_steps": [],
+                }
+            ],
+            run_id="run-1",
+        )
+        coverage_audit = {
+            "rows": [
+                {
+                    "run_row_number": 15,
+                    "diagnosis": "catalog_has_family_but_no_compatible_specs",
+                    "same_family_candidates_count": 33,
+                    "compatible_candidates_count": 0,
+                    "candidate_examples": [],
+                }
+            ]
+        }
+
+        enriched = enrich_match_diagnostics_payload(diagnostics, coverage_audit_payload=coverage_audit)
+        row = enriched["rows"][0]
+        self.assertEqual(row["stage_of_failure"], "catalog_gap")
+        self.assertEqual(row["reason_class"], "catalog_gap")
+        self.assertEqual(row["catalog_audit_diagnosis"], "catalog_has_family_but_no_compatible_specs")
+
     def test_prepare_tables_return_expected_columns(self):
         payload = build_match_diagnostics_payload(
             [
