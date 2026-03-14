@@ -19,6 +19,12 @@ import threading
 from typing import Any
 from cloudflare_r2_export import upload_file_to_r2
 from catalog_search import get_search_catalog_readiness, refresh_search_catalog
+from catalog_coverage_audit import (
+    build_catalog_coverage_audit,
+    is_catalog_coverage_audit_fresh,
+    prepare_catalog_coverage_audit_table,
+    prepare_catalog_coverage_family_table,
+)
 from config import (
     get_catalog_csv_path,
     get_matcher_cache_db_path,
@@ -42,6 +48,7 @@ from processing_runs import (
     get_processing_run,
     has_processing_run_draft,
     list_processing_runs,
+    load_processing_run_coverage_audit,
     load_processing_run_dataframe,
     load_processing_run_progress,
     load_processing_run_stats,
@@ -52,6 +59,7 @@ from processing_runs import (
     register_processing_run_thread,
     save_processing_run_draft,
     unregister_processing_run_thread,
+    write_processing_run_coverage_audit,
     write_processing_run_error,
     write_processing_run_progress,
     write_processing_run_result,
@@ -905,6 +913,93 @@ def show_statistics(stats):
 
 
 
+def _render_catalog_coverage_audit(run, df: pd.DataFrame) -> None:
+    st.subheader("🔎 Аудит покрытия каталога")
+    st.caption(
+        "Проверка помогает понять, это честный unresolved из-за каталога или в БД уже есть "
+        "совместимые кандидаты и сначала нужно тюнить matcher."
+    )
+
+    audit_payload = None
+    audit_error = None
+    try:
+        stored_payload = load_processing_run_coverage_audit(run.run_id)
+        if is_catalog_coverage_audit_fresh(
+            stored_payload,
+            run_id=run.run_id,
+            catalog_source_path=run.catalog_source_path,
+            catalog_source_kind=run.catalog_source_kind,
+        ):
+            audit_payload = stored_payload
+    except Exception as exc:
+        audit_error = exc
+
+    button_col, status_col = st.columns([1, 2])
+    with button_col:
+        run_audit = st.button("🔎 Проверить покрытие каталога", key=f"catalog_coverage_audit_{run.run_id}")
+    with status_col:
+        if audit_payload is not None:
+            generated_at = str(audit_payload.get("generated_at") or "").strip()
+            if generated_at:
+                st.caption(f"Используется сохраненный аудит: {generated_at}")
+        elif audit_error is not None:
+            st.caption("Сохраненный аудит не удалось прочитать, можно пересчитать.")
+        else:
+            st.caption("Аудит еще не рассчитывался для этого прогона.")
+
+    if run_audit:
+        try:
+            with st.spinner("Проверяю покрытие каталога по использованной БД..."):
+                audit_payload = build_catalog_coverage_audit(
+                    df,
+                    run_id=run.run_id,
+                    catalog_source_path=run.catalog_source_path,
+                    catalog_source_kind=run.catalog_source_kind,
+                )
+                write_processing_run_coverage_audit(run.run_id, audit_payload)
+            st.success("✓ Аудит покрытия каталога сохранен.")
+        except Exception as exc:
+            logger.error("❌ Не удалось построить аудит покрытия каталога для %s: %s", run.run_id, exc, exc_info=True)
+            st.error(f"❌ Не удалось построить аудит покрытия каталога: {exc}")
+            audit_payload = None
+
+    if audit_error is not None and audit_payload is None:
+        st.warning(f"⚠️ Не удалось загрузить сохраненный аудит покрытия каталога: {audit_error}")
+
+    if audit_payload is None:
+        st.info(
+            "Нажмите «Проверить покрытие каталога», чтобы получить диагноз по проблемным телеком-строкам "
+            "и понять, это пробел БД или точка роста для matcher."
+        )
+        return
+
+    summary = audit_payload.get("summary", {}) if isinstance(audit_payload, dict) else {}
+    metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
+    with metric_col1:
+        st.metric("Строк в аудите", int(summary.get("rows_analyzed", 0)))
+    with metric_col2:
+        st.metric("Пробел каталога", int(summary.get("catalog_missing_family", 0)))
+    with metric_col3:
+        st.metric("Есть family, нет specs", int(summary.get("catalog_has_family_but_no_compatible_specs", 0)))
+    with metric_col4:
+        st.metric("Есть совместимые кандидаты", int(summary.get("catalog_has_compatible_candidates", 0)))
+
+    st.caption(
+        "Есть совместимые кандидаты = сначала тюним matcher. "
+        "Пробел каталога = это скорее проблема входной БД, а не матчинга."
+    )
+
+    family_table = prepare_catalog_coverage_family_table(audit_payload)
+    if not family_table.empty:
+        st.markdown("**Сводка по семействам**")
+        st.dataframe(_prepare_df_for_display(family_table), width="stretch")
+
+    detail_table = prepare_catalog_coverage_audit_table(audit_payload)
+    if not detail_table.empty:
+        st.markdown("**Детали по строкам**")
+        st.dataframe(_prepare_df_for_display(detail_table), width="stretch")
+
+
 def _ensure_history_table_exists(conn: sqlite3.Connection) -> None:
     """Создать таблицу истории, если БД открыта до инициализации matcher."""
     conn.execute("""
@@ -1705,6 +1800,8 @@ def main():
                 if has_processing_run_draft(run):
                     st.info("📝 Для этого прогона есть автосохраненный черновик правок.")
                 show_statistics(stats)
+                st.divider()
+                _render_catalog_coverage_audit(run, df)
 
                 st.divider()
 

@@ -13,11 +13,13 @@ from processing_runs import (
     get_processing_run,
     has_processing_run_draft,
     load_processing_run_dataframe,
+    load_processing_run_coverage_audit,
     load_processing_run_stats,
     mark_processing_run_completed,
     mark_processing_run_started,
     mark_stale_running_runs_as_interrupted,
     save_processing_run_draft,
+    write_processing_run_coverage_audit,
     write_processing_run_result,
 )
 
@@ -134,6 +136,35 @@ class ProcessingRunsTests(unittest.TestCase):
         assert preferred_after is not None
         self.assertEqual(preferred_after.run_id, completed.run_id)
         self.assertEqual(get_latest_completed_processing_run().run_id, completed.run_id)
+
+    def test_processing_run_persists_catalog_coverage_audit(self):
+        run = create_processing_run(
+            input_filename="input.xlsx",
+            catalog_source_path=Path("catalog.csv"),
+            catalog_source_kind="search",
+        )
+        payload = {
+            "run_id": run.run_id,
+            "catalog_source_path": "catalog.csv",
+            "catalog_source_kind": "search",
+            "catalog_mtime": 123.0,
+            "summary": {"rows_analyzed": 1},
+            "rows": [
+                {
+                    "run_row_number": 2,
+                    "query_text": "Патч-панель 24 порта",
+                    "diagnosis": "catalog_has_compatible_candidates",
+                }
+            ],
+        }
+
+        audit_path = write_processing_run_coverage_audit(run.run_id, payload)
+        self.assertTrue(audit_path.exists())
+
+        loaded_payload = load_processing_run_coverage_audit(run.run_id)
+        assert loaded_payload is not None
+        self.assertEqual(loaded_payload["run_id"], run.run_id)
+        self.assertEqual(loaded_payload["summary"]["rows_analyzed"], 1)
 
 
 if __name__ == "__main__":
