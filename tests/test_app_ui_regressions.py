@@ -26,6 +26,12 @@ class AppUiRegressionTests(unittest.TestCase):
         self.assertIn("coverage_audit.json", processing_runs_source)
         self.assertIn("Проверить покрытие каталога", app_source)
 
+    def test_match_diagnostics_ui_is_present(self):
+        app_source = Path("app.py").read_text(encoding="utf-8")
+        processing_runs_source = Path("processing_runs.py").read_text(encoding="utf-8")
+        self.assertIn("match_diagnostics.json", processing_runs_source)
+        self.assertIn("Диагностика причин ненахода", app_source)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -77,6 +77,9 @@ class ProcessExcelExistingColumnsTests(unittest.TestCase):
         for col in (
             "Совместимость решения",
             "Причина несовместимости",
+            "Этап отказа",
+            "Код причины",
+            "Класс причины",
             "Gemini shortlist",
             "Gemini visible candidates",
             "Gemini truncated",
@@ -88,6 +91,8 @@ class ProcessExcelExistingColumnsTests(unittest.TestCase):
         self.assertEqual(stats["not_found"], 1)
         self.assertEqual(stats["errors"], 0)
         self.assertIn("gemini_rows_total", stats)
+        self.assertIn("diagnostic_stage_counts", stats)
+        self.assertIn("diagnostic_reason_code_counts", stats)
 
     def test_process_excel_overwrites_existing_result_cells(self):
         df = pd.DataFrame(
@@ -105,12 +110,15 @@ class ProcessExcelExistingColumnsTests(unittest.TestCase):
         self.assertEqual(result_df.loc[0, "Цена"], 100.5)
         self.assertEqual(result_df.loc[0, "Найденная номенклатура"], "Номенклатура 1")
         self.assertEqual(result_df.loc[0, "Артикул"], "ART-100")
+        self.assertEqual(result_df.loc[0, "Этап отказа"], "resolved")
+        self.assertEqual(result_df.loc[0, "Код причины"], "resolved")
 
         self.assertTrue(pd.isna(result_df.loc[1, "Цена"]))
         self.assertEqual(result_df.loc[1, "Найденная номенклатура"], MISSING_POSITION_TEXT)
         self.assertTrue(pd.isna(result_df.loc[1, "Артикул"]))
         self.assertIn("Позиция 2", str(result_df.loc[1, "Причина отсутствия"]))
         self.assertIn("не найдена", str(result_df.loc[1, "Причина отсутствия"]).lower())
+        self.assertEqual(result_df.loc[1, "Этап отказа"], "local_recall")
 
 
 if __name__ == "__main__":

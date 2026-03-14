@@ -14,12 +14,14 @@ from processing_runs import (
     has_processing_run_draft,
     load_processing_run_dataframe,
     load_processing_run_coverage_audit,
+    load_processing_run_match_diagnostics,
     load_processing_run_stats,
     mark_processing_run_completed,
     mark_processing_run_started,
     mark_stale_running_runs_as_interrupted,
     save_processing_run_draft,
     write_processing_run_coverage_audit,
+    write_processing_run_match_diagnostics,
     write_processing_run_result,
 )
 
@@ -165,6 +167,35 @@ class ProcessingRunsTests(unittest.TestCase):
         assert loaded_payload is not None
         self.assertEqual(loaded_payload["run_id"], run.run_id)
         self.assertEqual(loaded_payload["summary"]["rows_analyzed"], 1)
+
+    def test_processing_run_persists_match_diagnostics(self):
+        run = create_processing_run(
+            input_filename="input.xlsx",
+            catalog_source_path=Path("catalog.csv"),
+            catalog_source_kind="search",
+        )
+        payload = {
+            "diagnostics_version": 1,
+            "run_id": run.run_id,
+            "summary": {"rows_total": 1, "rows_unresolved": 1},
+            "rows": [
+                {
+                    "run_row_number": 2,
+                    "query_text": "Патч-панель 24 порта",
+                    "stage_of_failure": "catalog_gap",
+                    "reason_code": "catalog_missing_family",
+                    "reason_class": "catalog_gap",
+                }
+            ],
+        }
+
+        diagnostics_path = write_processing_run_match_diagnostics(run.run_id, payload)
+        self.assertTrue(diagnostics_path.exists())
+
+        loaded_payload = load_processing_run_match_diagnostics(run.run_id)
+        assert loaded_payload is not None
+        self.assertEqual(loaded_payload["run_id"], run.run_id)
+        self.assertEqual(loaded_payload["summary"]["rows_unresolved"], 1)
 
 
 if __name__ == "__main__":

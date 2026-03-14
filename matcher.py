@@ -53,6 +53,7 @@ from config import (
     get_matcher_retrieval_candidates,
     get_matcher_skip_weak_shortlist,
 )
+from match_diagnostics import build_match_diagnostics_payload, infer_reason_class
 
 logging.basicConfig(
     level=logging.INFO,
@@ -1816,6 +1817,8 @@ class ReMoMatcher:
         gemini_shortlist_count: int = 0,
         gemini_visible_candidates: int = 0,
         gemini_truncated_candidates: int = 0,
+        gemini_model: str = "",
+        gemini_result_status: str = "",
     ) -> Dict[str, Any]:
         return {
             "found_name": item.get("name") or MISSING_POSITION_TEXT,
@@ -1836,6 +1839,8 @@ class ReMoMatcher:
             "gemini_shortlist_count": int(gemini_shortlist_count),
             "gemini_visible_candidates": int(gemini_visible_candidates),
             "gemini_truncated_candidates": int(gemini_truncated_candidates),
+            "gemini_model": gemini_model,
+            "gemini_result_status": gemini_result_status,
         }
 
     def _build_missing_result(
@@ -1849,6 +1854,8 @@ class ReMoMatcher:
         gemini_shortlist_count: int = 0,
         gemini_visible_candidates: int = 0,
         gemini_truncated_candidates: int = 0,
+        gemini_model: str = "",
+        gemini_result_status: str = "",
     ) -> Dict[str, Any]:
         return {
             "found_name": MISSING_POSITION_TEXT,
@@ -1869,7 +1876,97 @@ class ReMoMatcher:
             "gemini_shortlist_count": int(gemini_shortlist_count),
             "gemini_visible_candidates": int(gemini_visible_candidates),
             "gemini_truncated_candidates": int(gemini_truncated_candidates),
+            "gemini_model": gemini_model,
+            "gemini_result_status": gemini_result_status,
         }
+
+    def _diagnostic_candidate_from_item(
+        self,
+        query_features: Dict[str, Any],
+        item: Dict[str, Any],
+        *,
+        score: float | None = None,
+        compatibility_label: str | None = None,
+        incompatibility_reason: str | None = None,
+    ) -> Dict[str, Any]:
+        label = compatibility_label or self._compatibility_label(query_features, item)
+        reason = incompatibility_reason or (
+            "" if label == "compatible" else self._explain_incompatibility(query_features, item)
+        )
+        snapshot = {
+            "name": self._clean_text_value(item.get("name")),
+            "article": self._clean_text_value(item.get("article")),
+            "family": self._entity_family(item.get("entity_type", "")),
+            "compatibility": label,
+            "reason": reason,
+        }
+        if score is not None:
+            snapshot["score"] = round(float(score), 4)
+        return snapshot
+
+    def _diagnostic_candidates_from_entries(
+        self,
+        query_features: Dict[str, Any],
+        entries: List[Dict[str, Any]],
+        *,
+        limit: int = 3,
+    ) -> List[Dict[str, Any]]:
+        snapshots: List[Dict[str, Any]] = []
+        for entry in entries[:limit]:
+            item = entry.get("item")
+            if not isinstance(item, dict):
+                continue
+            label = self._compatibility_label(query_features, item)
+            reason = "" if label == "compatible" else self._explain_incompatibility(query_features, item)
+            snapshots.append(
+                self._diagnostic_candidate_from_item(
+                    query_features,
+                    item,
+                    score=float(entry.get("score", 0.0)),
+                    compatibility_label=label,
+                    incompatibility_reason=reason,
+                )
+            )
+        return snapshots
+
+    def _attach_diagnostic_trace(
+        self,
+        result: Dict[str, Any],
+        *,
+        query_text: str,
+        query_features: Dict[str, Any] | None,
+        stage_of_failure: str,
+        reason_code: str,
+        trace_steps: List[Dict[str, Any]],
+        pipeline_counts: Dict[str, Any],
+        candidate_snapshots: Dict[str, Any],
+        gemini_payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        reason_code_value = str(reason_code or "resolved").strip() or "resolved"
+        row_type = str((query_features or {}).get("row_type") or "")
+        entity_type = str((query_features or {}).get("entity_type") or "")
+        query_family = self._entity_family(entity_type)
+        diagnostic_trace = {
+            "query_text": self._clean_text_value(query_text),
+            "row_type": row_type,
+            "entity_type": entity_type,
+            "query_family": query_family,
+            "resolution_source": str(result.get("resolution_source") or ""),
+            "compatibility_status": str(result.get("compatibility_status") or ""),
+            "incompatibility_reason": str(result.get("incompatibility_reason") or ""),
+            "stage_of_failure": stage_of_failure,
+            "reason_code": reason_code_value,
+            "reason_class": infer_reason_class(stage_of_failure, reason_code_value),
+            "pipeline_counts": pipeline_counts,
+            "candidate_snapshots": candidate_snapshots,
+            "gemini": gemini_payload,
+            "trace_steps": trace_steps,
+        }
+        result["stage_of_failure"] = diagnostic_trace["stage_of_failure"]
+        result["reason_code"] = diagnostic_trace["reason_code"]
+        result["reason_class"] = diagnostic_trace["reason_class"]
+        result["diagnostic_trace"] = diagnostic_trace
+        return result
 
     def _candidate_models(self) -> List[str]:
         preferred = [getattr(self, "model_name", None), *get_matcher_models()]
@@ -1953,6 +2050,7 @@ class ReMoMatcher:
         candidate_lookup: Dict[str, Dict[str, Any]],
         article_lookup: Dict[str, Dict[str, Any]],
         source: str,
+        model_name: str,
     ) -> Dict[str, Any]:
         start_idx = raw_text.find("{")
         end_idx = raw_text.rfind("}") + 1
@@ -1981,6 +2079,8 @@ class ReMoMatcher:
                 rejection_reason or reasoning or "Gemini отверг все кандидаты как несовместимые",
                 compatibility_status="rejected_incompatible_gemini",
                 incompatibility_reason=rejection_reason or "gemini_rejected_incompatible",
+                gemini_model=model_name,
+                gemini_result_status="rejected_incompatible",
             )
         if matched_item is None:
             return self._build_missing_result(
@@ -1988,6 +2088,8 @@ class ReMoMatcher:
                 rejection_reason or reasoning or "Gemini не выбрал валидного кандидата",
                 compatibility_status="unresolved_no_compatible_candidates",
                 incompatibility_reason=rejection_reason,
+                gemini_model=model_name,
+                gemini_result_status="no_valid_candidate",
             )
 
         return self._build_result_from_item(
@@ -1999,6 +2101,8 @@ class ReMoMatcher:
             reason=reasoning,
             compatibility_status=compatibility or "compatible",
             incompatibility_reason=rejection_reason,
+            gemini_model=model_name,
+            gemini_result_status="selected_candidate",
         )
 
     def _match_with_gemini(
@@ -2024,7 +2128,11 @@ class ReMoMatcher:
             source = "gemini"
 
         if not context_chunks:
-            return self._build_missing_result(query, "Контекст для Gemini отсутствует")
+            return self._build_missing_result(
+                query,
+                "Контекст для Gemini отсутствует",
+                gemini_result_status="no_context",
+            )
 
         candidate_lookup = {
             item.get("name", "").lower(): item
@@ -2086,7 +2194,7 @@ class ReMoMatcher:
             for model_name in self._candidate_models():
                 try:
                     raw_text = self._generate_gemini_text(prompt, model_name)
-                    parsed = self._parse_gemini_result(query, raw_text, candidate_lookup, article_lookup, source)
+                    parsed = self._parse_gemini_result(query, raw_text, candidate_lookup, article_lookup, source, model_name)
                     self.model_name = model_name
                     if parsed["found_name"] == MISSING_POSITION_TEXT:
                         last_missing = parsed
@@ -2116,7 +2224,13 @@ class ReMoMatcher:
             )
             return last_missing
 
-        return self._build_missing_result(query, "", error=str(last_error) if last_error else "Gemini did not return result")
+        return self._build_missing_result(
+            query,
+            "",
+            error=str(last_error) if last_error else "Gemini did not return result",
+            gemini_model=str(getattr(self, "model_name", "") or ""),
+            gemini_result_status="runtime_error" if last_error else "no_valid_candidate",
+        )
 
     def _resolve_ambiguous_candidates_with_gemini(
         self,
@@ -2164,6 +2278,8 @@ class ReMoMatcher:
                 gemini_shortlist_count=len(shortlist),
                 gemini_visible_candidates=visible_candidates,
                 gemini_truncated_candidates=truncated_candidates,
+                gemini_model=str(result.get("gemini_model") or ""),
+                gemini_result_status="weakly_compatible_rejected_strict",
             )
         if matched_item and not self._is_gemini_result_family_valid(query_features, matched_item):
             query_family = self._entity_family(query_features.get("entity_type", ""))
@@ -2182,6 +2298,8 @@ class ReMoMatcher:
                 gemini_shortlist_count=len(shortlist),
                 gemini_visible_candidates=visible_candidates,
                 gemini_truncated_candidates=truncated_candidates,
+                gemini_model=str(result.get("gemini_model") or ""),
+                gemini_result_status="family_gate_rejected",
             )
             if strictness == "strict":
                 return rejected
@@ -2197,6 +2315,8 @@ class ReMoMatcher:
                 gemini_shortlist_count=len(shortlist),
                 gemini_visible_candidates=visible_candidates,
                 gemini_truncated_candidates=truncated_candidates,
+                gemini_model=str(result.get("gemini_model") or ""),
+                gemini_result_status="hard_incompatibility_rejected",
             )
             if strictness == "strict":
                 return rejected
@@ -2211,26 +2331,127 @@ class ReMoMatcher:
             self._confidence_level_from_score(result.get("similarity_score", 0), result.get("requires_review") == "да"),
         )
         result.setdefault("resolution_source", "local_tree+gemini")
+        result.setdefault("gemini_result_status", "selected_candidate")
         return result
 
     def match(self, query: str, use_cache: bool = True) -> Dict[str, Any]:
-        if use_cache:
-            cached = self._get_from_cache(query)
+        query_text = self._clean_text_value(query)
+        query_features: Dict[str, Any] = {}
+        trace_steps: List[Dict[str, Any]] = []
+        local_candidate_pool: List[Dict[str, Any]] = []
+        all_scored_entries: List[Dict[str, Any]] = []
+        same_family_entries: List[Dict[str, Any]] = []
+        compatible_entries_all: List[Dict[str, Any]] = []
+        best_compatible: Dict[str, Any] | None = None
+        best_weak: Dict[str, Any] | None = None
+        gemini_attempted = False
+        gemini_result_status = ""
+        gemini_model = ""
+
+        def _build_pipeline_counts() -> Dict[str, Any]:
+            return {
+                "local_pool_count": len(local_candidate_pool),
+                "scored_count": len(all_scored_entries),
+                "same_family_count": len(same_family_entries),
+                "compatible_count": len(compatible_entries_all),
+            }
+
+        def _build_candidate_snapshots() -> Dict[str, Any]:
+            snapshots = {
+                "top_scored": self._diagnostic_candidates_from_entries(query_features, all_scored_entries),
+                "top_same_family": self._diagnostic_candidates_from_entries(query_features, same_family_entries),
+                "top_compatible": self._diagnostic_candidates_from_entries(query_features, compatible_entries_all),
+            }
+            if best_compatible is not None and isinstance(best_compatible.get("item"), dict):
+                snapshots["best_compatible"] = self._diagnostic_candidate_from_item(
+                    query_features,
+                    best_compatible["item"],
+                    score=float(best_compatible.get("score", 0.0)),
+                )
+            if best_weak is not None and isinstance(best_weak.get("item"), dict):
+                snapshots["best_weak"] = self._diagnostic_candidate_from_item(
+                    query_features,
+                    best_weak["item"],
+                    score=float(best_weak.get("score", 0.0)),
+                )
+            return snapshots
+
+        def _build_gemini_payload(result: Dict[str, Any] | None = None) -> Dict[str, Any]:
+            current_result = result or {}
+            return {
+                "attempted": gemini_attempted,
+                "model": str(current_result.get("gemini_model") or gemini_model or ""),
+                "shortlist_count": int(current_result.get("gemini_shortlist_count") or 0),
+                "visible_candidates": int(current_result.get("gemini_visible_candidates") or 0),
+                "truncated_candidates": int(current_result.get("gemini_truncated_candidates") or 0),
+                "result_status": str(current_result.get("gemini_result_status") or gemini_result_status or ""),
+            }
+
+        def _finalize(result: Dict[str, Any], *, stage_of_failure: str, reason_code: str) -> Dict[str, Any]:
+            trace_steps_with_final = list(trace_steps)
+            trace_steps_with_final.append(
+                {
+                    "stage": "final",
+                    "status": "resolved" if stage_of_failure == "resolved" else "failed",
+                    "resolution_source": str(result.get("resolution_source") or ""),
+                    "compatibility_status": str(result.get("compatibility_status") or ""),
+                    "reason_code": str(reason_code or "resolved"),
+                }
+            )
+            return self._attach_diagnostic_trace(
+                result,
+                query_text=query_text or str(query or ""),
+                query_features=query_features,
+                stage_of_failure=stage_of_failure,
+                reason_code=str(reason_code or "resolved"),
+                trace_steps=trace_steps_with_final,
+                pipeline_counts=_build_pipeline_counts(),
+                candidate_snapshots=_build_candidate_snapshots(),
+                gemini_payload=_build_gemini_payload(result),
+            )
+
+        if use_cache and query_text:
+            cached = self._get_from_cache(query_text)
             if cached:
-                return cached
+                query_features = self._extract_query_features(query_text)
+                trace_steps.append(
+                    {
+                        "stage": "query_classification",
+                        "status": "ok",
+                        "row_type": str(query_features.get("row_type") or ""),
+                        "entity_type": str(query_features.get("entity_type") or ""),
+                        "query_family": self._entity_family(query_features.get("entity_type", "")),
+                    }
+                )
+                trace_steps.append({"stage": "cache", "status": "hit"})
+                return _finalize(cached, stage_of_failure="resolved", reason_code="resolved")
 
         try:
-            query_text = self._clean_text_value(query)
             if not query_text:
-                return self._build_missing_result(query, "Пустая строка")
+                result = self._build_missing_result(query, "Пустая строка")
+                trace_steps.append({"stage": "query_input", "status": "failed", "reason_code": "empty_query"})
+                return _finalize(result, stage_of_failure="query_input", reason_code="empty_query")
 
             normalized_query = self._normalize_text(query_text)
             query_features = self._extract_query_features(query_text)
+            query_family = self._entity_family(query_features.get("entity_type", ""))
+            trace_steps.append(
+                {
+                    "stage": "query_classification",
+                    "status": "ok",
+                    "row_type": str(query_features.get("row_type") or ""),
+                    "entity_type": str(query_features.get("entity_type") or ""),
+                    "query_family": query_family,
+                }
+            )
             if query_features.get("row_type") == "section":
-                return self._build_missing_result(
+                result = self._build_missing_result(
                     query_text,
                     "Строка похожа на раздел каталога и не является конкретной товарной позицией.",
+                    incompatibility_reason="section_row_detected",
                 )
+                trace_steps.append({"stage": "query_input", "status": "failed", "reason_code": "section_row_detected"})
+                return _finalize(result, stage_of_failure="query_input", reason_code="section_row_detected")
             strictness = self._match_strictness_for_query(query_features)
 
             preferred_result: Dict[str, Any] | None = None
@@ -2292,10 +2513,40 @@ class ReMoMatcher:
                         key=lambda entry: (entry["score"], entry["lexical_score"], -int(entry["item"].get("row_idx", 0))),
                         reverse=True,
                     )
+            all_scored_entries = list(scored_entries)
+            same_family_entries = [
+                entry
+                for entry in all_scored_entries
+                if self._entity_family(entry["item"].get("entity_type", "")) == query_family
+            ]
+            compatible_entries_all = [
+                entry for entry in all_scored_entries if not self._is_hard_incompatible_match(query_features, entry["item"])
+            ]
+            trace_steps.append(
+                {
+                    "stage": "local_recall",
+                    "status": "ok" if all_scored_entries else "empty",
+                    "strictness": strictness,
+                    "local_pool_count": len(local_candidate_pool),
+                    "scored_count": len(all_scored_entries),
+                    "same_family_count": len(same_family_entries),
+                    "compatible_count": len(compatible_entries_all),
+                }
+            )
             if not scored_entries:
+                gemini_attempted = True
                 gemini_result = self._match_with_gemini(query_text)
+                gemini_model = str(gemini_result.get("gemini_model") or gemini_model or "")
+                gemini_result_status = str(gemini_result.get("gemini_result_status") or gemini_result_status or "")
+                trace_steps.append(
+                    {
+                        "stage": "gemini_selection",
+                        "status": gemini_result_status or "completed",
+                        "shortlist_count": int(gemini_result.get("gemini_shortlist_count") or 0),
+                    }
+                )
                 if self._clean_text_value(gemini_result.get("found_name")) and gemini_result.get("found_name") != MISSING_POSITION_TEXT:
-                    return gemini_result
+                    return _finalize(gemini_result, stage_of_failure="resolved", reason_code="resolved")
                 if preferred_result:
                     preferred_result["requires_review"] = "да"
                     preferred_result["confidence_level"] = self._confidence_level_from_score(
@@ -2314,29 +2565,43 @@ class ReMoMatcher:
                         preferred_result["similarity_score"],
                         "gemini_fallback",
                     )
-                    return preferred_result
-                return gemini_result
+                    trace_steps.append({"stage": "fallback_policy", "status": "accepted", "fallback": "gemini_fallback"})
+                    return _finalize(preferred_result, stage_of_failure="resolved", reason_code="resolved")
+                return _finalize(
+                    gemini_result,
+                    stage_of_failure="gemini_selection",
+                    reason_code=gemini_result.get("incompatibility_reason") or "gemini_returned_no_valid_candidate",
+                )
 
-            compatible_entries = [
-                entry for entry in scored_entries if not self._is_hard_incompatible_match(query_features, entry["item"])
-            ]
             logger.info(
                 "Gemini compatibility filter: query=%s scored=%s compatible=%s filtered_out=%s strictness=%s",
                 query_text[:120],
-                len(scored_entries),
-                len(compatible_entries),
-                max(0, len(scored_entries) - len(compatible_entries)),
+                len(all_scored_entries),
+                len(compatible_entries_all),
+                max(0, len(all_scored_entries) - len(compatible_entries_all)),
                 strictness,
             )
-            if compatible_entries:
-                scored_entries = compatible_entries
+            if compatible_entries_all:
+                scored_entries = compatible_entries_all
             else:
-                return self._build_missing_result(
+                trace_steps.append(
+                    {
+                        "stage": "compatibility_filter",
+                        "status": "failed",
+                        "reason_code": "no_compatible_candidates",
+                    }
+                )
+                result = self._build_missing_result(
                     query_text,
                     "Точные совместимые кандидаты не найдены: ближайшие совпадения конфликтуют с типом или ключевыми признаками позиции.",
-                    alternatives=self._format_alternatives(scored_entries),
+                    alternatives=self._format_alternatives(all_scored_entries),
                     compatibility_status="unresolved_no_compatible_candidates",
                     incompatibility_reason="no_compatible_candidates",
+                )
+                return _finalize(
+                    result,
+                    stage_of_failure="compatibility_filter" if same_family_entries else "local_recall",
+                    reason_code="no_compatible_candidates",
                 )
 
             best_entry = scored_entries[0]
@@ -2361,15 +2626,34 @@ class ReMoMatcher:
                     "Gemini skipped for weak shortlist: query=%s reason=weak_shortlist",
                     query_text[:120],
                 )
+                trace_steps.append({"stage": "gemini_selection", "status": "skipped", "reason_code": "weak_shortlist_skipped"})
             else:
+                gemini_attempted = True
                 gemini_result = self._resolve_ambiguous_candidates_with_gemini(
                     query_text,
                     query_features,
                     branch_paths,
                     scored_entries,
                 )
+                if gemini_result is not None:
+                    gemini_model = str(gemini_result.get("gemini_model") or gemini_model or "")
+                    gemini_result_status = str(gemini_result.get("gemini_result_status") or gemini_result_status or "")
+                    trace_steps.append(
+                        {
+                            "stage": "gemini_selection",
+                            "status": gemini_result_status or "completed",
+                            "shortlist_count": int(gemini_result.get("gemini_shortlist_count") or 0),
+                            "compatibility_status": str(gemini_result.get("compatibility_status") or ""),
+                        }
+                    )
             if gemini_result:
-                return gemini_result
+                if self._clean_text_value(gemini_result.get("found_name")) and gemini_result.get("found_name") != MISSING_POSITION_TEXT:
+                    return _finalize(gemini_result, stage_of_failure="resolved", reason_code="resolved")
+                return _finalize(
+                    gemini_result,
+                    stage_of_failure="gemini_selection",
+                    reason_code=gemini_result.get("incompatibility_reason") or "gemini_returned_no_valid_candidate",
+                )
 
             strong_local = (
                 best_score >= getattr(self, "local_confidence_threshold", 0.92)
@@ -2388,7 +2672,7 @@ class ReMoMatcher:
                     "",
                 )
                 self._save_to_cache(query_text, result["found_name"], result["price"], result["article"] or "", result["similarity_score"], "local_tree")
-                return result
+                return _finalize(result, stage_of_failure="resolved", reason_code="resolved")
 
             ambiguous = (
                 query_features.get("row_type") == "section"
@@ -2404,12 +2688,24 @@ class ReMoMatcher:
             best_weak = self._best_compatible_local_entry(query_features, scored_entries, allow_weak=True)
             if strictness == "strict":
                 if best_compatible is None:
-                    return self._build_missing_result(
+                    trace_steps.append(
+                        {
+                            "stage": "compatibility_filter",
+                            "status": "failed",
+                            "reason_code": "strict_class_no_compatible_candidate",
+                        }
+                    )
+                    result = self._build_missing_result(
                         query_text,
                         "Нет совместимого кандидата для строго типизированной позиции.",
                         alternatives=self._format_alternatives(scored_entries),
                         compatibility_status="unresolved_no_compatible_candidates",
                         incompatibility_reason="strict_class_no_compatible_candidate",
+                    )
+                    return _finalize(
+                        result,
+                        stage_of_failure="compatibility_filter" if same_family_entries else "local_recall",
+                        reason_code="strict_class_no_compatible_candidate",
                     )
             if best_compatible is not None and not self._is_strict_fallback_allowed(query_features, best_compatible["item"]):
                 query_family = self._entity_family(query_features.get("entity_type", ""))
@@ -2421,16 +2717,25 @@ class ReMoMatcher:
                     candidate_family or "other",
                     "strict_fallback_family_mismatch",
                 )
+                trace_steps.append(
+                    {
+                        "stage": "fallback_policy",
+                        "status": "rejected",
+                        "reason_code": "strict_fallback_family_mismatch",
+                    }
+                )
                 if strictness == "strict":
-                    return self._build_missing_result(
+                    result = self._build_missing_result(
                         query_text,
                         "Локальный fallback отклонен: лучший кандидат относится к несовместимому товарному семейству.",
                         alternatives=self._format_alternatives(scored_entries),
                         compatibility_status="unresolved_no_compatible_candidates",
                         incompatibility_reason="strict_fallback_family_mismatch",
                     )
+                    return _finalize(result, stage_of_failure="fallback_policy", reason_code="strict_fallback_family_mismatch")
                 best_compatible = None
             if best_compatible is not None:
+                trace_steps.append({"stage": "fallback_policy", "status": "accepted", "fallback": "compatible_local_fallback"})
                 result = self._build_result_from_item(
                     best_compatible["item"],
                     float(best_compatible["score"]),
@@ -2448,9 +2753,10 @@ class ReMoMatcher:
                     result["similarity_score"],
                     "compatible_local_fallback",
                 )
-                return result
+                return _finalize(result, stage_of_failure="resolved", reason_code="resolved")
 
             if strictness != "strict" and best_weak is not None:
+                trace_steps.append({"stage": "fallback_policy", "status": "accepted", "fallback": "weak_compatible_fallback"})
                 weak_reason = self._explain_incompatibility(query_features, best_weak["item"]) or "weak_compatible_shortlist"
                 result = self._build_result_from_item(
                     best_weak["item"],
@@ -2470,19 +2776,30 @@ class ReMoMatcher:
                     result["similarity_score"],
                     "weak_compatible_fallback",
                 )
-                return result
+                return _finalize(result, stage_of_failure="resolved", reason_code="resolved")
 
-            return self._build_missing_result(
+            trace_steps.append(
+                {
+                    "stage": "fallback_policy",
+                    "status": "failed",
+                    "reason_code": "no_confirmed_compatible_candidate",
+                }
+            )
+            result = self._build_missing_result(
                 query_text,
                 "Совместимый кандидат не подтвержден; позиция оставлена без сопоставления.",
                 alternatives=self._format_alternatives(scored_entries),
                 compatibility_status="unresolved_no_compatible_candidates",
                 incompatibility_reason="no_confirmed_compatible_candidate",
             )
+            unresolved_stage = "gemini_selection" if gemini_attempted else ("compatibility_filter" if same_family_entries else "local_recall")
+            return _finalize(result, stage_of_failure=unresolved_stage, reason_code="no_confirmed_compatible_candidate")
 
         except Exception as exc:
             logger.error("Matching error: %s", exc, exc_info=True)
-            return self._build_missing_result(query, "", error=str(exc))
+            result = self._build_missing_result(query, "", error=str(exc), incompatibility_reason="runtime_exception")
+            trace_steps.append({"stage": "runtime_error", "status": "failed", "reason_code": "runtime_exception"})
+            return _finalize(result, stage_of_failure="runtime_error", reason_code="runtime_exception")
 
     def save_to_history(
         self,
@@ -2601,6 +2918,9 @@ class ReMoMatcher:
             "Источник решения",
             "Совместимость решения",
             "Причина несовместимости",
+            "Этап отказа",
+            "Код причины",
+            "Класс причины",
             "Gemini shortlist",
             "Gemini visible candidates",
             "Gemini truncated",
@@ -2624,7 +2944,14 @@ class ReMoMatcher:
             "compatible_local_fallback_count": 0,
             "weak_compatible_fallback_count": 0,
             "strict_class_unresolved_count": 0,
+            "diagnostic_stage_counts": {},
+            "diagnostic_reason_class_counts": {},
+            "diagnostic_reason_code_counts": {},
         }
+        diagnostic_rows: List[dict[str, Any]] = []
+        diagnostic_stage_counts: Counter[str] = Counter()
+        diagnostic_reason_class_counts: Counter[str] = Counter()
+        diagnostic_reason_code_counts: Counter[str] = Counter()
         tasks: List[Tuple[int, str]] = []
         for idx, row in df.iterrows():
             query = str(row[col_b]).strip()
@@ -2658,6 +2985,9 @@ class ReMoMatcher:
             df.at[idx, "Источник решения"] = result.get("resolution_source")
             df.at[idx, "Совместимость решения"] = result.get("compatibility_status")
             df.at[idx, "Причина несовместимости"] = result.get("incompatibility_reason")
+            df.at[idx, "Этап отказа"] = result.get("stage_of_failure")
+            df.at[idx, "Код причины"] = result.get("reason_code")
+            df.at[idx, "Класс причины"] = result.get("reason_class")
             df.at[idx, "Gemini shortlist"] = result.get("gemini_shortlist_count")
             df.at[idx, "Gemini visible candidates"] = result.get("gemini_visible_candidates")
             df.at[idx, "Gemini truncated"] = result.get("gemini_truncated_candidates")
@@ -2700,6 +3030,29 @@ class ReMoMatcher:
             if compatibility_status == "unresolved_no_compatible_candidates" and incompatibility_reason.startswith("strict_class"):
                 stats["strict_class_unresolved_count"] += 1
 
+            stage_of_failure = str(result.get("stage_of_failure") or "").strip()
+            if not stage_of_failure:
+                stage_of_failure = "resolved" if found_name != MISSING_POSITION_TEXT else "local_recall"
+            reason_code = str(result.get("reason_code") or "").strip()
+            if not reason_code:
+                reason_code = "resolved" if stage_of_failure == "resolved" else "no_diagnostic_trace"
+            reason_class = str(result.get("reason_class") or "").strip() or infer_reason_class(
+                stage_of_failure,
+                reason_code,
+            )
+            diagnostic_stage_counts[stage_of_failure] += 1
+            diagnostic_reason_class_counts[reason_class] += 1
+            diagnostic_reason_code_counts[reason_code] += 1
+            df.at[idx, "Этап отказа"] = stage_of_failure
+            df.at[idx, "Код причины"] = reason_code
+            df.at[idx, "Класс причины"] = reason_class
+
+            trace = result.get("diagnostic_trace")
+            if isinstance(trace, dict):
+                trace_row = dict(trace)
+                trace_row["run_row_number"] = int(idx) + 2
+                diagnostic_rows.append(trace_row)
+
             if progress_callback is not None:
                 progress_callback(
                     stage="matching",
@@ -2707,6 +3060,10 @@ class ReMoMatcher:
                     total=len(tasks),
                     message=f"Обработано позиций: {processed_count} из {len(tasks)}",
                 )
+
+        stats["diagnostic_stage_counts"] = dict(sorted(diagnostic_stage_counts.items()))
+        stats["diagnostic_reason_class_counts"] = dict(sorted(diagnostic_reason_class_counts.items()))
+        stats["diagnostic_reason_code_counts"] = dict(sorted(diagnostic_reason_code_counts.items()))
 
         if output_path is None:
             src = Path(excel_path)
@@ -2720,6 +3077,11 @@ class ReMoMatcher:
                 message="Сохранение итогового Excel-файла",
             )
         df.to_excel(output_path, index=False)
+        self.last_match_diagnostics_rows = diagnostic_rows
+        self.last_match_diagnostics_payload = build_match_diagnostics_payload(
+            diagnostic_rows,
+            run_id=str(Path(excel_path).stem),
+        )
         logger.info("Result saved: %s", output_path)
         return df, stats
 

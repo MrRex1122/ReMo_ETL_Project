@@ -32,6 +32,7 @@ class ProcessingRunArtifacts:
     stats_json_path: Path
     progress_json_path: Path
     coverage_audit_json_path: Path
+    match_diagnostics_json_path: Path
     error_txt_path: Path
     result_xlsx_path: Path
 
@@ -154,6 +155,7 @@ def build_run_artifacts(run_id: str) -> ProcessingRunArtifacts:
         stats_json_path=run_dir / "stats.json",
         progress_json_path=run_dir / "progress.json",
         coverage_audit_json_path=run_dir / "coverage_audit.json",
+        match_diagnostics_json_path=run_dir / "match_diagnostics.json",
         error_txt_path=run_dir / "error.txt",
         result_xlsx_path=run_dir / "result.xlsx",
     )
@@ -521,6 +523,23 @@ def load_processing_run_coverage_audit(run_id: str) -> dict[str, Any] | None:
     if isinstance(loaded, dict):
         return loaded
     raise ValueError(f"Run coverage audit payload is invalid for {run_id}")
+
+
+def write_processing_run_match_diagnostics(run_id: str, payload: dict[str, Any]) -> Path:
+    artifacts = build_run_artifacts(run_id)
+    _write_json_atomic(artifacts.match_diagnostics_json_path, payload)
+    return artifacts.match_diagnostics_json_path
+
+
+def load_processing_run_match_diagnostics(run_id: str) -> dict[str, Any] | None:
+    diagnostics_path = build_run_artifacts(run_id).match_diagnostics_json_path
+    if not diagnostics_path.exists():
+        return None
+    with diagnostics_path.open("r", encoding="utf-8") as fh:
+        loaded = json.load(fh)
+    if isinstance(loaded, dict):
+        return loaded
+    raise ValueError(f"Run diagnostics payload is invalid for {run_id}")
 
 
 def save_processing_run_draft(run_id: str, df: pd.DataFrame) -> Path:

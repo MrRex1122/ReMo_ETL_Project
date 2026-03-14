@@ -25,6 +25,15 @@ from catalog_coverage_audit import (
     prepare_catalog_coverage_audit_table,
     prepare_catalog_coverage_family_table,
 )
+from match_diagnostics import (
+    build_match_diagnostics_payload,
+    enrich_match_diagnostics_payload,
+    is_match_diagnostics_fresh,
+    prepare_match_diagnostics_reason_table,
+    prepare_match_diagnostics_stage_table,
+    prepare_match_diagnostics_table,
+    reconstruct_match_diagnostics,
+)
 from config import (
     get_catalog_csv_path,
     get_matcher_cache_db_path,
@@ -50,6 +59,7 @@ from processing_runs import (
     list_processing_runs,
     load_processing_run_coverage_audit,
     load_processing_run_dataframe,
+    load_processing_run_match_diagnostics,
     load_processing_run_progress,
     load_processing_run_stats,
     mark_processing_run_completed,
@@ -60,6 +70,7 @@ from processing_runs import (
     save_processing_run_draft,
     unregister_processing_run_thread,
     write_processing_run_coverage_audit,
+    write_processing_run_match_diagnostics,
     write_processing_run_error,
     write_processing_run_progress,
     write_processing_run_result,
@@ -486,6 +497,10 @@ def _run_processing_job(run_id: str, matcher_settings: dict[str, Any]) -> None:
         )
 
         write_processing_run_result(run_id, df_result, stats)
+        diagnostics_rows = getattr(matcher, "last_match_diagnostics_rows", None)
+        if isinstance(diagnostics_rows, list):
+            diagnostics_payload = build_match_diagnostics_payload(diagnostics_rows, run_id=run_id)
+            write_processing_run_match_diagnostics(run_id, diagnostics_payload)
         write_processing_run_progress(
             run_id,
             stage="saving_results",
@@ -907,10 +922,95 @@ def show_statistics(stats):
             f"weak_fallback={stats.get('weak_compatible_fallback_count', 0)} | "
             f"strict_unresolved={stats.get('strict_class_unresolved_count', 0)}"
         )
+    if "diagnostic_reason_class_counts" in stats:
+        reason_classes = stats.get("diagnostic_reason_class_counts", {}) or {}
+        quality_rows.append(
+            "Диагностика: "
+            f"catalog_gap={reason_classes.get('catalog_gap', 0)} | "
+            f"retrieval={reason_classes.get('matcher_retrieval_or_ranking', 0)} | "
+            f"gemini/policy={reason_classes.get('gemini_or_decision_policy', 0)}"
+        )
     for row in quality_rows:
         st.caption(row)
 
 
+
+
+def _load_fresh_catalog_coverage_audit(run) -> dict[str, Any] | None:
+    try:
+        stored_payload = load_processing_run_coverage_audit(run.run_id)
+    except Exception:
+        return None
+    if is_catalog_coverage_audit_fresh(
+        stored_payload,
+        run_id=run.run_id,
+        catalog_source_path=run.catalog_source_path,
+        catalog_source_kind=run.catalog_source_kind,
+    ):
+        return stored_payload
+    return None
+
+
+def _render_match_diagnostics(run, df: pd.DataFrame) -> None:
+    st.subheader("🧭 Диагностика причин ненахода")
+    st.caption(
+        "Показывает, на каком этапе цепочки остановилась строка: query -> recall -> compatibility -> Gemini -> fallback."
+    )
+
+    coverage_audit_payload = _load_fresh_catalog_coverage_audit(run)
+    diagnostics_payload = None
+    reconstructed = False
+    try:
+        stored_payload = load_processing_run_match_diagnostics(run.run_id)
+        if is_match_diagnostics_fresh(stored_payload, run_id=run.run_id):
+            diagnostics_payload = enrich_match_diagnostics_payload(
+                stored_payload,
+                coverage_audit_payload=coverage_audit_payload,
+            )
+    except Exception as exc:
+        logger.warning("Не удалось загрузить сохраненную диагностику прогона %s: %s", run.run_id, exc)
+
+    if diagnostics_payload is None:
+        reconstructed = True
+        diagnostics_payload = reconstruct_match_diagnostics(
+            df,
+            run_id=run.run_id,
+            coverage_audit_payload=coverage_audit_payload,
+        )
+
+    if reconstructed:
+        st.info("Для этого прогона показана post-hoc reconstruction диагностики: runtime trace не был сохранен во время обработки.")
+    else:
+        generated_at = str(diagnostics_payload.get("generated_at") or "").strip()
+        if generated_at:
+            st.caption(f"Используется сохраненная runtime-диагностика: {generated_at}")
+
+    summary = diagnostics_payload.get("summary", {}) if isinstance(diagnostics_payload, dict) else {}
+    reason_class_counts = summary.get("reason_class_counts", {}) if isinstance(summary, dict) else {}
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("catalog gap", int(reason_class_counts.get("catalog_gap", 0)))
+    with col2:
+        st.metric("retrieval/ranking", int(reason_class_counts.get("matcher_retrieval_or_ranking", 0)))
+    with col3:
+        st.metric("Gemini/policy", int(reason_class_counts.get("gemini_or_decision_policy", 0)))
+    with col4:
+        st.metric("input/query shape", int(reason_class_counts.get("input_or_query_shape", 0)))
+
+    stage_table = prepare_match_diagnostics_stage_table(diagnostics_payload)
+    if not stage_table.empty:
+        st.markdown("**Сводка по этапам отказа**")
+        st.dataframe(_prepare_df_for_display(stage_table), width="stretch")
+
+    reason_table = prepare_match_diagnostics_reason_table(diagnostics_payload)
+    if not reason_table.empty:
+        st.markdown("**Сводка по кодам причин**")
+        st.dataframe(_prepare_df_for_display(reason_table), width="stretch")
+
+    detail_table = prepare_match_diagnostics_table(diagnostics_payload)
+    if not detail_table.empty:
+        st.markdown("**Детали по строкам**")
+        st.dataframe(_prepare_df_for_display(detail_table), width="stretch")
 
 
 def _render_catalog_coverage_audit(run, df: pd.DataFrame) -> None:
@@ -1802,6 +1902,9 @@ def main():
                 show_statistics(stats)
                 st.divider()
                 _render_catalog_coverage_audit(run, df)
+
+                st.divider()
+                _render_match_diagnostics(run, df)
 
                 st.divider()
 
