@@ -95,6 +95,15 @@ class CatalogSearchTests(unittest.TestCase):
             "телеком > аксессуары > шкафные аксессуары > заглушки",
         )
 
+    def test_classify_item_type_prefers_iec_power_cable_over_pdu_reference(self):
+        self.assertEqual(
+            classify_item_type(
+                "Кабель электрический соединительный 230VAC 16A IEC320 C19-C20, "
+                "с механизмом фиксации в розетках PDU"
+            ),
+            "iec_power_cable",
+        )
+
     def test_search_catalog_readiness_tracks_missing_ready_and_stale_states(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

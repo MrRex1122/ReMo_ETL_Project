@@ -65,6 +65,34 @@ class CatalogCoverageAuditTests(unittest.TestCase):
             self.assertEqual(row["diagnosis"], "catalog_has_compatible_candidates")
             self.assertGreaterEqual(row["compatible_candidates_count"], 1)
 
+    def test_patch_cord_is_included_as_target_family(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            catalog_path = Path(tmp_dir) / "catalog.csv"
+            _write_catalog_csv(
+                catalog_path,
+                [
+                    {
+                        CANONICAL_NAME_COLUMN: "Патч-корд медный категория 6 1м",
+                        CANONICAL_ARTICLE_COLUMN: "PC-1M-CAT6",
+                        "Название класса": "Патч-корды",
+                        "Тип изделия": "Патч-корд",
+                        "Тип исполнения кабельного изделия": "",
+                    }
+                ],
+            )
+
+            payload = build_catalog_coverage_audit(
+                _build_result_df("Медный патч-корд категории 6 (1м)"),
+                run_id="run-patch-cord",
+                catalog_source_path=catalog_path,
+                catalog_source_kind="merged",
+            )
+
+            row = self._first_row(payload)
+            self.assertEqual(row["query_family"], "patch_cord")
+            self.assertEqual(row["query_family_group"], "patch_cord")
+            self.assertEqual(row["diagnosis"], "catalog_has_compatible_candidates")
+
     def test_optical_cross_audit_detects_missing_family(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             catalog_path = Path(tmp_dir) / "catalog.csv"
@@ -91,6 +119,37 @@ class CatalogCoverageAuditTests(unittest.TestCase):
             row = self._first_row(payload)
             self.assertEqual(row["diagnosis"], "catalog_missing_family")
             self.assertEqual(row["same_family_candidates_count"], 0)
+
+    def test_iec_power_cable_is_included_as_target_family(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            catalog_path = Path(tmp_dir) / "catalog.csv"
+            _write_catalog_csv(
+                catalog_path,
+                [
+                    {
+                        CANONICAL_NAME_COLUMN: "Кабель электрический соединительный IEC320 C19-C20 1.8м",
+                        CANONICAL_ARTICLE_COLUMN: "IEC-C19-C20-18",
+                        "Название класса": "Кабели",
+                        "Тип изделия": "Кабель",
+                        "Тип исполнения кабельного изделия": "",
+                    }
+                ],
+            )
+
+            payload = build_catalog_coverage_audit(
+                _build_result_df(
+                    "Кабель электрический соединительный 230VAC 16A IEC320 C19-C20, "
+                    "с механизмом фиксации в розетках PDU (1,8м)"
+                ),
+                run_id="run-iec",
+                catalog_source_path=catalog_path,
+                catalog_source_kind="merged",
+            )
+
+            row = self._first_row(payload)
+            self.assertEqual(row["query_family"], "iec_power_cable")
+            self.assertEqual(row["query_family_group"], "iec_power_cable")
+            self.assertEqual(row["diagnosis"], "catalog_has_compatible_candidates")
 
     def test_keystone_group_can_report_family_without_compatible_specs(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -215,6 +274,34 @@ class CatalogCoverageAuditTests(unittest.TestCase):
             detail_table = prepare_catalog_coverage_audit_table(payload)
             self.assertFalse(detail_table.empty)
             self.assertIn("Примеры кандидатов", detail_table.columns)
+
+    def test_airflow_audit_does_not_count_generic_blank_panels_as_same_family(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            catalog_path = Path(tmp_dir) / "catalog.csv"
+            _write_catalog_csv(
+                catalog_path,
+                [
+                    {
+                        CANONICAL_NAME_COLUMN: "Панель-заглушка 19 1U",
+                        CANONICAL_ARTICLE_COLUMN: "BLANK-1U",
+                        "Название класса": "Шкафные аксессуары",
+                        "Тип изделия": "Панель-заглушка",
+                        "Тип исполнения кабельного изделия": "",
+                    }
+                ],
+            )
+
+            payload = build_catalog_coverage_audit(
+                _build_result_df("Заглушка для управления потоком воздуха"),
+                run_id="run-airflow",
+                catalog_source_path=catalog_path,
+                catalog_source_kind="merged",
+            )
+
+            row = self._first_row(payload)
+            self.assertEqual(row["query_family"], "airflow_blanking_panel")
+            self.assertEqual(row["diagnosis"], "catalog_missing_family")
+            self.assertEqual(row["same_family_candidates_count"], 0)
 
 
 if __name__ == "__main__":

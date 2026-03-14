@@ -194,6 +194,7 @@ def _has_airflow_blanking_signal(normalized: str) -> bool:
 def classify_item_type(text: str, synonyms: Mapping[str, str] | None = None) -> str:
     normalized = normalize_query_terms(text, synonyms=synonyms)
     phrase_normalized = normalized.replace("-", " ")
+    has_iec_connector_markers = any(marker in normalized for marker in ("iec320", "c13", "c14", "c19", "c20"))
     if "soft starter" in normalized or ("плавн" in normalized and "пуск" in normalized):
         return "soft_starter"
     if (
@@ -213,6 +214,8 @@ def classify_item_type(text: str, synonyms: Mapping[str, str] | None = None) -> 
         return "temperature_sensor"
     if "геркон" in normalized or "магнитоконтакт" in normalized:
         return "reed_sensor"
+    if has_iec_connector_markers and any(token in normalized for token in ("кабель", "cord", "шнур", "соединительн")):
+        return "iec_power_cable"
     if "pdu" in normalized or "блок розеток" in normalized:
         if "meter" in normalized or "измерител" in normalized:
             return "pdu_metered"
@@ -241,7 +244,7 @@ def classify_item_type(text: str, synonyms: Mapping[str, str] | None = None) -> 
         return "rack_rail"
     if "заземл" in normalized and "шин" in normalized:
         return "ground_bar"
-    if any(marker in normalized for marker in ("iec320", "c13", "c14", "c19", "c20")):
+    if has_iec_connector_markers:
         return "iec_power_cable"
     if "патч панел" in phrase_normalized or "patch panel" in phrase_normalized or (
         "панел" in normalized and "коммутац" in normalized

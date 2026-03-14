@@ -23,25 +23,30 @@ logger = logging.getLogger(__name__)
 
 TARGET_FAMILY_GROUPS = {
     "patch_panel": "patch_panel",
+    "patch_cord": "patch_cord",
     "keystone": "keystone_rj45",
     "rj45_connector": "keystone_rj45",
     "rj45_outlet": "keystone_rj45",
     "bulk_twisted_pair": "twisted_pair",
+    "iec_power_cable": "iec_power_cable",
     "optical_cross": "optical_cross",
     "optical_patch_cord": "optical_patch_cord",
     "ats_sts": "ats_sts",
     "airflow_blanking_panel": "airflow_accessories",
-    "rack_accessory_strict": "airflow_accessories",
+    "rack_accessory_strict": "rack_accessories",
 }
 
 FAMILY_GROUP_LABELS = {
     "patch_panel": "patch_panel",
+    "patch_cord": "patch_cord",
     "keystone_rj45": "keystone/rj45",
     "twisted_pair": "twisted_pair",
+    "iec_power_cable": "iec_power_cable",
     "optical_cross": "optical_cross",
     "optical_patch_cord": "optical_patch_cord",
     "ats_sts": "ats_sts",
     "airflow_accessories": "airflow/accessories",
+    "rack_accessories": "rack blank/brush",
 }
 
 HEADER_QUERY_VALUES = {
@@ -188,10 +193,6 @@ def _candidate_family_scope(query_family: str) -> set[str]:
         return {"keystone", "rj45_outlet"}
     if family == "rj45_outlet":
         return {"rj45_outlet", "keystone"}
-    if family == "airflow_blanking_panel":
-        return {"airflow_blanking_panel", "rack_accessory_strict"}
-    if family == "rack_accessory_strict":
-        return {"rack_accessory_strict", "airflow_blanking_panel"}
     return {family}
 
 
