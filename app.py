@@ -960,6 +960,7 @@ def _render_match_diagnostics(run, df: pd.DataFrame) -> None:
     coverage_audit_payload = _load_fresh_catalog_coverage_audit(run)
     diagnostics_payload = None
     reconstructed = False
+    diagnostics_error = None
     try:
         stored_payload = load_processing_run_match_diagnostics(run.run_id)
         if is_match_diagnostics_fresh(stored_payload, run_id=run.run_id):
@@ -968,7 +969,47 @@ def _render_match_diagnostics(run, df: pd.DataFrame) -> None:
                 coverage_audit_payload=coverage_audit_payload,
             )
     except Exception as exc:
+        diagnostics_error = exc
         logger.warning("Не удалось загрузить сохраненную диагностику прогона %s: %s", run.run_id, exc)
+
+    button_col, status_col = st.columns([1, 2])
+    with button_col:
+        rebuild_diagnostics = st.button("🧭 Пересчитать диагностику", key=f"match_diagnostics_{run.run_id}")
+    with status_col:
+        if diagnostics_payload is not None:
+            generated_at = str(diagnostics_payload.get("generated_at") or "").strip()
+            if diagnostics_payload.get("reconstructed"):
+                st.caption(
+                    f"Используется сохраненная reconstructed-диагностика: {generated_at}" if generated_at
+                    else "Используется сохраненная reconstructed-диагностика."
+                )
+            elif generated_at:
+                st.caption(f"Используется сохраненная runtime-диагностика: {generated_at}")
+        elif diagnostics_error is not None:
+            st.caption("Сохраненную диагностику не удалось прочитать, можно пересчитать.")
+        else:
+            st.caption("Диагностика еще не пересчитывалась вручную для этого прогона.")
+
+    if rebuild_diagnostics:
+        try:
+            with st.spinner("Пересчитываю диагностику причин ненахода..."):
+                if diagnostics_payload is None:
+                    diagnostics_payload = reconstruct_match_diagnostics(
+                        df,
+                        run_id=run.run_id,
+                        coverage_audit_payload=coverage_audit_payload,
+                    )
+                else:
+                    diagnostics_payload = enrich_match_diagnostics_payload(
+                        diagnostics_payload,
+                        coverage_audit_payload=coverage_audit_payload,
+                    )
+                write_processing_run_match_diagnostics(run.run_id, diagnostics_payload)
+            reconstructed = bool(diagnostics_payload.get("reconstructed"))
+            st.success("✓ Диагностика сохранена.")
+        except Exception as exc:
+            st.error(f"Не удалось пересчитать диагностику: {exc}")
+            logger.exception("Не удалось пересчитать диагностику прогона %s", run.run_id)
 
     if diagnostics_payload is None:
         reconstructed = True

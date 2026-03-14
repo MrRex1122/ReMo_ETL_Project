@@ -31,6 +31,7 @@ class AppUiRegressionTests(unittest.TestCase):
         processing_runs_source = Path("processing_runs.py").read_text(encoding="utf-8")
         self.assertIn("match_diagnostics.json", processing_runs_source)
         self.assertIn("Диагностика причин ненахода", app_source)
+        self.assertIn("Пересчитать диагностику", app_source)
 
 
 if __name__ == "__main__":
