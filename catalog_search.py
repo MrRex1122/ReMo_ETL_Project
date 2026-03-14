@@ -10,6 +10,14 @@ from typing import Any, Dict, Iterable, List, Mapping
 
 import pandas as pd
 
+try:
+    import duckdb
+
+    DUCKDB_AVAILABLE = True
+except ImportError:
+    duckdb = None
+    DUCKDB_AVAILABLE = False
+
 from catalog_merge import get_catalog_readiness, get_merged_catalog_path
 from catalog_schema import (
     CANONICAL_NAME_COLUMN,
@@ -20,7 +28,10 @@ from catalog_schema import (
 
 logger = logging.getLogger(__name__)
 
-SEARCH_CATALOG_FILENAME = "price_clean_search.csv"
+SEARCH_CATALOG_CSV_FILENAME = "price_clean_search.csv"
+SEARCH_CATALOG_DUCKDB_FILENAME = "price_clean_search.duckdb"
+SEARCH_CATALOG_FILENAME = SEARCH_CATALOG_CSV_FILENAME
+SEARCH_CATALOG_TABLE = "search_catalog"
 SEARCH_BUILD_DEFAULT_CHUNKSIZE = 50000
 BRANCH_PATH_SEPARATOR = " > "
 DEFAULT_TAXONOMY_RULES_PATH = Path(__file__).with_name("taxonomy_rules.json")
@@ -94,14 +105,37 @@ SEARCH_DERIVED_COLUMNS = [
 class SearchCatalogReadiness:
     merged_path: Path
     search_path: Path
+    search_format: str
+    search_csv_path: Path
+    search_duckdb_path: Path
     state: str
     reason: str | None
     merged_mtime: float | None
     search_mtime: float | None
 
 
+def get_search_catalog_csv_path(clean_dir: Path) -> Path:
+    return Path(clean_dir) / SEARCH_CATALOG_CSV_FILENAME
+
+
+def get_search_catalog_duckdb_path(clean_dir: Path) -> Path:
+    return Path(clean_dir) / SEARCH_CATALOG_DUCKDB_FILENAME
+
+
 def get_search_catalog_path(clean_dir: Path) -> Path:
-    return Path(clean_dir) / SEARCH_CATALOG_FILENAME
+    preferred = os.getenv("REMO_SEARCH_STORAGE_FORMAT", "").strip().lower()
+    if preferred == "csv":
+        return get_search_catalog_csv_path(clean_dir)
+    if preferred == "duckdb" and DUCKDB_AVAILABLE:
+        return get_search_catalog_duckdb_path(clean_dir)
+    if DUCKDB_AVAILABLE:
+        return get_search_catalog_duckdb_path(clean_dir)
+    return get_search_catalog_csv_path(clean_dir)
+
+
+def is_search_catalog_path(path: str | Path) -> bool:
+    candidate = Path(str(path))
+    return candidate.name in {SEARCH_CATALOG_CSV_FILENAME, SEARCH_CATALOG_DUCKDB_FILENAME}
 
 
 def load_search_taxonomy_rules() -> Dict[str, Any]:
@@ -859,4 +893,265 @@ def refresh_search_catalog(clean_dir: Path) -> Path:
         if merged_readiness.state == "missing":
             raise FileNotFoundError(merged_readiness.reason or "Итоговая БД не собрана")
         raise RuntimeError(merged_readiness.reason or f"Итоговая БД не готова: {merged_readiness.state}")
+    return build_search_catalog_from_merged(merged_readiness.merged_path, get_search_catalog_path(clean_dir))
+
+
+def _search_preferred_formats(clean_dir: Path) -> list[str]:
+    preferred_path = get_search_catalog_path(clean_dir)
+    if preferred_path.name == SEARCH_CATALOG_DUCKDB_FILENAME:
+        return ["duckdb", "csv"]
+    return ["csv", "duckdb"]
+
+
+def _search_artifact_path(clean_dir: Path, storage_format: str) -> Path:
+    if storage_format == "duckdb":
+        return get_search_catalog_duckdb_path(clean_dir)
+    return get_search_catalog_csv_path(clean_dir)
+
+
+def _build_search_catalog_csv_from_merged(merged_path: Path, target_path: Path) -> Path:
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    part_path = target_path.with_suffix(f"{target_path.suffix}.part")
+    if part_path.exists():
+        part_path.unlink()
+
+    chunksize = _read_search_build_chunksize()
+    rows_total = 0
+    wrote_header = False
+    taxonomy_rules = load_search_taxonomy_rules()
+    logger.info("Search catalog rebuild start: source=%s target=%s format=csv", merged_path, target_path)
+
+    for chunk in pd.read_csv(
+        merged_path,
+        sep=";",
+        encoding="utf-8",
+        chunksize=chunksize,
+        low_memory=False,
+    ):
+        chunk = canonicalize_catalog_columns(chunk, create_missing=True)
+        for column in SEARCH_BASE_COLUMNS:
+            if column not in chunk.columns:
+                chunk[column] = ""
+        source_chunk = chunk[SEARCH_BASE_COLUMNS].copy()
+        output_rows = [
+            build_search_projection_row(row, taxonomy_rules=taxonomy_rules)
+            for row in source_chunk.to_dict(orient="records")
+        ]
+        projected_frame = pd.DataFrame(output_rows, columns=SEARCH_BASE_COLUMNS + SEARCH_DERIVED_COLUMNS)
+        projected_frame.to_csv(
+            part_path,
+            sep=";",
+            encoding="utf-8",
+            index=False,
+            mode="w" if not wrote_header else "a",
+            header=not wrote_header,
+        )
+        wrote_header = True
+        rows_total += len(projected_frame)
+        logger.info("Search build progress: rows=%s format=csv", rows_total)
+
+    if not wrote_header:
+        pd.DataFrame(columns=SEARCH_BASE_COLUMNS + SEARCH_DERIVED_COLUMNS).to_csv(
+            part_path,
+            sep=";",
+            encoding="utf-8",
+            index=False,
+        )
+
+    part_path.replace(target_path)
+    return target_path
+
+
+def _build_search_catalog_duckdb_from_merged(merged_path: Path, target_path: Path) -> Path:
+    if not DUCKDB_AVAILABLE:
+        raise RuntimeError("duckdb package is not installed")
+
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    part_path = target_path.with_suffix(f"{target_path.suffix}.part")
+    if part_path.exists():
+        part_path.unlink()
+
+    chunksize = _read_search_build_chunksize()
+    rows_total = 0
+    created_table = False
+    taxonomy_rules = load_search_taxonomy_rules()
+    logger.info("Search catalog rebuild start: source=%s target=%s format=duckdb", merged_path, target_path)
+
+    connection = duckdb.connect(str(part_path))
+    try:
+        for chunk in pd.read_csv(
+            merged_path,
+            sep=";",
+            encoding="utf-8",
+            chunksize=chunksize,
+            low_memory=False,
+        ):
+            chunk = canonicalize_catalog_columns(chunk, create_missing=True)
+            for column in SEARCH_BASE_COLUMNS:
+                if column not in chunk.columns:
+                    chunk[column] = ""
+            source_chunk = chunk[SEARCH_BASE_COLUMNS].copy()
+            output_rows = [
+                build_search_projection_row(row, taxonomy_rules=taxonomy_rules)
+                for row in source_chunk.to_dict(orient="records")
+            ]
+            projected_frame = pd.DataFrame(output_rows, columns=SEARCH_BASE_COLUMNS + SEARCH_DERIVED_COLUMNS)
+            connection.register("projected_frame", projected_frame)
+            if not created_table:
+                connection.execute(
+                    f"CREATE TABLE {SEARCH_CATALOG_TABLE} AS SELECT * FROM projected_frame"
+                )
+                created_table = True
+            else:
+                connection.execute(
+                    f"INSERT INTO {SEARCH_CATALOG_TABLE} SELECT * FROM projected_frame"
+                )
+            connection.unregister("projected_frame")
+            rows_total += len(projected_frame)
+            logger.info("Search build progress: rows=%s format=duckdb", rows_total)
+
+        if not created_table:
+            empty_frame = pd.DataFrame(columns=SEARCH_BASE_COLUMNS + SEARCH_DERIVED_COLUMNS)
+            connection.register("projected_frame", empty_frame)
+            connection.execute(
+                f"CREATE TABLE {SEARCH_CATALOG_TABLE} AS SELECT * FROM projected_frame"
+            )
+            connection.unregister("projected_frame")
+    finally:
+        connection.close()
+
+    part_path.replace(target_path)
+    return target_path
+
+
+def iter_search_catalog_chunks(search_path: Path | str, *, chunksize: int = SEARCH_BUILD_DEFAULT_CHUNKSIZE) -> Iterable[pd.DataFrame]:
+    catalog_path = Path(search_path)
+    if catalog_path.suffix.lower() == ".duckdb":
+        if not DUCKDB_AVAILABLE:
+            raise RuntimeError("duckdb package is not installed")
+        connection = duckdb.connect(str(catalog_path), read_only=True)
+        try:
+            offset = 0
+            while True:
+                frame = connection.execute(
+                    f"SELECT * FROM {SEARCH_CATALOG_TABLE} LIMIT {int(chunksize)} OFFSET {int(offset)}"
+                ).df()
+                if frame.empty:
+                    break
+                yield frame
+                offset += len(frame)
+        finally:
+            connection.close()
+        return
+
+    yield from pd.read_csv(
+        catalog_path,
+        sep=";",
+        encoding="utf-8",
+        chunksize=chunksize,
+        low_memory=False,
+    )
+
+
+def get_search_catalog_readiness(source_path: str | Path) -> SearchCatalogReadiness:
+    merged_readiness = get_catalog_readiness(source_path)
+    clean_dir = merged_readiness.merged_path.parent if merged_readiness.clean_dir is None else merged_readiness.clean_dir
+    search_csv_path = get_search_catalog_csv_path(clean_dir)
+    search_duckdb_path = get_search_catalog_duckdb_path(clean_dir)
+    preferred_formats = _search_preferred_formats(clean_dir)
+
+    def artifact_state(storage_format: str) -> tuple[str, Path, float | None]:
+        path = _search_artifact_path(clean_dir, storage_format)
+        if not path.exists():
+            return "missing", path, None
+        path_mtime = path.stat().st_mtime
+        if merged_readiness.merged_mtime is not None and path_mtime < merged_readiness.merged_mtime:
+            return "stale", path, path_mtime
+        return "ready", path, path_mtime
+
+    if merged_readiness.state != "ready":
+        preferred_format = preferred_formats[0]
+        search_path = _search_artifact_path(clean_dir, preferred_format)
+        return SearchCatalogReadiness(
+            merged_path=merged_readiness.merged_path,
+            search_path=search_path,
+            search_format=preferred_format,
+            search_csv_path=search_csv_path,
+            search_duckdb_path=search_duckdb_path,
+            state="invalid",
+            reason=merged_readiness.reason or "Search source catalog is not ready",
+            merged_mtime=merged_readiness.merged_mtime,
+            search_mtime=search_path.stat().st_mtime if search_path.exists() else None,
+        )
+
+    ready_candidate: tuple[str, Path, float | None] | None = None
+    stale_candidate: tuple[str, Path, float | None] | None = None
+    for storage_format in preferred_formats:
+        state, path, path_mtime = artifact_state(storage_format)
+        if state == "ready" and ready_candidate is None:
+            ready_candidate = (storage_format, path, path_mtime)
+        elif state == "stale" and stale_candidate is None:
+            stale_candidate = (storage_format, path, path_mtime)
+
+    if ready_candidate is not None:
+        storage_format, search_path, search_mtime = ready_candidate
+        return SearchCatalogReadiness(
+            merged_path=merged_readiness.merged_path,
+            search_path=search_path,
+            search_format=storage_format,
+            search_csv_path=search_csv_path,
+            search_duckdb_path=search_duckdb_path,
+            state="ready",
+            reason=None,
+            merged_mtime=merged_readiness.merged_mtime,
+            search_mtime=search_mtime,
+        )
+
+    if stale_candidate is not None:
+        storage_format, search_path, search_mtime = stale_candidate
+        return SearchCatalogReadiness(
+            merged_path=merged_readiness.merged_path,
+            search_path=search_path,
+            search_format=storage_format,
+            search_csv_path=search_csv_path,
+            search_duckdb_path=search_duckdb_path,
+            state="stale",
+            reason="Search catalog is stale; rebuild it from the merged catalog.",
+            merged_mtime=merged_readiness.merged_mtime,
+            search_mtime=search_mtime,
+        )
+
+    preferred_format = preferred_formats[0]
+    search_path = _search_artifact_path(clean_dir, preferred_format)
+    return SearchCatalogReadiness(
+        merged_path=merged_readiness.merged_path,
+        search_path=search_path,
+        search_format=preferred_format,
+        search_csv_path=search_csv_path,
+        search_duckdb_path=search_duckdb_path,
+        state="missing",
+        reason=f"Search catalog is missing: {search_path.name}",
+        merged_mtime=merged_readiness.merged_mtime,
+        search_mtime=None,
+    )
+
+
+def build_search_catalog_from_merged(merged_csv: Path, output_path: Path | None = None) -> Path:
+    merged_path = Path(merged_csv)
+    if not merged_path.exists():
+        raise FileNotFoundError(f"Search source merged catalog not found: {merged_path}")
+
+    target_path = Path(output_path) if output_path is not None else get_search_catalog_path(merged_path.parent)
+    if target_path.suffix.lower() == ".duckdb":
+        return _build_search_catalog_duckdb_from_merged(merged_path, target_path)
+    return _build_search_catalog_csv_from_merged(merged_path, target_path)
+
+
+def refresh_search_catalog(clean_dir: Path) -> Path:
+    clean_dir = Path(clean_dir)
+    merged_readiness = get_catalog_readiness(clean_dir)
+    if merged_readiness.state != "ready":
+        if merged_readiness.state == "missing":
+            raise FileNotFoundError(merged_readiness.reason or "Merged catalog is missing")
+        raise RuntimeError(merged_readiness.reason or f"Merged catalog is not ready: {merged_readiness.state}")
     return build_search_catalog_from_merged(merged_readiness.merged_path, get_search_catalog_path(clean_dir))

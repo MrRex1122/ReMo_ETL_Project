@@ -18,7 +18,7 @@ import json
 import threading
 from typing import Any
 from cloudflare_r2_export import upload_file_to_r2
-from catalog_search import get_search_catalog_readiness, refresh_search_catalog
+from catalog_search import get_search_catalog_readiness, is_search_catalog_path, refresh_search_catalog
 from catalog_coverage_audit import (
     build_catalog_coverage_audit,
     is_catalog_coverage_audit_fresh,
@@ -405,7 +405,7 @@ def _create_matcher_instance(db_csv: str, settings: dict[str, Any]) -> ReMoMatch
 
 def _resolve_catalog_source_for_run() -> tuple[Path, str]:
     catalog_path = _matcher_catalog_source_path()
-    source_kind = "search" if catalog_path.name == "price_clean_search.csv" else "merged"
+    source_kind = "search" if is_search_catalog_path(catalog_path) else "merged"
     return catalog_path, source_kind
 
 
@@ -1469,6 +1469,7 @@ def main():
             "Если она не собрана или устарела, matcher будет работать на полной merged БД."
         )
         st.code(str(search_readiness.search_path))
+        st.caption(f"Format: `{getattr(search_readiness, 'search_format', 'csv')}`")
         st.write(
             f"Состояние поисковой БД: **{readiness_labels.get(search_readiness.state, search_readiness.state)}**"
         )

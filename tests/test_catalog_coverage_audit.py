@@ -11,6 +11,7 @@ from catalog_coverage_audit import (
     prepare_catalog_coverage_audit_table,
     prepare_catalog_gap_reason_table,
 )
+from catalog_search import DUCKDB_AVAILABLE, build_search_catalog_from_merged, get_search_catalog_duckdb_path
 from catalog_schema import CANONICAL_ARTICLE_COLUMN, CANONICAL_NAME_COLUMN
 
 
@@ -586,6 +587,41 @@ class CatalogCoverageAuditTests(unittest.TestCase):
             row = self._first_row(payload)
             self.assertEqual(row["compatible_candidates_count"], 0)
             self.assertEqual(row["diagnosis"], "catalog_has_family_but_no_compatible_specs")
+
+    def test_search_duckdb_catalog_is_supported_by_audit(self):
+        if not DUCKDB_AVAILABLE:
+            self.skipTest("duckdb package is not installed")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            _write_catalog_csv(
+                merged_path,
+                [
+                    {
+                        CANONICAL_NAME_COLUMN: "Патч-панель 1U категории 6 UTP 24 порта",
+                        CANONICAL_ARTICLE_COLUMN: "PP-24-CAT6",
+                        "Название класса": "Патч-панели",
+                        "Код класса": "CLS-1",
+                        "Тип изделия": "Патч-панель",
+                        "Тип исполнения кабельного изделия": "",
+                        "Производитель": "ReMo",
+                        "Цена розничная": "1000",
+                    }
+                ],
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_duckdb_path(root))
+            payload = build_catalog_coverage_audit(
+                _build_result_df("Панель коммутационная 24 порта категория 6"),
+                run_id="run-search-duckdb",
+                catalog_source_path=search_path,
+                catalog_source_kind="search",
+            )
+
+            row = self._first_row(payload)
+            self.assertEqual(row["diagnosis"], "catalog_has_compatible_candidates")
+            self.assertGreaterEqual(row["compatible_candidates_count"], 1)
 
 
 if __name__ == "__main__":

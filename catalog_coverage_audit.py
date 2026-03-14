@@ -16,6 +16,8 @@ from catalog_search import (
     SEARCH_DERIVED_COLUMNS,
     build_search_projection_row,
     clean_text_value,
+    is_search_catalog_path,
+    iter_search_catalog_chunks,
 )
 from matcher import MATCH_MODE_EXACT, ReMoMatcher
 
@@ -345,6 +347,14 @@ def _iter_catalog_rows(
     chunksize: int = 10_000,
 ) -> Any:
     required_columns = set(SEARCH_BASE_COLUMNS) | set(SEARCH_DERIVED_COLUMNS)
+    if is_search_catalog_path(catalog_source_path):
+        for chunk in iter_search_catalog_chunks(catalog_source_path, chunksize=chunksize):
+            chunk = chunk.copy()
+            for column in required_columns:
+                if column not in chunk.columns:
+                    chunk[column] = ""
+            yield chunk[[column for column in chunk.columns if column in required_columns]]
+        return
     for chunk in pd.read_csv(
         catalog_source_path,
         sep=";",

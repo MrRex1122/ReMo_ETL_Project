@@ -23,6 +23,8 @@ from catalog_search import (
     derive_branch_from_text as shared_derive_branch_from_text,
     extract_item_markers as shared_extract_item_markers,
     get_search_catalog_readiness,
+    is_search_catalog_path,
+    iter_search_catalog_chunks,
     normalize_branch_path as shared_normalize_branch_path,
     normalize_catalog_branch_from_row as shared_normalize_catalog_branch_from_row,
     normalize_query_terms as shared_normalize_query_terms,
@@ -314,7 +316,7 @@ class ReMoMatcher:
     def _resolve_catalog_csv_path(self, db_csv_path: str) -> str:
         source_path = Path(str(db_csv_path))
         search_readiness = get_search_catalog_readiness(source_path)
-        if source_path.is_dir() or source_path.name == SEARCH_CATALOG_FILENAME:
+        if source_path.is_dir() or is_search_catalog_path(source_path):
             if search_readiness.state == "ready":
                 logger.info("📄 Matcher using prepared search catalog: %s", search_readiness.search_path)
                 return str(search_readiness.search_path)
@@ -1108,14 +1110,20 @@ class ReMoMatcher:
         chunksize = self._catalog_load_chunksize()
         logger.info("Matcher catalog load config: chunksize=%s selective_columns=yes", chunksize)
 
-        for chunk in pd.read_csv(
-            self.db_csv_path,
-            sep=";",
-            encoding="utf-8",
-            low_memory=False,
-            chunksize=chunksize,
-            usecols=self._should_load_catalog_column,
-        ):
+        source_path = Path(self.db_csv_path)
+        if is_search_catalog_path(source_path):
+            chunk_iter = iter_search_catalog_chunks(source_path, chunksize=chunksize)
+        else:
+            chunk_iter = pd.read_csv(
+                self.db_csv_path,
+                sep=";",
+                encoding="utf-8",
+                low_memory=False,
+                chunksize=chunksize,
+                usecols=self._should_load_catalog_column,
+            )
+
+        for chunk in chunk_iter:
             chunk = canonicalize_catalog_columns(chunk, create_missing=True)
             if CANONICAL_NAME_COLUMN in chunk.columns:
                 saw_name_column = True

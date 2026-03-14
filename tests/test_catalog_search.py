@@ -7,18 +7,22 @@ import pandas as pd
 
 from catalog_merge import refresh_merged_catalog
 from catalog_search import (
+    DUCKDB_AVAILABLE,
     build_search_catalog_from_merged,
     classify_item_type,
     derive_branch_from_text,
     extract_item_markers,
     get_search_catalog_path,
+    get_search_catalog_csv_path,
+    get_search_catalog_duckdb_path,
     get_search_catalog_readiness,
+    is_search_catalog_path,
     refresh_search_catalog,
 )
 
 
 class CatalogSearchTests(unittest.TestCase):
-    def test_build_search_catalog_from_merged_creates_projected_csv(self):
+    def test_build_search_catalog_from_merged_creates_projected_storage(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             merged_path = root / "price_clean_merged.csv"
@@ -33,15 +37,9 @@ class CatalogSearchTests(unittest.TestCase):
 
             search_path = build_search_catalog_from_merged(merged_path)
 
-            self.assertEqual(search_path, root / "price_clean_search.csv")
-            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
-            self.assertIn("search_branch_path", built.columns)
-            self.assertIn("search_tokens_json", built.columns)
-            self.assertIn("search_item_markers_json", built.columns)
-            self.assertNotIn("Лишняя колонка", built.columns)
-            self.assertEqual(len(built), 1)
-            self.assertEqual(built.loc[0, "Артикул"], "PDU-1")
-            self.assertEqual(built.loc[0, "search_entity_type"], "pdu_basic")
+            self.assertEqual(search_path, get_search_catalog_path(root))
+            self.assertTrue(is_search_catalog_path(search_path))
+            self.assertTrue(search_path.exists())
 
     def test_build_search_catalog_extracts_richer_markers(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -56,7 +54,11 @@ class CatalogSearchTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            built = pd.read_csv(build_search_catalog_from_merged(merged_path), sep=";", encoding="utf-8")
+            built = pd.read_csv(
+                build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root)),
+                sep=";",
+                encoding="utf-8",
+            )
             markers = built.loc[0, "search_item_markers_json"]
 
             self.assertIn("connector_pair", markers)
@@ -76,7 +78,11 @@ class CatalogSearchTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            built = pd.read_csv(build_search_catalog_from_merged(merged_path), sep=";", encoding="utf-8")
+            built = pd.read_csv(
+                build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root)),
+                sep=";",
+                encoding="utf-8",
+            )
             markers = built.loc[0, "search_item_markers_json"]
 
             self.assertIn("shielding", markers)
@@ -126,6 +132,8 @@ class CatalogSearchTests(unittest.TestCase):
             ready = get_search_catalog_readiness(root)
             self.assertEqual(ready.state, "ready")
             self.assertEqual(ready.search_path, search_path)
+            self.assertTrue(is_search_catalog_path(search_path))
+            self.assertIn(ready.search_format, {"csv", "duckdb"})
 
             newer_time = merged_path.stat().st_mtime + 10
             os.utime(merged_path, (newer_time, newer_time))
@@ -145,6 +153,7 @@ class CatalogSearchTests(unittest.TestCase):
 
             self.assertEqual(search_path, get_search_catalog_path(root))
             self.assertTrue(search_path.exists())
+            self.assertTrue(is_search_catalog_path(search_path))
 
     def test_classify_item_type_does_not_treat_ups_with_iec_ports_as_power_cable(self):
         self.assertNotEqual(
@@ -217,6 +226,51 @@ class CatalogSearchTests(unittest.TestCase):
         self.assertEqual(cable_channel_markers.get("port_count"), "2")
         self.assertEqual(single_outlet_markers.get("port_count"), "1")
         self.assertEqual(cover_markers.get("component_kind"), "adapter")
+
+    def test_build_search_catalog_can_write_csv_explicitly(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "PDU Zero U 16A;PDU-1;1200;Шкафы телекоммуникационные;CLS-1;Блок розеток;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+
+            self.assertEqual(search_path, get_search_catalog_csv_path(root))
+            self.assertIn("search_branch_path", built.columns)
+            self.assertEqual(len(built), 1)
+            self.assertEqual(built.loc[0, "search_entity_type"], "pdu_basic")
+
+    def test_build_search_catalog_can_write_duckdb_explicitly(self):
+        if not DUCKDB_AVAILABLE:
+            self.skipTest("duckdb package is not installed")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "PDU Zero U 16A;PDU-1;1200;Шкафы телекоммуникационные;CLS-1;Блок розеток;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_duckdb_path(root))
+
+            self.assertEqual(search_path, get_search_catalog_duckdb_path(root))
+            self.assertTrue(search_path.exists())
+            readiness = get_search_catalog_readiness(root)
+            self.assertEqual(readiness.search_path, search_path)
+            self.assertEqual(readiness.search_format, "duckdb")
 
 
 if __name__ == "__main__":

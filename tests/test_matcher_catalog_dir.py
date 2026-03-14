@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from catalog_merge import refresh_merged_catalog
-from catalog_search import refresh_search_catalog
+from catalog_search import get_search_catalog_path, refresh_search_catalog
 from matcher import ReMoMatcher
 
 
@@ -22,7 +22,7 @@ class MatcherCatalogDirTests(unittest.TestCase):
 
             resolved = ReMoMatcher._resolve_catalog_csv_path(matcher, str(root))
 
-            self.assertTrue(resolved.endswith("price_clean_search.csv"))
+            self.assertEqual(Path(resolved), get_search_catalog_path(root))
             self.assertTrue(Path(resolved).exists())
 
     def test_resolve_catalog_csv_path_accepts_directory_with_prepared_merged_file(self):
