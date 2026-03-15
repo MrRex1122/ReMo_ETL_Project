@@ -194,6 +194,12 @@ class CatalogSearchTests(unittest.TestCase):
             "pdu_basic",
         )
 
+    def test_classify_item_type_does_not_treat_without_pdu_battery_block_as_pdu(self):
+        self.assertNotEqual(
+            classify_item_type("Блок батарейный BAT VGD 240V RM for VRT 6000 240V 7.2Ah without PDU and without charger"),
+            "pdu_basic",
+        )
+
     def test_classify_item_type_does_not_treat_fastener_pdu_series_as_pdu(self):
         self.assertNotEqual(
             classify_item_type("Дюбель универсальный нейлоновый PDU N 8x40 с шурупом"),
@@ -233,6 +239,12 @@ class CatalogSearchTests(unittest.TestCase):
             classify_item_type(
                 "Источник бесперебойного питания Value 2200E line interactive 2200VA USB RJ11 RJ45 4 Schuko"
             ),
+            "rj45_outlet",
+        )
+
+    def test_classify_item_type_does_not_treat_rj45_faceplate_as_outlet(self):
+        self.assertNotEqual(
+            classify_item_type("Celiane лицевая панель для розетки компьютерной RJ45 белая"),
             "rj45_outlet",
         )
 

@@ -290,6 +290,8 @@ def _looks_like_pdu_device(normalized: str) -> bool:
     has_socket_strip = "\u0431\u043b\u043e\u043a \u0440\u043e\u0437\u0435\u0442\u043e\u043a" in normalized
     if not has_pdu_token and not has_socket_strip:
         return False
+    if "without pdu" in normalized or "\u0431\u0435\u0437 pdu" in normalized:
+        return False
     fastener_noise_markers = (
         "\u0434\u044e\u0431\u0435\u043b",
         "\u0448\u0443\u0440\u0443\u043f",
@@ -462,6 +464,15 @@ def _looks_like_rj45_outlet(normalized: str) -> bool:
         "ups",
     )
     if any(marker in normalized for marker in power_device_noise):
+        return False
+    adapter_noise = (
+        "\u043b\u0438\u0446\u0435\u0432\u0430\u044f \u043f\u0430\u043d\u0435\u043b",
+        "\u043d\u0430\u043a\u043b\u0430\u0434\u043a",
+        "\u0430\u0434\u0430\u043f\u0442\u0435\u0440",
+        "faceplate",
+        "cover",
+    )
+    if any(marker in normalized for marker in adapter_noise):
         return False
     outlet_markers = (
         "\u0440\u043e\u0437\u0435\u0442\u043a",
