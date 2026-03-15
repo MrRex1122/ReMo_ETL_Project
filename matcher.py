@@ -527,6 +527,7 @@ class ReMoMatcher:
             "optical_patch_cord": "optical_patch_cord",
             "optical_cross": "optical_cross",
             "iec_power_cable": "iec_power_cable",
+            "keystone_adapter": "keystone",
             "keystone_module": "keystone",
             "rj45_connector": "rj45_connector",
             "rj45_outlet": "rj45_outlet",

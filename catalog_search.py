@@ -273,6 +273,57 @@ def _has_iec_power_cable_context(normalized: str) -> bool:
     return any(marker in normalized for marker in cable_context_markers)
 
 
+def _looks_like_primary_cable_product(normalized: str) -> bool:
+    primary_prefixes = (
+        "\u043a\u0430\u0431\u0435\u043b\u044c",
+        "\u0448\u043d\u0443\u0440",
+        "\u0441\u043e\u0435\u0434\u0438\u043d\u0438\u0442\u0435\u043b\u044c\u043d",
+        "power cord",
+        "cord",
+    )
+    return normalized.startswith(primary_prefixes)
+
+
+def _looks_like_pdu_device(normalized: str) -> bool:
+    has_pdu_token = "pdu" in normalized
+    has_socket_strip = "\u0431\u043b\u043e\u043a \u0440\u043e\u0437\u0435\u0442\u043e\u043a" in normalized
+    if not has_pdu_token and not has_socket_strip:
+        return False
+    fastener_noise_markers = (
+        "\u0434\u044e\u0431\u0435\u043b",
+        "\u0448\u0443\u0440\u0443\u043f",
+        "\u043d\u0435\u0439\u043b\u043e\u043d",
+        "zn ",
+        "sormat",
+        "fischer",
+    )
+    if any(marker in normalized for marker in fastener_noise_markers):
+        return False
+    if _looks_like_primary_cable_product(normalized) and any(
+        marker in normalized for marker in ("iec320", "c13", "c14", "c19", "c20")
+    ):
+        return False
+    if has_pdu_token:
+        return True
+    rack_pdu_markers = (
+        "zero u",
+        "schuko",
+        "c13",
+        "c19",
+        "c20",
+        "\u0431\u0430\u0439\u043f\u0430\u0441",
+        "bypass",
+        "\u0438\u0431\u043f",
+        "ups",
+        "\u0448\u043a\u0430\u0444",
+        "\u0441\u0442\u043e\u0439\u043a",
+        "\u0432\u0435\u0440\u0442\u0438\u043a\u0430\u043b\u044c\u043d",
+        "\u0433\u043e\u0440\u0438\u0437\u043e\u043d\u0442\u0430\u043b\u044c\u043d",
+        "19",
+    )
+    return any(marker in normalized for marker in rack_pdu_markers)
+
+
 def _looks_like_patch_panel(normalized: str, phrase_normalized: str) -> bool:
     if "патч панел" in phrase_normalized or "patch panel" in phrase_normalized:
         return True
@@ -350,6 +401,78 @@ def _looks_like_ats_sts_device(normalized: str) -> bool:
     )
 
 
+def _looks_like_optical_patch_cord(normalized: str, phrase_normalized: str) -> bool:
+    if not any(marker in normalized for marker in ("\u043e\u043f\u0442\u0438\u0447\u0435\u0441\u043a", "\u0432\u043e\u043b\u043e\u043a\u043e\u043d")):
+        return False
+    if "\u0434\u043b\u044f \u043f\u0430\u0442\u0447 \u043a\u043e\u0440\u0434" in phrase_normalized:
+        return False
+    explicit_patch_cord = "\u043f\u0430\u0442\u0447 \u043a\u043e\u0440\u0434" in phrase_normalized or "patch cord" in phrase_normalized
+    connector_markers = ("lc", "sc", "fc", "st", "mtp", "mpo", "duplex", "simplex", "os2", "om3", "om4")
+    return explicit_patch_cord and any(marker in normalized for marker in connector_markers)
+
+
+def _looks_like_keystone_adapter(normalized: str) -> bool:
+    if "keystone" not in normalized and "\u043a\u0435\u0439\u0441\u0442\u043e\u0443\u043d" not in normalized:
+        return False
+    adapter_markers = (
+        "\u0430\u0434\u0430\u043f\u0442\u0435\u0440",
+        "\u043b\u0438\u0446\u0435\u0432\u0430\u044f \u043f\u0430\u043d\u0435\u043b",
+        "\u043d\u0430\u043a\u043b\u0430\u0434\u043a",
+        "\u0440\u0430\u043c\u043a",
+        "faceplate",
+        "cover",
+        "adapter",
+    )
+    return any(marker in normalized for marker in adapter_markers)
+
+
+def _looks_like_keystone_module(normalized: str) -> bool:
+    if "keystone" not in normalized and "\u043a\u0435\u0439\u0441\u0442\u043e\u0443\u043d" not in normalized:
+        return False
+    if _looks_like_keystone_adapter(normalized):
+        return False
+    module_markers = (
+        "\u043c\u043e\u0434\u0443\u043b",
+        "jack",
+        "toolless",
+        "\u0433\u043d\u0435\u0437\u0434\u043e",
+        "\u0440\u043e\u0437\u0435\u0442\u043a",
+        "\u044d\u043a\u0440\u0430\u043d\u0438\u0440\u043e\u0432\u0430\u043d",
+        "cat5",
+        "cat6",
+        "cat6a",
+        "rj45",
+    )
+    return any(marker in normalized for marker in module_markers)
+
+
+def _looks_like_rj45_outlet(normalized: str) -> bool:
+    if not re.search(r"\brj[\s-]?45\b", normalized, flags=re.IGNORECASE):
+        return False
+    power_device_noise = (
+        "\u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a \u0431\u0435\u0441\u043f\u0435\u0440\u0435\u0431\u043e\u0439\u043d",
+        "line interactive",
+        "online ups",
+        "usb",
+        "schuko",
+        "\u0438\u0431\u043f",
+        "ups",
+    )
+    if any(marker in normalized for marker in power_device_noise):
+        return False
+    outlet_markers = (
+        "\u0440\u043e\u0437\u0435\u0442\u043a",
+        "\u043a\u043e\u043d\u0441\u0442\u0440\u0443\u043a\u0442\u0438\u0432",
+        "\u043b\u044e\u0447\u043e\u043a",
+        "\u043a\u0430\u0431\u0435\u043b\u044c-\u043a\u0430\u043d\u0430\u043b",
+        "\u0432 \u0441\u0431\u043e\u0440\u0435",
+        "\u0435\u0432\u0440\u043e\u0441\u043b\u043e\u0442",
+        "\u043d\u0430\u0440\u0443\u0436\u043d",
+        "\u0432\u043d\u0443\u0442\u0440\u0435\u043d",
+    )
+    return any(marker in normalized for marker in outlet_markers)
+
+
 def classify_item_type(text: str, synonyms: Mapping[str, str] | None = None) -> str:
     normalized = normalize_query_terms(text, synonyms=synonyms)
     phrase_normalized = normalized.replace("-", " ")
@@ -378,23 +501,25 @@ def classify_item_type(text: str, synonyms: Mapping[str, str] | None = None) -> 
         return "temperature_sensor"
     if "геркон" in normalized or "магнитоконтакт" in normalized:
         return "reed_sensor"
-    if has_iec_connector_markers and any(token in normalized for token in ("кабель", "cord", "шнур", "соединительн")):
+    if has_iec_connector_markers and not _looks_like_pdu_device(normalized) and any(
+        token in normalized for token in ("кабель", "cord", "шнур", "соединительн")
+    ):
         return "iec_power_cable"
-    if "pdu" in normalized or "блок розеток" in normalized:
+    if _looks_like_pdu_device(normalized):
         if "meter" in normalized or "измерител" in normalized:
             return "pdu_metered"
         return "pdu_basic"
-    if any(marker in normalized for marker in ("оптическ", "волокон")) and (
-        "патч корд" in phrase_normalized or "patch cord" in phrase_normalized
-    ):
+    if _looks_like_optical_patch_cord(normalized, phrase_normalized):
         return "optical_patch_cord"
     if ("оптическ" in normalized and "кросс" in normalized) or ("кросс" in normalized and "волокон" in normalized):
         return "optical_cross"
-    if "keystone" in normalized or "кейстоун" in normalized:
+    if _looks_like_keystone_adapter(normalized):
+        return "keystone_adapter"
+    if _looks_like_keystone_module(normalized):
         return "keystone_module"
     if "коннектор" in normalized and re.search(r"\brj[\s-]?45\b", normalized, flags=re.IGNORECASE):
         return "rj45_connector"
-    if "розетк" in normalized and re.search(r"\brj[\s-]?45\b", normalized, flags=re.IGNORECASE):
+    if _looks_like_rj45_outlet(normalized):
         return "rj45_outlet"
     if "лючок" in normalized or ("напольн" in normalized and "короб" in normalized):
         return "floor_box"
@@ -408,7 +533,7 @@ def classify_item_type(text: str, synonyms: Mapping[str, str] | None = None) -> 
         return "rack_rail"
     if "заземл" in normalized and "шин" in normalized:
         return "ground_bar"
-    if has_iec_connector_markers:
+    if has_iec_connector_markers and not _looks_like_pdu_device(normalized):
         return "iec_power_cable"
     if _looks_like_patch_panel(normalized, phrase_normalized):
         return "patch_panel"
@@ -470,7 +595,7 @@ def derive_branch_from_text(
         return "телеком > кабели > оптические патч корды"
     if entity_type == "patch_cord":
         return "телеком > кабели > патч корды"
-    if entity_type in {"keystone_module", "rj45_connector", "rj45_outlet"}:
+    if entity_type in {"keystone_module", "keystone_adapter", "rj45_connector", "rj45_outlet"}:
         return "телеком > коммутация > модули"
     if entity_type == "rack":
         return "телеком > шкафы"

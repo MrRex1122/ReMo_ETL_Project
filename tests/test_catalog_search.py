@@ -182,10 +182,54 @@ class CatalogSearchTests(unittest.TestCase):
             "iec_power_cable",
         )
 
+    def test_classify_item_type_does_not_treat_pdu_with_cable_length_as_iec_power_cable(self):
+        self.assertEqual(
+            classify_item_type("Блок розеток PDU 8xSchuko C20 кабель длиной 1.8 м с разъемом C20"),
+            "pdu_basic",
+        )
+
+    def test_classify_item_type_does_not_treat_fastener_pdu_series_as_pdu(self):
+        self.assertNotEqual(
+            classify_item_type("Дюбель универсальный нейлоновый PDU N 8x40 с шурупом"),
+            "pdu_basic",
+        )
+
+    def test_classify_item_type_does_not_treat_generic_socket_strip_as_pdu(self):
+        self.assertNotEqual(
+            classify_item_type("Блок розеток тройной с заземлением 16А белый"),
+            "pdu_basic",
+        )
+
     def test_classify_item_type_does_not_treat_non_telecom_commutation_panel_as_patch_panel(self):
         self.assertNotEqual(
             classify_item_type("Панель коммутационная Ridan WD на 8 каналов и 14 приводов"),
             "patch_panel",
+        )
+
+    def test_classify_item_type_separates_keystone_adapters_from_modules(self):
+        self.assertEqual(
+            classify_item_type("Avanti Адаптер для Keystone белое облако 1 модульный"),
+            "keystone_adapter",
+        )
+        self.assertEqual(
+            classify_item_type("Модуль Keystone экранированный категория 6A RJ45"),
+            "keystone_module",
+        )
+
+    def test_classify_item_type_does_not_treat_ups_with_rj45_ports_as_outlet(self):
+        self.assertNotEqual(
+            classify_item_type(
+                "Источник бесперебойного питания Value 2200E line interactive 2200VA USB RJ11 RJ45 4 Schuko"
+            ),
+            "rj45_outlet",
+        )
+
+    def test_classify_item_type_does_not_treat_optical_cable_for_patch_cords_as_patch_cord(self):
+        self.assertNotEqual(
+            classify_item_type(
+                "Кабель волоконно-оптический многомодовый для патч кордов и кабельных сборок с коннекторами MPO/MTP"
+            ),
+            "optical_patch_cord",
         )
 
     def test_extract_item_markers_normalizes_category_and_panel_markers(self):

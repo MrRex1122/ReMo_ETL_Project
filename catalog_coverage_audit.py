@@ -29,6 +29,7 @@ TARGET_FAMILY_GROUPS = {
     "patch_panel": "patch_panel",
     "patch_cord": "patch_cord",
     "keystone": "keystone_rj45",
+    "keystone_adapter": "keystone_rj45",
     "rj45_connector": "keystone_rj45",
     "rj45_outlet": "keystone_rj45",
     "bulk_twisted_pair": "twisted_pair",
