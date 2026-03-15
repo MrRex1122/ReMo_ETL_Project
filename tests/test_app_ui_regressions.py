@@ -40,8 +40,10 @@ class AppUiRegressionTests(unittest.TestCase):
 
     def test_search_catalog_export_ui_is_present(self):
         app_source = Path("app.py").read_text(encoding="utf-8")
-        self.assertIn("Подготовить ссылку на выгрузку поисковой БД", app_source)
-        self.assertIn("Скачать поисковую БД", app_source)
+        self.assertIn("Выгрузить поисковую БД в Cloudflare R2", app_source)
+        self.assertIn("Открыть поисковую БД в Cloudflare R2", app_source)
+        self.assertNotIn("Подготовить ссылку на выгрузку поисковой БД", app_source)
+        self.assertNotIn("Выгрузить БД в Google Drive (CSV)", app_source)
 
 
 if __name__ == "__main__":
