@@ -38,5 +38,11 @@ class AppUiRegressionTests(unittest.TestCase):
         self.assertIn("Сводка по root cause", app_source)
 
 
+    def test_search_catalog_export_ui_is_present(self):
+        app_source = Path("app.py").read_text(encoding="utf-8")
+        self.assertIn("Подготовить ссылку на выгрузку поисковой БД", app_source)
+        self.assertIn("Скачать поисковую БД", app_source)
+
+
 if __name__ == "__main__":
     unittest.main()

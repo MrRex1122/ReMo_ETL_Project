@@ -82,6 +82,7 @@ from snapshot_export import (
     build_snapshot_export_basename,
     get_snapshot_xlsx_status,
     start_snapshot_xlsx_build,
+    stage_public_export,
 )
 
 # ============ ЛОГИРОВАНИЕ ============
@@ -194,6 +195,10 @@ if 'catalog_snapshot_r2_csv_url' not in st.session_state:
     st.session_state.catalog_snapshot_r2_csv_url = None
 if 'catalog_snapshot_r2_csv_key' not in st.session_state:
     st.session_state.catalog_snapshot_r2_csv_key = None
+if 'search_catalog_export_url' not in st.session_state:
+    st.session_state.search_catalog_export_url = None
+if 'search_catalog_export_name' not in st.session_state:
+    st.session_state.search_catalog_export_name = None
 
 
 
@@ -725,6 +730,8 @@ def _reset_catalog_runtime_state() -> None:
     st.session_state.catalog_snapshot_drive_csv_name = None
     st.session_state.catalog_snapshot_r2_csv_url = None
     st.session_state.catalog_snapshot_r2_csv_key = None
+    st.session_state.search_catalog_export_url = None
+    st.session_state.search_catalog_export_name = None
 
 
 def _reset_matcher_runtime_state() -> None:
@@ -1439,6 +1446,9 @@ def main():
         elif catalog_readiness.state != "ready" and st.session_state.catalog_snapshot_r2_csv_url is not None:
             st.session_state.catalog_snapshot_r2_csv_url = None
             st.session_state.catalog_snapshot_r2_csv_key = None
+        if search_readiness.state != "ready":
+            st.session_state.search_catalog_export_url = None
+            st.session_state.search_catalog_export_name = None
         readiness_labels = {
             "ready": "Готова",
             "missing": "Не собрана",
@@ -1501,6 +1511,8 @@ def main():
                     logger.info("🪶 Search catalog rebuild requested: clean_dir=%s", catalog_readiness.clean_dir)
                     search_path = refresh_search_catalog(catalog_readiness.clean_dir)
                     _reset_matcher_runtime_state()
+                    st.session_state.search_catalog_export_url = None
+                    st.session_state.search_catalog_export_name = None
                     st.success(f"✓ Поисковая БД обновлена: {search_path.name}")
                 except Exception as e:
                     logger.error("❌ Search catalog rebuild failed: %s", e, exc_info=True)
@@ -1509,6 +1521,39 @@ def main():
         if st.button("♻️ Сбросить состояние БД"):
             _reset_catalog_runtime_state()
             st.success("✓ Состояние БД сброшено")
+
+        st.caption("Выгрузка поисковой БД")
+        if st.button("📥 Подготовить ссылку на выгрузку поисковой БД"):
+            if search_readiness.state != "ready":
+                st.error(
+                    f"❌ {search_readiness.reason or 'Поисковая БД не готова'}. "
+                    "Нажмите `🪶 Обновить поисковую БД`."
+                )
+            else:
+                try:
+                    source_path = search_readiness.search_path
+                    export_name = f"{build_snapshot_export_basename(source_path)}{source_path.suffix or '.duckdb'}"
+                    logger.info(
+                        "🖱️ Search catalog export link button pressed: source=%s export_name=%s",
+                        source_path,
+                        export_name,
+                    )
+                    _, public_url = stage_public_export(source_path, export_name, add_utf8_bom=False)
+                    st.session_state.search_catalog_export_url = public_url
+                    st.session_state.search_catalog_export_name = export_name
+                    st.success(f"✓ Ссылка на поисковую БД готова: {source_path.name}")
+                except Exception as e:
+                    logger.error("❌ Search catalog export link failed: %s", e, exc_info=True)
+                    st.error(f"❌ Не удалось подготовить ссылку на поисковую БД: {e}")
+
+        if st.session_state.search_catalog_export_url:
+            if st.session_state.search_catalog_export_name:
+                st.caption(f"Файл выгрузки: {st.session_state.search_catalog_export_name}")
+            st.link_button(
+                "⬇️ Скачать поисковую БД",
+                st.session_state.search_catalog_export_url,
+                use_container_width=True,
+            )
 
         st.caption("Выгрузка готовой входной БД")
         if st.button("📥 Подготовить ссылку на выгрузку БД (CSV)"):
