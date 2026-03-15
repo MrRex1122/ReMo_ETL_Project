@@ -1941,13 +1941,12 @@ def main():
                     st.rerun()
             with status_col2:
                 if auto_refresh_allowed:
-                    auto_refresh_enabled = st.checkbox(
+                    st.checkbox(
                         "Автообновление 5с",
                         value=bool(st.session_state.get("active_run_auto_refresh_enabled")),
                         key="active_run_auto_refresh_enabled",
                         help="Включает автоматическое обновление страницы во время выполнения прогона.",
                     )
-                    st.session_state.active_run_auto_refresh_enabled = bool(auto_refresh_enabled)
                 elif st.button("📌 Открыть этот прогон в результатах", key="open_active_run_results"):
                     st.session_state.active_run_id = run_for_display.run_id
                     st.session_state.active_run_status = run_for_display.status
