@@ -431,6 +431,8 @@ def _looks_like_keystone_module(normalized: str) -> bool:
         return False
     if _looks_like_keystone_adapter(normalized):
         return False
+    if "\u043f\u0430\u043d\u0435\u043b" in normalized or "patch panel" in normalized or "\u043f\u0430\u0442\u0447 \u043f\u0430\u043d\u0435\u043b" in normalized:
+        return False
     module_markers = (
         "\u043c\u043e\u0434\u0443\u043b",
         "jack",

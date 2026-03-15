@@ -216,6 +216,12 @@ class CatalogSearchTests(unittest.TestCase):
             "keystone_module",
         )
 
+    def test_classify_item_type_does_not_treat_keystone_patch_panel_as_module(self):
+        self.assertEqual(
+            classify_item_type("TITAN 5 Патч-панель на 12 модулей типа Keystone"),
+            "patch_panel",
+        )
+
     def test_classify_item_type_does_not_treat_ups_with_rj45_ports_as_outlet(self):
         self.assertNotEqual(
             classify_item_type(
