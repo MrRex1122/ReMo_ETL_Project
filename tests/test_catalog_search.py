@@ -182,6 +182,12 @@ class CatalogSearchTests(unittest.TestCase):
             "iec_power_cable",
         )
 
+    def test_classify_item_type_does_not_treat_tc200_blank_panel_as_iec_power_cable(self):
+        self.assertNotEqual(
+            classify_item_type("Заглушка TC200x80 горячеоцинкованная"),
+            "iec_power_cable",
+        )
+
     def test_classify_item_type_does_not_treat_pdu_with_cable_length_as_iec_power_cable(self):
         self.assertEqual(
             classify_item_type("Блок розеток PDU 8xSchuko C20 кабель длиной 1.8 м с разъемом C20"),

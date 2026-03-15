@@ -261,7 +261,8 @@ def _looks_like_ats_sts_device_precise(normalized: str) -> bool:
 
 
 def _has_iec_power_cable_context(normalized: str) -> bool:
-    if not any(marker in normalized for marker in ("iec320", "c13", "c14", "c19", "c20")):
+    connector_pattern = r"(?<![A-Za-z0-9])(?:iec320|c13|c14|c19|c20)(?![A-Za-z0-9])"
+    if not re.search(connector_pattern, normalized, flags=re.IGNORECASE):
         return False
     cable_context_markers = (
         "\u043a\u0430\u0431\u0435\u043b\u044c",
