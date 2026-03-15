@@ -3,6 +3,8 @@ import unittest
 import pandas as pd
 
 from match_diagnostics import (
+    apply_match_diagnostics_summary_to_stats,
+    apply_match_diagnostics_to_result_dataframe,
     build_match_diagnostics_payload,
     enrich_match_diagnostics_payload,
     is_match_diagnostics_fresh,
@@ -286,6 +288,66 @@ class MatchDiagnosticsTests(unittest.TestCase):
         self.assertIn("Pipeline stage", stages.columns)
         self.assertIn("Root cause class", root_causes.columns)
         self.assertIn("Root cause code", reasons.columns)
+
+    def test_apply_match_diagnostics_to_result_dataframe_uses_enriched_root_cause_fields(self):
+        df = pd.DataFrame(
+            {
+                "Наименование оборудования, материалов и кабелей": ["Оптический кросс"],
+                "Этап отказа": ["local_recall"],
+                "Код причины": ["no_compatible_candidates"],
+                "Класс причины": ["matcher_retrieval_or_ranking"],
+            }
+        )
+        diagnostics = build_match_diagnostics_payload(
+            [
+                {
+                    "run_row_number": 2,
+                    "query_text": "Оптический кросс",
+                    "query_family": "optical_cross",
+                    "stage_of_failure": "local_recall",
+                    "reason_code": "no_compatible_candidates",
+                    "reason_class": "matcher_retrieval_or_ranking",
+                    "pipeline_counts": {"same_family_count": 0, "compatible_count": 0},
+                    "candidate_snapshots": {},
+                    "gemini": {"attempted": False},
+                    "trace_steps": [],
+                }
+            ],
+            run_id="run-1",
+        )
+        coverage_audit = {
+            "rows": [
+                {
+                    "run_row_number": 2,
+                    "diagnosis": "catalog_missing_family",
+                    "gap_reason_code": "missing_family",
+                    "same_family_candidates_count": 0,
+                    "compatible_candidates_count": 0,
+                }
+            ]
+        }
+        enriched = enrich_match_diagnostics_payload(diagnostics, coverage_audit_payload=coverage_audit)
+
+        updated = apply_match_diagnostics_to_result_dataframe(df, enriched)
+
+        self.assertEqual(updated.at[0, "Этап отказа"], "local_recall")
+        self.assertEqual(updated.at[0, "Код причины"], "missing_family")
+        self.assertEqual(updated.at[0, "Класс причины"], "catalog_gap")
+
+    def test_apply_match_diagnostics_summary_to_stats_uses_enriched_summary(self):
+        payload = {
+            "summary": {
+                "pipeline_stage_counts": {"local_recall": 3, "resolved": 1},
+                "root_cause_class_counts": {"catalog_gap": 3, "resolved": 1},
+                "root_cause_code_counts": {"missing_family": 2, "category_mismatch": 1, "resolved": 1},
+            }
+        }
+
+        updated = apply_match_diagnostics_summary_to_stats({"total": 4}, payload)
+
+        self.assertEqual(updated["diagnostic_stage_counts"]["local_recall"], 3)
+        self.assertEqual(updated["diagnostic_reason_class_counts"]["catalog_gap"], 3)
+        self.assertEqual(updated["diagnostic_reason_code_counts"]["missing_family"], 2)
 
 
 if __name__ == "__main__":

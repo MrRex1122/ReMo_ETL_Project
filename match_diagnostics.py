@@ -367,6 +367,64 @@ def build_match_diagnostics_payload(
     return enrich_match_diagnostics_payload(payload, coverage_audit_payload=coverage_audit_payload)
 
 
+def apply_match_diagnostics_to_result_dataframe(
+    df_result: pd.DataFrame,
+    payload: dict[str, Any] | None,
+) -> pd.DataFrame:
+    if not isinstance(payload, dict):
+        return df_result
+    rows = payload.get("rows")
+    if not isinstance(rows, list) or df_result is None:
+        return df_result
+
+    stage_column = "Этап отказа"
+    reason_code_column = "Код причины"
+    reason_class_column = "Класс причины"
+    for column in (stage_column, reason_code_column, reason_class_column):
+        if column not in df_result.columns:
+            df_result[column] = None
+
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        run_row_number = _safe_int(row.get("run_row_number"))
+        if run_row_number <= 1:
+            continue
+        dataframe_index = run_row_number - 2
+        if dataframe_index not in df_result.index:
+            continue
+        pipeline_stage = _clean_text_value(row.get("pipeline_stage") or row.get("stage_of_failure")) or "runtime_error"
+        root_cause_code = _normalize_reason_code(row.get("root_cause_code") or row.get("reason_code"))
+        root_cause_class = _clean_text_value(row.get("root_cause_class") or row.get("reason_class")) or infer_reason_class(
+            pipeline_stage,
+            root_cause_code,
+        )
+        df_result.at[dataframe_index, stage_column] = pipeline_stage
+        df_result.at[dataframe_index, reason_code_column] = root_cause_code
+        df_result.at[dataframe_index, reason_class_column] = root_cause_class
+    return df_result
+
+
+def apply_match_diagnostics_summary_to_stats(
+    stats: dict[str, Any] | None,
+    payload: dict[str, Any] | None,
+) -> dict[str, Any]:
+    updated_stats = dict(stats or {})
+    if not isinstance(payload, dict):
+        return updated_stats
+    summary = payload.get("summary")
+    if not isinstance(summary, dict):
+        return updated_stats
+    updated_stats["diagnostic_stage_counts"] = dict(summary.get("pipeline_stage_counts") or summary.get("stage_counts") or {})
+    updated_stats["diagnostic_reason_class_counts"] = dict(
+        summary.get("root_cause_class_counts") or summary.get("reason_class_counts") or {}
+    )
+    updated_stats["diagnostic_reason_code_counts"] = dict(
+        summary.get("root_cause_code_counts") or summary.get("reason_code_counts") or {}
+    )
+    return updated_stats
+
+
 def _find_query_column(df_result: pd.DataFrame) -> str:
     for column in df_result.columns:
         normalized = _clean_text_value(column).lower()

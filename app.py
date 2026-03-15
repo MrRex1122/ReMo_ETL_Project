@@ -27,6 +27,8 @@ from catalog_coverage_audit import (
     prepare_catalog_gap_reason_table,
 )
 from match_diagnostics import (
+    apply_match_diagnostics_summary_to_stats,
+    apply_match_diagnostics_to_result_dataframe,
     build_match_diagnostics_payload,
     enrich_match_diagnostics_payload,
     is_match_diagnostics_fresh,
@@ -504,19 +506,47 @@ def _run_processing_job(run_id: str, matcher_settings: dict[str, Any]) -> None:
             progress_callback=_progress_callback,
         )
 
-        write_processing_run_result(run_id, df_result, stats)
         diagnostics_rows = getattr(matcher, "last_match_diagnostics_rows", None)
-        if isinstance(diagnostics_rows, list):
-            diagnostics_payload = build_match_diagnostics_payload(diagnostics_rows, run_id=run_id)
-            write_processing_run_match_diagnostics(run_id, diagnostics_payload)
         write_processing_run_progress(
             run_id,
             stage="saving_results",
             current=int(stats.get("total", len(df_result))),
             total=int(stats.get("total", len(df_result))),
             percent=0.99,
-            message="Сохранение результатов",
+            message="Формирование диагностики и сохранение результатов",
         )
+        coverage_audit_payload = None
+        try:
+            coverage_audit_payload = build_catalog_coverage_audit(
+                df_result,
+                run_id=run_id,
+                catalog_source_path=Path(run.catalog_source_path),
+                catalog_source_kind=str(run.catalog_source_kind or ""),
+            )
+            write_processing_run_coverage_audit(run_id, coverage_audit_payload)
+        except Exception:
+            logger.exception("Failed to build coverage audit for run %s", run_id)
+
+        try:
+            if isinstance(diagnostics_rows, list):
+                diagnostics_payload = build_match_diagnostics_payload(
+                    diagnostics_rows,
+                    run_id=run_id,
+                    coverage_audit_payload=coverage_audit_payload,
+                )
+            else:
+                diagnostics_payload = reconstruct_match_diagnostics(
+                    df_result,
+                    run_id=run_id,
+                    coverage_audit_payload=coverage_audit_payload,
+                )
+            write_processing_run_match_diagnostics(run_id, diagnostics_payload)
+            apply_match_diagnostics_to_result_dataframe(df_result, diagnostics_payload)
+            stats = apply_match_diagnostics_summary_to_stats(stats, diagnostics_payload)
+        except Exception:
+            logger.exception("Failed to build or apply diagnostics for run %s", run_id)
+
+        write_processing_run_result(run_id, df_result, stats)
         rows_total = int(stats.get("total", len(df_result)))
         found_count = int(stats.get("found", 0))
         missing_count = int(stats.get("not_found", 0))

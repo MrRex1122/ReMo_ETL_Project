@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Tuple
 
 import pandas as pd
 
@@ -3497,15 +3497,16 @@ class ReMoMatcher:
         except Exception as exc:
             logger.warning("History write error: %s", exc)
 
-    def _run_matches_parallel(self, tasks: List[Tuple[int, str]]) -> List[Tuple[int, Dict[str, Any]]]:
+    def _run_matches_parallel(self, tasks: List[Tuple[int, str]]) -> Iterator[Tuple[int, Dict[str, Any]]]:
         if not tasks:
-            return []
+            return
 
         workers = min(max(1, int(getattr(self, "parallel_requests", 1))), len(tasks))
         if workers <= 1:
-            return [(idx, self.match(query, use_cache=True)) for idx, query in tasks]
+            for idx, query in tasks:
+                yield idx, self.match(query, use_cache=True)
+            return
 
-        results: List[Tuple[int, Dict[str, Any]]] = []
         with ThreadPoolExecutor(max_workers=workers) as pool:
             future_map = {pool.submit(self.match, query, True): idx for idx, query in tasks}
             completed = 0
@@ -3516,11 +3517,47 @@ class ReMoMatcher:
                     result = future.result()
                 except Exception as exc:
                     result = self._build_missing_result("", "", error=str(exc))
-                results.append((idx, result))
                 completed += 1
                 if completed % 10 == 0 or completed == total:
                     logger.info("Processed %s/%s rows", completed, total)
-        return results
+                yield idx, result
+
+    def _prioritize_match_tasks(self, tasks: List[Tuple[int, str]]) -> List[Tuple[int, str]]:
+        prioritized: List[Tuple[Tuple[int, int, int, int, int], int, str]] = []
+        cache_hits = 0
+        for idx, query in tasks:
+            query_text = self._clean_text_value(query)
+            cache_rank = 1
+            try:
+                if query_text and self._get_from_cache(query_text):
+                    cache_rank = 0
+                    cache_hits += 1
+            except Exception as exc:
+                logger.debug("Task prioritization cache probe failed for query=%s: %s", query_text[:120], exc)
+
+            row_type_rank = 1
+            broad_family_rank = 0
+            query_length_rank = len(query_text)
+            if cache_rank != 0 and query_text:
+                try:
+                    query_features = self._extract_query_features(query_text)
+                    row_type_rank = 0 if self._clean_text_value(query_features.get("row_type")) == "section" else 1
+                    query_family = self._entity_family(query_features.get("entity_type", ""))
+                    broad_family_rank = 1 if query_family in {"rack", "sensor", "rack_accessory_strict"} else 0
+                except Exception as exc:
+                    logger.debug("Task prioritization feature probe failed for query=%s: %s", query_text[:120], exc)
+
+            prioritized.append(((cache_rank, row_type_rank, broad_family_rank, query_length_rank, idx), idx, query))
+
+        prioritized.sort(key=lambda entry: entry[0])
+        if prioritized:
+            logger.info(
+                "🧠 Match task prioritization: tasks=%s cache_hits=%s parallel_workers=%s",
+                len(prioritized),
+                cache_hits,
+                min(max(1, int(getattr(self, "parallel_requests", 1))), len(prioritized)),
+            )
+        return [(idx, query) for _priority, idx, query in prioritized]
 
     def _compose_not_found_reason(self, query: str, result: Dict[str, Any]) -> str:
         query_text = str(query or "").strip()
@@ -3641,6 +3678,7 @@ class ReMoMatcher:
                 continue
             tasks.append((idx, query))
 
+        tasks = self._prioritize_match_tasks(tasks)
         stats["total"] = len(tasks)
         if progress_callback is not None:
             progress_callback(
