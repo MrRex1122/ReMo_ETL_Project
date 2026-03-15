@@ -177,6 +177,8 @@ if 'last_run_restore_attempted' not in st.session_state:
     st.session_state.last_run_restore_attempted = False
 if 'processing_thread_started_run_id' not in st.session_state:
     st.session_state.processing_thread_started_run_id = None
+if 'active_run_auto_refresh_enabled' not in st.session_state:
+    st.session_state.active_run_auto_refresh_enabled = False
 
 if 'catalog_snapshot_bundle' not in st.session_state:
     st.session_state.catalog_snapshot_bundle = None
@@ -1871,7 +1873,10 @@ def main():
                 "failed": "Ошибка",
                 "interrupted": "Прерван",
             }
-            if run_for_display.status in ("queued", "running"):
+            auto_refresh_allowed = run_for_display.status in ("queued", "running")
+            if not auto_refresh_allowed:
+                st.session_state.active_run_auto_refresh_enabled = False
+            if auto_refresh_allowed and st.session_state.get("active_run_auto_refresh_enabled"):
                 _schedule_active_run_autorefresh(run_for_display.run_id)
             else:
                 _schedule_active_run_autorefresh(None)
@@ -1914,8 +1919,11 @@ def main():
                     st.caption(f"Прогресс: {int(current)} / {int(total)}")
                 if progress_message:
                     st.caption(progress_message)
-                if run_for_display.status in ("queued", "running"):
-                    st.caption("Страница обновляется автоматически каждые 5 секунд.")
+                if auto_refresh_allowed:
+                    if st.session_state.get("active_run_auto_refresh_enabled"):
+                        st.caption("Автообновление включено: страница обновляется каждые 5 секунд.")
+                    else:
+                        st.caption("Автообновление выключено. Включите его ниже или обновляйте статус вручную.")
             if run_for_display.status == "completed":
                 st.caption(
                     "Статистика: "
@@ -1932,7 +1940,15 @@ def main():
                 if st.button("🔄 Обновить статус", key="refresh_active_run_status"):
                     st.rerun()
             with status_col2:
-                if st.button("📌 Открыть этот прогон в результатах", key="open_active_run_results"):
+                if auto_refresh_allowed:
+                    auto_refresh_enabled = st.checkbox(
+                        "Автообновление 5с",
+                        value=bool(st.session_state.get("active_run_auto_refresh_enabled")),
+                        key="active_run_auto_refresh_enabled",
+                        help="Включает автоматическое обновление страницы во время выполнения прогона.",
+                    )
+                    st.session_state.active_run_auto_refresh_enabled = bool(auto_refresh_enabled)
+                elif st.button("📌 Открыть этот прогон в результатах", key="open_active_run_results"):
                     st.session_state.active_run_id = run_for_display.run_id
                     st.session_state.active_run_status = run_for_display.status
                     st.info("Перейдите на вкладку «Результаты», чтобы открыть этот прогон.")
@@ -1940,9 +1956,11 @@ def main():
                 if st.button("🧹 Сбросить выбор", key="clear_active_run_selection"):
                     st.session_state.active_run_id = None
                     st.session_state.active_run_status = None
+                    st.session_state.active_run_auto_refresh_enabled = False
                     _clear_loaded_run_cache()
                     st.success("Выбор активного прогона очищен")
         else:
+            st.session_state.active_run_auto_refresh_enabled = False
             _schedule_active_run_autorefresh(None)
         
         uploaded_file = st.file_uploader(
