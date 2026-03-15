@@ -7,6 +7,8 @@ import math
 import os
 import re
 import sqlite3
+import threading
+import time
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
@@ -16,8 +18,18 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 import pandas as pd
 
+try:
+    import duckdb
+
+    MATCHER_DUCKDB_AVAILABLE = True
+except ImportError:
+    duckdb = None
+    MATCHER_DUCKDB_AVAILABLE = False
+
 from catalog_search import (
+    DUCKDB_AVAILABLE as SEARCH_DUCKDB_AVAILABLE,
     SEARCH_CATALOG_FILENAME,
+    SEARCH_CATALOG_TABLE,
     clean_text_value as shared_clean_text_value,
     classify_item_type as shared_classify_item_type,
     derive_branch_from_text as shared_derive_branch_from_text,
@@ -108,6 +120,28 @@ TERM_NORMALIZATION_ALIASES = {
     "zero-u": "zero u",
     '19"': "19 inch",
     "19''": "19 inch",
+}
+
+WHOLE_CATEGORY_RETRIEVAL_FAMILIES = {
+    "airflow_blanking_panel",
+    "ats_sts",
+    "bulk_twisted_pair",
+    "floor_box",
+    "ground_bar",
+    "iec_power_cable",
+    "keystone",
+    "optical_cross",
+    "optical_patch_cord",
+    "patch_cord",
+    "patch_panel",
+    "pdu",
+    "rack",
+    "rack_accessory_strict",
+    "rack_rail",
+    "rack_shelf",
+    "rj45_connector",
+    "rj45_outlet",
+    "sensor",
 }
 
 DEFAULT_TAXONOMY_RULES: Dict[str, Any] = {
@@ -248,6 +282,13 @@ class ReMoMatcher:
         self.branch_priority_scores: Dict[str, float] = {}
         self.catalog_text: str = ""
         self.backend: str | None = None
+        self.catalog_storage_backend = "memory"
+        self.retrieval_backend = "memory"
+        self.retrieval_mode = "legacy_limited"
+        self.catalog_row_count = 0
+        self.matcher_init_ms = 0.0
+        self._duckdb_path: str | None = None
+        self._duckdb_local = threading.local()
         self.client = None
         self.legacy_genai = None
         self.model_name: str | None = None
@@ -310,8 +351,15 @@ class ReMoMatcher:
             logger.warning("Gemini SDK is unavailable; matcher will fall back to local-only routing when possible.")
 
         self._init_cache_db()
+        init_started_at = time.perf_counter()
         self._load_catalog()
-        logger.info("ReMoMatcher initialized")
+        self.matcher_init_ms = round((time.perf_counter() - init_started_at) * 1000, 2)
+        logger.info(
+            "ReMoMatcher initialized: init_ms=%s retrieval_backend=%s retrieval_mode=%s",
+            self.matcher_init_ms,
+            self.retrieval_backend,
+            self.retrieval_mode,
+        )
 
     def _resolve_catalog_csv_path(self, db_csv_path: str) -> str:
         source_path = Path(str(db_csv_path))
@@ -388,6 +436,322 @@ class ReMoMatcher:
             return max(1000, int(raw_value))
         except (TypeError, ValueError):
             return MATCHER_LOAD_CHUNKSIZE
+
+    def _uses_duckdb_query_backend(self) -> bool:
+        source_path = Path(str(getattr(self, "db_csv_path", "")))
+        return (
+            MATCHER_DUCKDB_AVAILABLE
+            and SEARCH_DUCKDB_AVAILABLE
+            and source_path.suffix.lower() == ".duckdb"
+            and is_search_catalog_path(source_path)
+        )
+
+    def _get_duckdb_connection(self):
+        if not self._uses_duckdb_query_backend():
+            raise RuntimeError("DuckDB retrieval backend is not available")
+        connection = getattr(self._duckdb_local, "connection", None)
+        if connection is None:
+            connection = duckdb.connect(str(self._duckdb_path or self.db_csv_path), read_only=True)
+            self._duckdb_local.connection = connection
+        return connection
+
+    @staticmethod
+    def _quote_sql_identifier(value: str) -> str:
+        return '"' + str(value).replace('"', '""') + '"'
+
+    def _stable_row_idx_for_item(self, *, name: str, article: str, branch_path: str) -> int:
+        payload = f"{name.lower()}|{article.lower()}|{branch_path.lower()}"
+        return int(hashlib.md5(payload.encode("utf-8")).hexdigest()[:12], 16)
+
+    def _catalog_row_to_item(self, row: Dict[str, Any], *, row_idx: int | None = None) -> Dict[str, Any] | None:
+        name = self._clean_text_value(row.get(CANONICAL_NAME_COLUMN))
+        if not name:
+            return None
+
+        article = self._clean_text_value(row.get(CANONICAL_ARTICLE_COLUMN))
+        price = self._parse_price_value(row.get(CANONICAL_PRICE_COLUMN))
+        item_type = self._clean_text_value(row.get("Тип изделия"))
+        class_name = self._clean_text_value(row.get("Название класса"))
+        combined_text = " ".join(filter(None, [name, item_type, class_name]))
+        normalized_name = self._clean_text_value(row.get("search_normalized_name")) or self._normalize_text(name)
+
+        tokens: List[str] = []
+        precomputed_tokens_raw = self._clean_text_value(row.get("search_tokens_json"))
+        if precomputed_tokens_raw:
+            try:
+                loaded_tokens = json.loads(precomputed_tokens_raw)
+                if isinstance(loaded_tokens, list):
+                    tokens = sorted(
+                        {
+                            self._clean_text_value(token)
+                            for token in loaded_tokens
+                            if self._clean_text_value(token)
+                        }
+                    )
+            except (TypeError, ValueError, json.JSONDecodeError):
+                tokens = []
+        if not tokens:
+            tokens = sorted(set(self._tokenize(combined_text or normalized_name)))
+
+        branch_path = self._clean_text_value(row.get("search_branch_path")) or self._normalize_catalog_branch(row)
+        branch_leaf = self._clean_text_value(row.get("search_branch_leaf")) or branch_path.split(BRANCH_PATH_SEPARATOR)[-1]
+        entity_type = self._clean_text_value(row.get("search_entity_type")) or self._classify_item_type(combined_text)
+
+        item_markers: Dict[str, Any] = {}
+        precomputed_markers_raw = self._clean_text_value(row.get("search_item_markers_json"))
+        if precomputed_markers_raw:
+            try:
+                loaded_markers = json.loads(precomputed_markers_raw)
+                if isinstance(loaded_markers, dict):
+                    item_markers = {
+                        self._clean_text_value(key): self._clean_text_value(value)
+                        for key, value in loaded_markers.items()
+                        if self._clean_text_value(key)
+                    }
+            except (TypeError, ValueError, json.JSONDecodeError):
+                item_markers = {}
+        derived_markers = shared_extract_item_markers(
+            combined_text,
+            attribute_patterns=getattr(self, "taxonomy_rules", {}).get("attribute_patterns", {}),
+            synonyms=getattr(self, "taxonomy_rules", {}).get("synonyms", {}),
+        )
+        for marker_key, marker_value in derived_markers.items():
+            if not self._clean_text_value(item_markers.get(marker_key)):
+                item_markers[marker_key] = marker_value
+
+        resolved_row_idx = row_idx
+        if resolved_row_idx is None:
+            resolved_row_idx = self._stable_row_idx_for_item(name=name, article=article, branch_path=branch_path)
+
+        return {
+            "name": name,
+            "name_lc": name.lower(),
+            "normalized_name": normalized_name,
+            "article": article,
+            "price": price,
+            "row_idx": int(resolved_row_idx),
+            "tokens": tokens,
+            "branch_path": branch_path,
+            "branch_leaf": branch_leaf,
+            "class_name": class_name,
+            "class_code": self._clean_text_value(row.get("Код класса")),
+            "item_type": item_type,
+            "cable_execution": self._clean_text_value(row.get("Тип исполнения кабельного изделия")),
+            "manufacturer": self._clean_text_value(row.get("Производитель")),
+            "entity_type": entity_type,
+            "item_markers": item_markers,
+        }
+
+    def _duckdb_fetch_frame(self, sql: str, params: List[Any] | Tuple[Any, ...] | None = None) -> pd.DataFrame:
+        frame = self._get_duckdb_connection().execute(sql, list(params or [])).df()
+        if frame.empty:
+            return frame
+        return canonicalize_catalog_columns(frame, create_missing=True)
+
+    def _duckdb_fetch_items(
+        self,
+        *,
+        where_sql: str = "",
+        params: List[Any] | Tuple[Any, ...] | None = None,
+        order_by_sql: str = "",
+        limit: int | None = None,
+    ) -> List[Dict[str, Any]]:
+        sql = f"SELECT * FROM {SEARCH_CATALOG_TABLE}"
+        if where_sql:
+            sql += f" WHERE {where_sql}"
+        if order_by_sql:
+            sql += f" ORDER BY {order_by_sql}"
+        if limit is not None:
+            sql += f" LIMIT {int(limit)}"
+        frame = self._duckdb_fetch_frame(sql, params)
+        items: List[Dict[str, Any]] = []
+        for row in frame.to_dict(orient="records"):
+            item = self._catalog_row_to_item(row)
+            if item is not None:
+                items.append(item)
+        return items
+
+    def _lookup_catalog_item_by_name(self, name: str, *, candidate_pool: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any] | None:
+        normalized_name = self._clean_text_value(name).lower()
+        if not normalized_name:
+            return None
+        for item in candidate_pool or []:
+            if self._clean_text_value(item.get("name")).lower() == normalized_name:
+                return item
+        cached = (getattr(self, "catalog_dict", {}) or {}).get(normalized_name)
+        if cached is not None:
+            return cached
+        if not self._uses_duckdb_query_backend():
+            return None
+        column = self._quote_sql_identifier(CANONICAL_NAME_COLUMN)
+        items = self._duckdb_fetch_items(where_sql=f"lower({column}) = ?", params=[normalized_name], limit=1)
+        return items[0] if items else None
+
+    def _lookup_catalog_item_by_normalized_name(self, normalized_name: str) -> Dict[str, Any] | None:
+        cleaned = self._clean_text_value(normalized_name)
+        if not cleaned:
+            return None
+        cached = (getattr(self, "catalog_normalized_dict", {}) or {}).get(cleaned)
+        if cached is not None:
+            return cached
+        if not self._uses_duckdb_query_backend():
+            return None
+        items = self._duckdb_fetch_items(
+            where_sql=f"{self._quote_sql_identifier('search_normalized_name')} = ?",
+            params=[cleaned],
+            limit=1,
+        )
+        return items[0] if items else None
+
+    def _entity_types_for_family(self, entity_family: str) -> set[str]:
+        family = self._entity_family(entity_family)
+        family_map = {
+            "airflow_blanking_panel": {"airflow_blanking_panel"},
+            "ats_sts": {"ats_sts"},
+            "bulk_twisted_pair": {"bulk_twisted_pair"},
+            "floor_box": {"floor_box"},
+            "ground_bar": {"ground_bar"},
+            "iec_power_cable": {"iec_power_cable"},
+            "keystone": {"keystone_module", "keystone_adapter", "rj45_outlet"},
+            "optical_cross": {"optical_cross"},
+            "optical_patch_cord": {"optical_patch_cord"},
+            "patch_cord": {"patch_cord"},
+            "patch_panel": {"patch_panel"},
+            "pdu": {"pdu_basic", "pdu_metered"},
+            "rack": {"rack"},
+            "rack_accessory_strict": {"rack_blank_panel", "rack_brush_panel", "rack_shelf", "rack_rail"},
+            "rack_rail": {"rack_rail", "rack_shelf"},
+            "rack_shelf": {"rack_shelf", "rack_rail"},
+            "rj45_connector": {"rj45_connector"},
+            "rj45_outlet": {"rj45_outlet", "keystone_module", "keystone_adapter"},
+            "sensor": {"sensor", "temperature_sensor", "temperature_humidity_sensor", "reed_sensor"},
+        }
+        return set(family_map.get(family, {family} if family else set()))
+
+    def _default_branch_paths_for_family(self, query_features: Dict[str, Any]) -> List[str]:
+        family = self._entity_family(query_features.get("entity_type", ""))
+        branch_hint = self._clean_text_value(query_features.get("branch_hint"))
+        defaults: List[str] = []
+        if branch_hint and branch_hint != "прочее":
+            defaults.append(branch_hint)
+        family_defaults = {
+            "airflow_blanking_panel": "телеком > аксессуары > шкафные аксессуары > заглушки",
+            "ats_sts": "телеком > питание > ats",
+            "floor_box": "телеком > аксессуары > лючки",
+            "ground_bar": "телеком > аксессуары > заземление",
+            "iec_power_cable": "электрика > кабели",
+            "keystone": "телеком > коммутация > модули",
+            "optical_cross": "телеком > оптика > кроссы",
+            "optical_patch_cord": "телеком > кабели > оптические патч корды",
+            "patch_cord": "телеком > кабели > патч корды",
+            "patch_panel": "телеком > коммутация > патч панели",
+            "pdu": "телеком > питание > pdu",
+            "rack": "телеком > шкафы",
+            "rack_accessory_strict": "телеком > аксессуары > шкафные аксессуары",
+            "rack_rail": "телеком > аксессуары > шкафные аксессуары",
+            "rack_shelf": "телеком > аксессуары > шкафные аксессуары",
+            "rj45_connector": "телеком > коммутация > модули",
+            "rj45_outlet": "телеком > коммутация > модули",
+            "sensor": "автоматика > датчики",
+        }
+        default_branch = family_defaults.get(family)
+        if default_branch and default_branch not in defaults:
+            defaults.append(default_branch)
+        return defaults or (["прочее"] if family else [])
+
+    def _should_use_whole_category_retrieval(self, query_features: Dict[str, Any]) -> bool:
+        if not self._uses_duckdb_query_backend():
+            return False
+        if self._clean_text_value(query_features.get("row_type")) != "item":
+            return False
+        family = self._entity_family(query_features.get("entity_type", ""))
+        if family not in WHOLE_CATEGORY_RETRIEVAL_FAMILIES:
+            return False
+        return any(self._clean_text_value(path) and self._clean_text_value(path) != "прочее" for path in self._default_branch_paths_for_family(query_features))
+
+    def _duckdb_category_candidates(self, query_features: Dict[str, Any]) -> Tuple[str, List[Dict[str, Any]], float]:
+        branch_paths = [path for path in self._default_branch_paths_for_family(query_features) if path and path != "прочее"]
+        if not branch_paths:
+            return "", [], 0.0
+
+        started_at = time.perf_counter()
+        branch_clauses: List[str] = []
+        params: List[Any] = []
+        branch_column = self._quote_sql_identifier("search_branch_path")
+        for path in branch_paths:
+            branch_clauses.append(f"({branch_column} = ? OR {branch_column} LIKE ?)")
+            params.extend([path, f"{path}{BRANCH_PATH_SEPARATOR}%"])
+
+        query_family = self._entity_family(query_features.get("entity_type", ""))
+        family_types = sorted(self._entity_types_for_family(query_features.get("entity_type", "")))
+        filters = ["(" + " OR ".join(branch_clauses) + ")"]
+        if family_types and query_family not in {"", "other"}:
+            entity_column = self._quote_sql_identifier("search_entity_type")
+            placeholders = ", ".join("?" for _ in family_types)
+            filters.append(f"{entity_column} IN ({placeholders})")
+            params.extend(family_types)
+
+        exact_branch = branch_paths[0]
+        items = self._duckdb_fetch_items(
+            where_sql=" AND ".join(filters),
+            params=params,
+            limit=None,
+        )
+        items.sort(
+            key=lambda item: (
+                0 if self._clean_text_value(item.get("branch_path")) == exact_branch else 1,
+                self._clean_text_value(item.get("branch_path")),
+                self._clean_text_value(item.get("name")),
+            )
+        )
+        elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
+        return exact_branch, items, elapsed_ms
+
+    def _duckdb_heuristic_candidates(
+        self,
+        query: str,
+        query_features: Dict[str, Any] | None = None,
+        *,
+        limit: int,
+    ) -> Tuple[List[Dict[str, Any]], float]:
+        started_at = time.perf_counter()
+        features = query_features or self._extract_query_features(query)
+        tokens = [token for token in features.get("tokens", []) if len(token) >= 3][:6]
+        branch_paths = [path for path in self._default_branch_paths_for_family(features) if path and path != "прочее"][:2]
+
+        filters: List[str] = []
+        params: List[Any] = []
+        if branch_paths:
+            branch_column = self._quote_sql_identifier("search_branch_path")
+            branch_clauses: List[str] = []
+            for path in branch_paths:
+                branch_clauses.append(f"({branch_column} = ? OR {branch_column} LIKE ?)")
+                params.extend([path, f"{path}{BRANCH_PATH_SEPARATOR}%"])
+            filters.append("(" + " OR ".join(branch_clauses) + ")")
+
+        query_family = self._entity_family(features.get("entity_type", ""))
+        family_types = sorted(self._entity_types_for_family(features.get("entity_type", "")))
+        if family_types and query_family not in {"", "other"}:
+            entity_column = self._quote_sql_identifier("search_entity_type")
+            placeholders = ", ".join("?" for _ in family_types)
+            filters.append(f"{entity_column} IN ({placeholders})")
+            params.extend(family_types)
+
+        text_clauses: List[str] = []
+        for token in tokens:
+            token_like = f"%{token}%"
+            text_clauses.append(f"{self._quote_sql_identifier('search_normalized_name')} LIKE ?")
+            params.append(token_like)
+        if text_clauses:
+            filters.append("(" + " OR ".join(text_clauses) + ")")
+
+        items = self._duckdb_fetch_items(
+            where_sql=" AND ".join(filters) if filters else "",
+            params=params,
+            limit=max(1, int(limit)),
+        )
+        elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
+        return items, elapsed_ms
 
     def _should_load_catalog_column(self, column_name: str) -> bool:
         header = normalize_header(column_name)
@@ -984,7 +1348,24 @@ class ReMoMatcher:
             )
             return typed_pool
 
-        for item in self._collect_branch_candidates(branch_paths, limit=max(typed_limit * 2, typed_limit)):
+        if self._should_use_whole_category_retrieval(query_features):
+            category_key, category_candidates, _elapsed_ms = self._duckdb_category_candidates(query_features)
+            query_features["query_category_key"] = category_key
+            for item in category_candidates:
+                if not _matches_typed_family(item):
+                    continue
+                row_idx = int(item.get("row_idx", -1))
+                if row_idx in seen:
+                    continue
+                typed_pool.append(item)
+                seen.add(row_idx)
+            return _log_and_return()
+
+        for item in self._collect_branch_candidates(
+            branch_paths,
+            limit=max(typed_limit * 2, typed_limit),
+            query_features=query_features,
+        ):
             if not _matches_typed_family(item):
                 continue
             row_idx = int(item.get("row_idx", -1))
@@ -1102,6 +1483,13 @@ class ReMoMatcher:
         self.catalog_dict = {}
         self.catalog_normalized_dict = {}
         self.catalog_items = []
+        self.token_index = {}
+        self.group_index = {}
+        self.token_idf = {}
+        self.branch_index = {}
+        self.branch_prefix_index = {}
+        self.branch_token_index = {}
+        self.catalog_row_count = 0
         token_to_items: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         token_doc_frequency: Counter[str] = Counter()
         sample_lines: List[str] = []
@@ -1112,6 +1500,31 @@ class ReMoMatcher:
         logger.info("Matcher catalog load config: chunksize=%s selective_columns=yes", chunksize)
 
         source_path = Path(self.db_csv_path)
+        if self._uses_duckdb_query_backend():
+            self.catalog_storage_backend = "duckdb"
+            self.retrieval_backend = "duckdb"
+            self.retrieval_mode = "whole_category"
+            self._duckdb_path = str(source_path)
+            frame = self._duckdb_fetch_frame(f"SELECT * FROM {SEARCH_CATALOG_TABLE} LIMIT 300")
+            for row in frame.to_dict(orient="records"):
+                item = self._catalog_row_to_item(row)
+                if item is None:
+                    continue
+                sample_lines.append(
+                    f"• {item['name']} | Артикул: {item['article'] or 'N/A'} | "
+                    f"Цена: {item['price'] if item['price'] is not None else 'N/A'}"
+                )
+            count_frame = self._duckdb_fetch_frame(f"SELECT COUNT(*) AS rows_total FROM {SEARCH_CATALOG_TABLE}")
+            if not count_frame.empty:
+                self.catalog_row_count = int(count_frame.iloc[0].get("rows_total", 0))
+            self.catalog_text = "\n".join(sample_lines[:300])
+            logger.info(
+                "Loaded catalog metadata via DuckDB: rows=%s retrieval_backend=%s retrieval_mode=%s",
+                self.catalog_row_count,
+                self.retrieval_backend,
+                self.retrieval_mode,
+            )
+            return
         if is_search_catalog_path(source_path):
             chunk_iter = iter_search_catalog_chunks(source_path, chunksize=chunksize)
         else:
@@ -1130,10 +1543,26 @@ class ReMoMatcher:
                 saw_name_column = True
 
             for _, row in chunk.iterrows():
-                name = self._clean_text_value(row.get(CANONICAL_NAME_COLUMN))
-                if not name:
+                item = self._catalog_row_to_item(row.to_dict(), row_idx=row_idx)
+                if item is None:
                     continue
                 saw_name_value = True
+                self.catalog_dict.setdefault(item["name_lc"], item)
+                if item["normalized_name"] and item["normalized_name"] not in self.catalog_normalized_dict:
+                    self.catalog_normalized_dict[item["normalized_name"]] = item
+
+                self.catalog_items.append(item)
+                for token in item["tokens"]:
+                    token_to_items[token].append(item)
+                for token in set(item["tokens"]):
+                    token_doc_frequency[token] += 1
+                if len(sample_lines) < max(300, int(getattr(self, "catalog_sample_items", 500))):
+                    sample_lines.append(
+                        f"• {item['name']} | Артикул: {item['article'] or 'N/A'} | "
+                        f"Цена: {item['price'] if item['price'] is not None else 'N/A'}"
+                    )
+                row_idx += 1
+                continue
 
                 article = self._clean_text_value(row.get(CANONICAL_ARTICLE_COLUMN))
                 price = self._parse_price_value(row.get(CANONICAL_PRICE_COLUMN))
@@ -1238,6 +1667,10 @@ class ReMoMatcher:
         }
         self._build_branch_index()
         self.catalog_text = "\n".join(sample_lines[:300])
+        self.catalog_row_count = len(self.catalog_items)
+        self.catalog_storage_backend = "memory"
+        self.retrieval_backend = "memory"
+        self.retrieval_mode = "legacy_limited"
         logger.info("Loaded catalog items: %s", len(self.catalog_items))
 
     def _prepare_catalog_text(self, max_items: int = 500) -> None:
@@ -1256,6 +1689,12 @@ class ReMoMatcher:
         self.catalog_text = "\n".join(lines[:300])
 
     def _rank_group_candidates(self, query: str) -> List[Dict[str, Any]]:
+        if self._uses_duckdb_query_backend():
+            candidates, _elapsed_ms = self._duckdb_heuristic_candidates(
+                query,
+                limit=max(1, int(getattr(self, "retrieval_candidates_limit", 1200))),
+            )
+            return candidates
         query_tokens = self._tokenize(query)
         group_index = getattr(self, "group_index", {}) or {}
         if not query_tokens or not group_index:
@@ -1334,11 +1773,16 @@ class ReMoMatcher:
     ) -> List[Tuple[float, Dict[str, Any]]]:
         normalized_query = self._normalize_text(query)
         query_tokens = self._tokenize(normalized_query)
-        pool = candidate_pool if candidate_pool is not None else getattr(self, "catalog_items", [])
+        if candidate_pool is None and self._uses_duckdb_query_backend():
+            retrieval_limit = max(limit * 20, int(getattr(self, "retrieval_candidates_limit", 1200)))
+            heuristic_pool, _elapsed_ms = self._duckdb_heuristic_candidates(query, limit=retrieval_limit)
+            pool = heuristic_pool
+        else:
+            pool = candidate_pool if candidate_pool is not None else getattr(self, "catalog_items", [])
         if not pool:
             return []
 
-        if candidate_pool is None:
+        if candidate_pool is None and not self._uses_duckdb_query_backend():
             candidate_map: Dict[str, Dict[str, Any]] = {}
             token_index = getattr(self, "token_index", {}) or {}
             for token in query_tokens:
@@ -1583,6 +2027,16 @@ class ReMoMatcher:
         if branch_hint:
             scores[branch_hint] += 2.5
 
+        if self._uses_duckdb_query_backend():
+            for path in self._default_branch_paths_for_family(query_features):
+                if path and path != "прочее":
+                    scores[path] += 1.8
+            if not scores:
+                fallback_paths = self._default_branch_paths_for_family(query_features)
+                return [{"path": path, "score": 1.0} for path in fallback_paths if path]
+            ranked_duckdb = sorted(scores.items(), key=lambda pair: pair[1], reverse=True)
+            return [{"path": path, "score": float(score)} for path, score in ranked_duckdb[:TOP_BRANCH_COUNT]]
+
         branch_token_index = getattr(self, "branch_token_index", {}) or {}
         token_idf = getattr(self, "token_idf", {}) or {}
         for token in set(tokens):
@@ -1634,8 +2088,12 @@ class ReMoMatcher:
         )
         return [{"path": path, "score": float(score)} for path, score in ranked[:TOP_BRANCH_COUNT]]
 
-    def _collect_branch_candidates(self, branches: List[Any], limit: int | None = None) -> List[Dict[str, Any]]:
-        limit = max(1, int(limit or getattr(self, "retrieval_candidates_limit", 3000)))
+    def _collect_branch_candidates(
+        self,
+        branches: List[Any],
+        limit: int | None = None,
+        query_features: Dict[str, Any] | None = None,
+    ) -> List[Dict[str, Any]]:
         prefix_index = getattr(self, "branch_prefix_index", {}) or {}
         exact_index = getattr(self, "branch_index", {}) or {}
         branch_paths: List[str] = []
@@ -1647,6 +2105,31 @@ class ReMoMatcher:
             if path:
                 branch_paths.append(path)
 
+        if self._uses_duckdb_query_backend():
+            if not branch_paths:
+                return []
+            branch_column = self._quote_sql_identifier("search_branch_path")
+            clauses: List[str] = []
+            params: List[Any] = []
+            for path in branch_paths:
+                clauses.append(f"({branch_column} = ? OR {branch_column} LIKE ?)")
+                params.extend([path, f"{path}{BRANCH_PATH_SEPARATOR}%"])
+            where_clauses = ["(" + " OR ".join(clauses) + ")"]
+            query_family = self._entity_family((query_features or {}).get("entity_type", ""))
+            family_types = sorted(self._entity_types_for_family((query_features or {}).get("entity_type", "")))
+            if family_types and query_family not in {"", "other"}:
+                entity_column = self._quote_sql_identifier("search_entity_type")
+                placeholders = ", ".join("?" for _ in family_types)
+                where_clauses.append(f"{entity_column} IN ({placeholders})")
+                params.extend(family_types)
+            duckdb_limit = max(1, int(limit)) if limit is not None else None
+            return self._duckdb_fetch_items(
+                where_sql=" AND ".join(where_clauses),
+                params=params,
+                limit=duckdb_limit,
+            )
+
+        limit = max(1, int(limit or getattr(self, "retrieval_candidates_limit", 3000)))
         candidates: List[Dict[str, Any]] = []
         seen: set[int] = set()
         for path in branch_paths:
@@ -1960,6 +2443,8 @@ class ReMoMatcher:
             "row_type": row_type,
             "entity_type": entity_type,
             "query_family": query_family,
+            "retrieval_mode": str((pipeline_counts or {}).get("retrieval_mode") or getattr(self, "retrieval_mode", "")),
+            "retrieval_backend": str((pipeline_counts or {}).get("retrieval_backend") or getattr(self, "retrieval_backend", "")),
             "resolution_source": str(result.get("resolution_source") or ""),
             "compatibility_status": str(result.get("compatibility_status") or ""),
             "incompatibility_reason": str(result.get("incompatibility_reason") or ""),
@@ -2078,7 +2563,7 @@ class ReMoMatcher:
 
         matched_item = None
         if found_name:
-            matched_item = candidate_lookup.get(found_name.lower()) or getattr(self, "catalog_dict", {}).get(found_name.lower())
+            matched_item = candidate_lookup.get(found_name.lower()) or self._lookup_catalog_item_by_name(found_name)
         if matched_item is None and article:
             matched_item = article_lookup.get(article.lower())
 
@@ -2277,7 +2762,7 @@ class ReMoMatcher:
             if strictness == "strict" and result:
                 return result
             return None
-        matched_item = getattr(self, "catalog_dict", {}).get(found_name.lower())
+        matched_item = self._lookup_catalog_item_by_name(found_name, candidate_pool=shortlist)
         if strictness == "strict" and str(result.get("compatibility_status") or "").strip() == "weakly_compatible":
             return self._build_missing_result(
                 query,
@@ -2356,6 +2841,14 @@ class ReMoMatcher:
         gemini_attempted = False
         gemini_result_status = ""
         gemini_model = ""
+        retrieval_mode = "legacy_limited"
+        query_category_key = ""
+        category_candidate_count = 0
+        category_rows_scanned = 0
+        duckdb_query_ms = 0.0
+        python_scoring_ms = 0.0
+        compatibility_filter_ms = 0.0
+        gemini_total_ms = 0.0
 
         def _build_pipeline_counts() -> Dict[str, Any]:
             return {
@@ -2363,6 +2856,15 @@ class ReMoMatcher:
                 "scored_count": len(all_scored_entries),
                 "same_family_count": len(same_family_entries),
                 "compatible_count": len(compatible_entries_all),
+                "retrieval_mode": retrieval_mode,
+                "retrieval_backend": getattr(self, "retrieval_backend", "memory"),
+                "query_category_key": query_category_key,
+                "category_candidate_count": category_candidate_count,
+                "category_rows_scanned": category_rows_scanned,
+                "duckdb_query_ms": round(float(duckdb_query_ms), 2),
+                "python_scoring_ms": round(float(python_scoring_ms), 2),
+                "compatibility_filter_ms": round(float(compatibility_filter_ms), 2),
+                "gemini_ms": round(float(gemini_total_ms), 2),
             }
 
         def _build_candidate_snapshots() -> Dict[str, Any]:
@@ -2466,12 +2968,12 @@ class ReMoMatcher:
             preferred_result: Dict[str, Any] | None = None
             preferred_entry: Dict[str, Any] | None = None
 
-            exact_match = (getattr(self, "catalog_dict", {}) or {}).get(query_text.lower())
+            exact_match = self._lookup_catalog_item_by_name(query_text)
             if exact_match:
                 preferred_result = self._build_result_from_item(exact_match, 1.0, "exact_match", False, "", "")
                 preferred_entry = {"item": exact_match, "score": 1.0, "lexical_score": 1.0}
             else:
-                normalized_match = (getattr(self, "catalog_normalized_dict", {}) or {}).get(normalized_query)
+                normalized_match = self._lookup_catalog_item_by_normalized_name(normalized_query)
                 if normalized_match:
                     preferred_result = self._build_result_from_item(normalized_match, 0.98, "normalized_match", False, "", "")
                     preferred_entry = {"item": normalized_match, "score": 0.98, "lexical_score": 0.98}
@@ -2490,29 +2992,60 @@ class ReMoMatcher:
             ranked_branches = self._rank_branches(query_features)
             query_features["ranked_branches"] = ranked_branches
             branch_paths = [entry["path"] for entry in ranked_branches if entry.get("path")]
+            if branch_paths and not query_category_key:
+                query_category_key = branch_paths[0]
             local_recall_limit = int(getattr(self, "local_recall_pool", 300))
+            retrieval_mode = "whole_category" if self._should_use_whole_category_retrieval(query_features) else "heuristic_fallback"
+            retrieval_started_at = time.perf_counter()
             branch_candidates = self._typed_candidate_pool(query_text, query_features, local_recall_limit)
-            if branch_candidates:
-                fallback_candidates = self._collect_branch_candidates(branch_paths, limit=local_recall_limit)
-                seen_candidates = {int(item.get("row_idx", -1)) for item in branch_candidates}
-                for item in fallback_candidates:
-                    row_idx = int(item.get("row_idx", -1))
-                    if row_idx in seen_candidates:
-                        continue
-                    branch_candidates.append(item)
-                    seen_candidates.add(row_idx)
-                    if len(branch_candidates) >= local_recall_limit:
-                        break
+            query_category_key = self._clean_text_value(query_features.get("query_category_key"))
+            if retrieval_mode == "whole_category":
+                if not branch_candidates:
+                    query_category_key = query_category_key or self._clean_text_value(query_features.get("branch_hint"))
+                    branch_candidates = self._collect_branch_candidates(
+                        branch_paths,
+                        limit=None,
+                        query_features=query_features,
+                    )
             else:
-                branch_candidates = self._collect_branch_candidates(branch_paths, limit=local_recall_limit)
+                if branch_candidates:
+                    fallback_candidates = self._collect_branch_candidates(
+                        branch_paths,
+                        limit=local_recall_limit,
+                        query_features=query_features,
+                    )
+                    seen_candidates = {int(item.get("row_idx", -1)) for item in branch_candidates}
+                    for item in fallback_candidates:
+                        row_idx = int(item.get("row_idx", -1))
+                        if row_idx in seen_candidates:
+                            continue
+                        branch_candidates.append(item)
+                        seen_candidates.add(row_idx)
+                        if len(branch_candidates) >= local_recall_limit:
+                            break
+                else:
+                    branch_candidates = self._collect_branch_candidates(
+                        branch_paths,
+                        limit=local_recall_limit,
+                        query_features=query_features,
+                    )
             if not branch_candidates:
                 branch_candidates = self._select_candidates(query_text, limit=local_recall_limit)
+            duckdb_query_ms = round((time.perf_counter() - retrieval_started_at) * 1000, 2)
 
             local_candidate_pool = branch_candidates
+            category_candidate_count = len(local_candidate_pool)
+            category_rows_scanned = len(local_candidate_pool)
+            scoring_started_at = time.perf_counter()
             scored_entries = self._score_candidates_locally(query_features, branch_candidates)
+            python_scoring_ms = round((time.perf_counter() - scoring_started_at) * 1000, 2)
             if not scored_entries and getattr(self, "catalog_items", []):
                 local_candidate_pool = self._select_candidates(query_text, limit=local_recall_limit)
+                category_candidate_count = len(local_candidate_pool)
+                category_rows_scanned = len(local_candidate_pool)
+                scoring_started_at = time.perf_counter()
                 scored_entries = self._score_candidates_locally(query_features, local_candidate_pool)
+                python_scoring_ms = round((time.perf_counter() - scoring_started_at) * 1000, 2)
             if preferred_entry:
                 preferred_key = int(preferred_entry["item"].get("row_idx", -1))
                 seen_preferred = any(int(entry["item"].get("row_idx", -2)) == preferred_key for entry in scored_entries)
@@ -2523,6 +3056,7 @@ class ReMoMatcher:
                         reverse=True,
                     )
             all_scored_entries = list(scored_entries)
+            compatibility_started_at = time.perf_counter()
             same_family_entries = [
                 entry
                 for entry in all_scored_entries
@@ -2531,11 +3065,20 @@ class ReMoMatcher:
             compatible_entries_all = [
                 entry for entry in all_scored_entries if not self._is_hard_incompatible_match(query_features, entry["item"])
             ]
+            compatibility_filter_ms = round((time.perf_counter() - compatibility_started_at) * 1000, 2)
             trace_steps.append(
                 {
                     "stage": "local_recall",
                     "status": "ok" if all_scored_entries else "empty",
                     "strictness": strictness,
+                    "retrieval_mode": retrieval_mode,
+                    "retrieval_backend": getattr(self, "retrieval_backend", "memory"),
+                    "category_key": query_category_key or (branch_paths[0] if branch_paths else ""),
+                    "category_candidate_count": category_candidate_count,
+                    "category_rows_scanned": category_rows_scanned,
+                    "duckdb_query_ms": duckdb_query_ms,
+                    "python_scoring_ms": python_scoring_ms,
+                    "compatibility_filter_ms": compatibility_filter_ms,
                     "local_pool_count": len(local_candidate_pool),
                     "scored_count": len(all_scored_entries),
                     "same_family_count": len(same_family_entries),
@@ -2544,7 +3087,9 @@ class ReMoMatcher:
             )
             if not scored_entries:
                 gemini_attempted = True
+                gemini_started_at = time.perf_counter()
                 gemini_result = self._match_with_gemini(query_text)
+                gemini_total_ms += round((time.perf_counter() - gemini_started_at) * 1000, 2)
                 gemini_model = str(gemini_result.get("gemini_model") or gemini_model or "")
                 gemini_result_status = str(gemini_result.get("gemini_result_status") or gemini_result_status or "")
                 trace_steps.append(
@@ -2552,6 +3097,7 @@ class ReMoMatcher:
                         "stage": "gemini_selection",
                         "status": gemini_result_status or "completed",
                         "shortlist_count": int(gemini_result.get("gemini_shortlist_count") or 0),
+                        "gemini_ms": round(gemini_total_ms, 2),
                     }
                 )
                 if self._clean_text_value(gemini_result.get("found_name")) and gemini_result.get("found_name") != MISSING_POSITION_TEXT:
@@ -2638,12 +3184,14 @@ class ReMoMatcher:
                 trace_steps.append({"stage": "gemini_selection", "status": "skipped", "reason_code": "weak_shortlist_skipped"})
             else:
                 gemini_attempted = True
+                gemini_started_at = time.perf_counter()
                 gemini_result = self._resolve_ambiguous_candidates_with_gemini(
                     query_text,
                     query_features,
                     branch_paths,
                     scored_entries,
                 )
+                gemini_total_ms += round((time.perf_counter() - gemini_started_at) * 1000, 2)
                 if gemini_result is not None:
                     gemini_model = str(gemini_result.get("gemini_model") or gemini_model or "")
                     gemini_result_status = str(gemini_result.get("gemini_result_status") or gemini_result_status or "")
@@ -2653,6 +3201,7 @@ class ReMoMatcher:
                             "status": gemini_result_status or "completed",
                             "shortlist_count": int(gemini_result.get("gemini_shortlist_count") or 0),
                             "compatibility_status": str(gemini_result.get("compatibility_status") or ""),
+                            "gemini_ms": round(gemini_total_ms, 2),
                         }
                     )
             if gemini_result:
@@ -2956,6 +3505,15 @@ class ReMoMatcher:
             "diagnostic_stage_counts": {},
             "diagnostic_reason_class_counts": {},
             "diagnostic_reason_code_counts": {},
+            "matcher_init_ms": round(float(getattr(self, "matcher_init_ms", 0.0)), 2),
+            "retrieval_backend": str(getattr(self, "retrieval_backend", "memory") or "memory"),
+            "retrieval_mode": str(getattr(self, "retrieval_mode", "legacy_limited") or "legacy_limited"),
+            "duckdb_category_query_ms_total": 0.0,
+            "python_scoring_ms_total": 0.0,
+            "compatibility_filter_ms_total": 0.0,
+            "gemini_total_ms_total": 0.0,
+            "category_candidate_count_total": 0,
+            "category_rows_scanned_total": 0,
         }
         diagnostic_rows: List[dict[str, Any]] = []
         diagnostic_stage_counts: Counter[str] = Counter()
@@ -3061,6 +3619,13 @@ class ReMoMatcher:
                 trace_row = dict(trace)
                 trace_row["run_row_number"] = int(idx) + 2
                 diagnostic_rows.append(trace_row)
+                pipeline_counts = dict(trace.get("pipeline_counts") or {})
+                stats["duckdb_category_query_ms_total"] += float(pipeline_counts.get("duckdb_query_ms") or 0.0)
+                stats["python_scoring_ms_total"] += float(pipeline_counts.get("python_scoring_ms") or 0.0)
+                stats["compatibility_filter_ms_total"] += float(pipeline_counts.get("compatibility_filter_ms") or 0.0)
+                stats["gemini_total_ms_total"] += float(pipeline_counts.get("gemini_ms") or 0.0)
+                stats["category_candidate_count_total"] += int(pipeline_counts.get("category_candidate_count") or 0)
+                stats["category_rows_scanned_total"] += int(pipeline_counts.get("category_rows_scanned") or 0)
 
             if progress_callback is not None:
                 progress_callback(
@@ -3073,6 +3638,13 @@ class ReMoMatcher:
         stats["diagnostic_stage_counts"] = dict(sorted(diagnostic_stage_counts.items()))
         stats["diagnostic_reason_class_counts"] = dict(sorted(diagnostic_reason_class_counts.items()))
         stats["diagnostic_reason_code_counts"] = dict(sorted(diagnostic_reason_code_counts.items()))
+        for key in (
+            "duckdb_category_query_ms_total",
+            "python_scoring_ms_total",
+            "compatibility_filter_ms_total",
+            "gemini_total_ms_total",
+        ):
+            stats[key] = round(float(stats.get(key) or 0.0), 2)
 
         if output_path is None:
             src = Path(excel_path)

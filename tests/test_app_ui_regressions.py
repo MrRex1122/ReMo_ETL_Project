@@ -45,6 +45,12 @@ class AppUiRegressionTests(unittest.TestCase):
         self.assertNotIn("Подготовить ссылку на выгрузку поисковой БД", app_source)
         self.assertNotIn("Выгрузить БД в Google Drive (CSV)", app_source)
 
+    def test_duckdb_whole_category_retrieval_ui_is_present(self):
+        app_source = Path("app.py").read_text(encoding="utf-8")
+        self.assertIn("DuckDB whole-category retrieval by derived branch", app_source)
+        self.assertIn("Advanced matcher controls", app_source)
+        self.assertIn("Retrieval mode: `whole category` by derived branch.", app_source)
+
 
 if __name__ == "__main__":
     unittest.main()

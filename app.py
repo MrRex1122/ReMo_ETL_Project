@@ -938,6 +938,14 @@ def show_statistics(stats):
             f"retrieval={reason_classes.get('matcher_retrieval_or_ranking', 0)} | "
             f"gemini/policy={reason_classes.get('gemini_or_decision_policy', 0)}"
         )
+    if "matcher_init_ms" in stats:
+        quality_rows.append(
+            "Performance: "
+            f"matcher_init={float(stats.get('matcher_init_ms', 0.0)):.0f}ms | "
+            f"duckdb_query_total={float(stats.get('duckdb_category_query_ms_total', 0.0)):.0f}ms | "
+            f"scoring_total={float(stats.get('python_scoring_ms_total', 0.0)):.0f}ms | "
+            f"gemini_total={float(stats.get('gemini_total_ms_total', 0.0)):.0f}ms"
+        )
     for row in quality_rows:
         st.caption(row)
 
@@ -1479,6 +1487,8 @@ def main():
         )
         st.code(str(search_readiness.search_path))
         st.caption(f"Format: `{getattr(search_readiness, 'search_format', 'csv')}`")
+        if str(getattr(search_readiness, "search_format", "")).strip().lower() == "duckdb":
+            st.caption("Retrieval mode: `whole category` by derived branch.")
         st.write(
             f"Состояние поисковой БД: **{readiness_labels.get(search_readiness.state, search_readiness.state)}**"
         )
@@ -1749,57 +1759,62 @@ def main():
             "Параллелизм установлен на максимум: одновременно отправляется число запросов, "
             "равное числу позиций в файле."
         )
+        st.success("Активный режим retrieval: `DuckDB whole-category retrieval by derived branch`.")
         st.caption(
-            "Эти параметры управляют тем, сколько локальных кандидатов будет отобрано "
-            "и сколько из них увидит Gemini."
+            "При подготовленной search DuckDB matcher сначала берет всю категорию запроса по derived branch, "
+            "а лимиты ниже используются как legacy/advanced fallback и для разбиения Gemini-контекста."
         )
-        st.slider(
-            "Кандидатов для Gemini",
-            min_value=24,
-            max_value=200,
-            step=12,
-            key="matcher_gemini_shortlist_limit",
-            help="Сколько лучших кандидатов максимум может увидеть Gemini для одной позиции.",
-        )
-        st.slider(
-            "Кандидатов в 1 запрос Gemini",
-            min_value=6,
-            max_value=20,
-            step=2,
-            key="matcher_gemini_chunk_size",
-            help="Сколько кандидатов включать в один вызов модели.",
-        )
-        st.slider(
-            "Максимум запросов Gemini на позицию",
-            min_value=1,
-            max_value=12,
-            step=1,
-            key="matcher_gemini_max_chunks",
-            help="Ограничение по числу последовательных Gemini-вызовов для одной строки.",
-        )
-        st.slider(
-            "Глубина локального поиска",
-            min_value=100,
-            max_value=1000,
-            step=50,
-            key="matcher_local_recall_pool",
-            help="Сколько кандидатов сначала отбирается локально из каталога до передачи лучших в Gemini.",
-        )
-        st.checkbox(
-            "Пропускать Gemini для слабого shortlist",
-            key="matcher_skip_weak_shortlist",
-            help="Если включено, слишком слабый локальный shortlist не отправляется в Gemini. По умолчанию выключено.",
-        )
+        with st.expander("Advanced matcher controls", expanded=False):
+            st.caption(
+                "Эти параметры больше не являются основным retrieval-механизмом в DuckDB-режиме, "
+                "но остаются полезными для fallback и Gemini chunking."
+            )
+            st.slider(
+                "Кандидатов для Gemini",
+                min_value=24,
+                max_value=200,
+                step=12,
+                key="matcher_gemini_shortlist_limit",
+                help="Сколько лучших кандидатов максимум может увидеть Gemini для одной позиции.",
+            )
+            st.slider(
+                "Кандидатов в 1 запрос Gemini",
+                min_value=6,
+                max_value=20,
+                step=2,
+                key="matcher_gemini_chunk_size",
+                help="Сколько кандидатов включать в один вызов модели.",
+            )
+            st.slider(
+                "Максимум запросов Gemini на позицию",
+                min_value=1,
+                max_value=12,
+                step=1,
+                key="matcher_gemini_max_chunks",
+                help="Ограничение по числу последовательных Gemini-вызовов для одной строки.",
+            )
+            st.slider(
+                "Глубина локального поиска",
+                min_value=100,
+                max_value=1000,
+                step=50,
+                key="matcher_local_recall_pool",
+                help="Legacy/fallback лимит локального отбора, если whole-category retrieval недоступен.",
+            )
+            st.checkbox(
+                "Пропускать Gemini для слабого shortlist",
+                key="matcher_skip_weak_shortlist",
+                help="Если включено, слишком слабый локальный shortlist не отправляется в Gemini. По умолчанию выключено.",
+            )
 
         shortlist_limit = int(st.session_state.get("matcher_gemini_shortlist_limit", get_matcher_gemini_shortlist_limit()))
         chunk_size = int(st.session_state.get("matcher_gemini_chunk_size", get_matcher_gemini_chunk_size()))
         max_chunks = int(st.session_state.get("matcher_gemini_max_chunks", get_matcher_gemini_max_chunks()))
         st.caption(
-            f"Максимальный охват Gemini: до {shortlist_limit} кандидатов. "
-            f"Запросов на строку: до {max_chunks}. "
-            f"Кандидатов за один запрос: {chunk_size}."
+            f"Gemini chunking: до {shortlist_limit} кандидатов, "
+            f"до {max_chunks} запросов на строку, по {chunk_size} кандидатов за запрос."
         )
-        st.warning("Рост этих значений увеличивает время обработки и стоимость вызовов Gemini.")
+        st.warning("Рост этих advanced-лимитов увеличивает время обработки и стоимость Gemini, но не заменяет category retrieval.")
 
         mode_options = ["exact", "analog"]
         current_mode = str(st.session_state.get("matcher_mode", "exact"))
