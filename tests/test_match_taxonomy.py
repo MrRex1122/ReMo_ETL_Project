@@ -19,6 +19,9 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.matcher._apply_attribute_score = ReMoMatcher._apply_attribute_score.__get__(self.matcher, ReMoMatcher)
         self.matcher._score_candidates_locally = ReMoMatcher._score_candidates_locally.__get__(self.matcher, ReMoMatcher)
         self.matcher._default_branch_paths_for_family = ReMoMatcher._default_branch_paths_for_family.__get__(self.matcher, ReMoMatcher)
+        self.matcher._entity_types_for_family = ReMoMatcher._entity_types_for_family.__get__(self.matcher, ReMoMatcher)
+        self.matcher._duckdb_category_candidates = ReMoMatcher._duckdb_category_candidates.__get__(self.matcher, ReMoMatcher)
+        self.matcher._quote_sql_identifier = ReMoMatcher._quote_sql_identifier
         self.matcher._is_disallowed_category_substitution = ReMoMatcher._is_disallowed_category_substitution.__get__(
             self.matcher,
             ReMoMatcher,
@@ -432,6 +435,33 @@ class MatchTaxonomyTests(unittest.TestCase):
                 "whole_category",
             )
         )
+
+    def test_rj45_connector_whole_category_query_includes_cable_branch(self):
+        captured: dict[str, object] = {}
+
+        def fake_fetch_items(where_sql, params, limit=None):
+            captured["where_sql"] = where_sql
+            captured["params"] = list(params)
+            captured["limit"] = limit
+            return []
+
+        self.matcher._duckdb_fetch_items = fake_fetch_items
+        query_features = {
+            "entity_type": "rj45_connector",
+            "row_type": "item",
+            "branch_hint": "телеком > коммутация > модули",
+            "original_text": "Коннектор RJ-45, неэкранированный, категория 6",
+            "markers": {"category": "cat6", "shielding": "utp", "component_kind": "connector"},
+        }
+
+        category_key, items, elapsed_ms = self.matcher._duckdb_category_candidates(query_features)
+
+        self.assertEqual(category_key, "телеком > коммутация > модули")
+        self.assertEqual(items, [])
+        self.assertGreaterEqual(elapsed_ms, 0.0)
+        self.assertIsNone(captured["limit"])
+        self.assertIn("электрика > кабели", captured["params"])
+        self.assertIn("электрика > кабели > %", captured["params"])
 
 
 if __name__ == "__main__":

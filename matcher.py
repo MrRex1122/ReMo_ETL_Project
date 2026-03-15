@@ -650,12 +650,19 @@ class ReMoMatcher:
             "rack_accessory_strict": "телеком > аксессуары > шкафные аксессуары",
             "rack_rail": "телеком > аксессуары > шкафные аксессуары",
             "rack_shelf": "телеком > аксессуары > шкафные аксессуары",
-            "rj45_connector": "телеком > коммутация > модули",
+            "rj45_connector": [
+                "телеком > коммутация > модули",
+                "электрика > кабели",
+            ],
             "rj45_outlet": "телеком > коммутация > модули",
             "sensor": "автоматика > датчики",
         }
         default_branch = family_defaults.get(family)
-        if default_branch and default_branch not in defaults:
+        if isinstance(default_branch, (list, tuple, set)):
+            for branch_path in default_branch:
+                if branch_path and branch_path not in defaults:
+                    defaults.append(branch_path)
+        elif default_branch and default_branch not in defaults:
             defaults.append(default_branch)
         return defaults or (["прочее"] if family else [])
 
