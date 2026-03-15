@@ -18,11 +18,17 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.matcher._branch_match_bonus = ReMoMatcher._branch_match_bonus.__get__(self.matcher, ReMoMatcher)
         self.matcher._apply_attribute_score = ReMoMatcher._apply_attribute_score.__get__(self.matcher, ReMoMatcher)
         self.matcher._score_candidates_locally = ReMoMatcher._score_candidates_locally.__get__(self.matcher, ReMoMatcher)
+        self.matcher._default_branch_paths_for_family = ReMoMatcher._default_branch_paths_for_family.__get__(self.matcher, ReMoMatcher)
         self.matcher._is_disallowed_category_substitution = ReMoMatcher._is_disallowed_category_substitution.__get__(
             self.matcher,
             ReMoMatcher,
         )
         self.matcher._is_hard_incompatible_match = ReMoMatcher._is_hard_incompatible_match.__get__(self.matcher, ReMoMatcher)
+        self.matcher._should_use_whole_category_retrieval = ReMoMatcher._should_use_whole_category_retrieval.__get__(self.matcher, ReMoMatcher)
+        self.matcher._whole_category_secondary_filter_groups = ReMoMatcher._whole_category_secondary_filter_groups.__get__(self.matcher, ReMoMatcher)
+        self.matcher._apply_whole_category_secondary_filter = ReMoMatcher._apply_whole_category_secondary_filter.__get__(self.matcher, ReMoMatcher)
+        self.matcher._should_query_gemini_without_candidates = ReMoMatcher._should_query_gemini_without_candidates.__get__(self.matcher, ReMoMatcher)
+        self.matcher._should_accept_weak_gemini_result = ReMoMatcher._should_accept_weak_gemini_result.__get__(self.matcher, ReMoMatcher)
         self.matcher.match_mode = "exact"
         self.matcher.branch_index = {
             "телеком > питание > pdu": [],
@@ -385,6 +391,47 @@ class MatchTaxonomyTests(unittest.TestCase):
 
         self.assertTrue(self.matcher._is_hard_incompatible_match(features, item))
         self.assertEqual(self.matcher._hard_incompatibility_reason(features, item), "rj45_component_mismatch")
+
+    def test_whole_category_secondary_filter_keeps_only_organizer_candidates(self):
+        features = self.matcher._extract_query_features('Горизонтальный кабельный органайзер 19" в шкаф')
+        candidates = [
+            {
+                "name": 'Горизонтальный кабельный органайзер 1U 19"',
+                "normalized_name": "горизонтальный кабельный органайзер 1u 19",
+                "branch_path": "телеком > аксессуары > кабельные органайзеры",
+                "entity_type": "rack",
+            },
+            {
+                "name": "Шкаф серверный напольный 42U",
+                "normalized_name": "шкаф серверный напольный 42u",
+                "branch_path": "телеком > аксессуары > кабельные органайзеры",
+                "entity_type": "rack",
+            },
+        ]
+
+        filtered = self.matcher._apply_whole_category_secondary_filter(features, candidates)
+
+        self.assertEqual(len(filtered), 1)
+        self.assertIn("органайзер", filtered[0]["normalized_name"])
+
+    def test_duckdb_whole_category_queries_do_not_use_free_gemini_without_candidates(self):
+        self.matcher._uses_duckdb_query_backend = lambda: True
+        features = self.matcher._extract_query_features("Заглушка для управления потоком воздуха")
+
+        self.assertTrue(self.matcher._should_use_whole_category_retrieval(features))
+        self.assertFalse(self.matcher._should_query_gemini_without_candidates(features))
+
+    def test_weak_gemini_result_is_rejected_when_local_compatible_candidates_exist(self):
+        gemini_result = {"compatibility_status": "weakly_compatible"}
+        compatible_entries = [{"item": {"name": "Органайзер 1U"}, "score": 0.81}]
+
+        self.assertFalse(
+            self.matcher._should_accept_weak_gemini_result(
+                gemini_result,
+                compatible_entries,
+                "whole_category",
+            )
+        )
 
 
 if __name__ == "__main__":

@@ -669,6 +669,87 @@ class ReMoMatcher:
             return False
         return any(self._clean_text_value(path) and self._clean_text_value(path) != "прочее" for path in self._default_branch_paths_for_family(query_features))
 
+    def _whole_category_secondary_filter_groups(self, query_features: Dict[str, Any]) -> List[Tuple[str, ...]]:
+        family = self._entity_family(query_features.get("entity_type", ""))
+        markers = query_features.get("markers", {}) or {}
+        normalized_query = self._normalize_text(self._clean_text_value(query_features.get("original_text")))
+        groups: List[Tuple[str, ...]] = []
+
+        if family == "rack" and "органайз" in normalized_query:
+            groups.append(("органайз",))
+        elif family == "sensor":
+            sensor_kind = self._clean_text_value(markers.get("sensor_kind"))
+            if sensor_kind == "temperature_humidity":
+                groups.append(("датчик",))
+                groups.append(("температур", "влажност"))
+            elif sensor_kind == "temperature":
+                groups.append(("датчик",))
+                groups.append(("температур",))
+        elif family == "rack_accessory_strict":
+            mount_kind = self._clean_text_value(markers.get("mount_kind"))
+            if mount_kind == "brush_panel":
+                groups.append(("щеточ",))
+            elif mount_kind == "blank_panel":
+                groups.append(("заглуш",))
+
+        return groups
+
+    def _apply_whole_category_secondary_filter(
+        self,
+        query_features: Dict[str, Any],
+        candidates: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        groups = self._whole_category_secondary_filter_groups(query_features)
+        if not groups or not candidates:
+            return candidates
+
+        filtered: List[Dict[str, Any]] = []
+        for item in candidates:
+            haystack = self._normalize_text(
+                " ".join(
+                    filter(
+                        None,
+                        [
+                            self._clean_text_value(item.get("name")),
+                            self._clean_text_value(item.get("normalized_name")),
+                        ],
+                    )
+                )
+            )
+            if all(any(term in haystack for term in group) for group in groups):
+                filtered.append(item)
+
+        if filtered:
+            logger.info(
+                "🧠 Whole-category secondary filter: query=%s family=%s before=%s after=%s",
+                self._clean_text_value(query_features.get("original_text"))[:120],
+                self._entity_family(query_features.get("entity_type", "")) or "other",
+                len(candidates),
+                len(filtered),
+            )
+            return filtered
+        return candidates
+
+    def _should_query_gemini_without_candidates(self, query_features: Dict[str, Any]) -> bool:
+        if self._clean_text_value(query_features.get("row_type")) != "item":
+            return False
+        if self._uses_duckdb_query_backend() and self._should_use_whole_category_retrieval(query_features):
+            return False
+        return True
+
+    def _should_accept_weak_gemini_result(
+        self,
+        gemini_result: Dict[str, Any],
+        compatible_entries: List[Dict[str, Any]],
+        retrieval_mode: str,
+    ) -> bool:
+        compatibility = self._clean_text_value(gemini_result.get("compatibility_status"))
+        if compatibility != "weakly_compatible":
+            return True
+        if retrieval_mode == "whole_category" and compatible_entries:
+            return False
+        return True
+
     def _duckdb_category_candidates(self, query_features: Dict[str, Any]) -> Tuple[str, List[Dict[str, Any]], float]:
         branch_paths = [path for path in self._default_branch_paths_for_family(query_features) if path and path != "прочее"]
         if not branch_paths:
@@ -704,6 +785,7 @@ class ReMoMatcher:
                 self._clean_text_value(item.get("name")),
             )
         )
+        items = self._apply_whole_category_secondary_filter(query_features, items)
         elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
         return exact_branch, items, elapsed_ms
 
@@ -3086,6 +3168,14 @@ class ReMoMatcher:
                 }
             )
             if not scored_entries:
+                if not self._should_query_gemini_without_candidates(query_features):
+                    result = self._build_missing_result(
+                        query_text,
+                        "Кандидаты в подходящей категории не найдены; позиция оставлена без свободного Gemini-подбора.",
+                        compatibility_status="unresolved_no_compatible_candidates",
+                        incompatibility_reason="no_compatible_candidates",
+                    )
+                    return _finalize(result, stage_of_failure="local_recall", reason_code="no_compatible_candidates")
                 gemini_attempted = True
                 gemini_started_at = time.perf_counter()
                 gemini_result = self._match_with_gemini(query_text)
@@ -3205,13 +3295,29 @@ class ReMoMatcher:
                         }
                     )
             if gemini_result:
-                if self._clean_text_value(gemini_result.get("found_name")) and gemini_result.get("found_name") != MISSING_POSITION_TEXT:
-                    return _finalize(gemini_result, stage_of_failure="resolved", reason_code="resolved")
-                return _finalize(
-                    gemini_result,
-                    stage_of_failure="gemini_selection",
-                    reason_code=gemini_result.get("incompatibility_reason") or "gemini_returned_no_valid_candidate",
-                )
+                if not self._should_accept_weak_gemini_result(gemini_result, compatible_entries_all, retrieval_mode):
+                    logger.info(
+                        "🧠 Weak Gemini result rejected in favor of local compatible candidates: query=%s compatible=%s retrieval_mode=%s",
+                        query_text[:120],
+                        len(compatible_entries_all),
+                        retrieval_mode,
+                    )
+                    trace_steps.append(
+                        {
+                            "stage": "gemini_selection",
+                            "status": "rejected",
+                            "reason_code": "weakly_compatible_rejected_local_compatible_exists",
+                        }
+                    )
+                    gemini_result = None
+                else:
+                    if self._clean_text_value(gemini_result.get("found_name")) and gemini_result.get("found_name") != MISSING_POSITION_TEXT:
+                        return _finalize(gemini_result, stage_of_failure="resolved", reason_code="resolved")
+                    return _finalize(
+                        gemini_result,
+                        stage_of_failure="gemini_selection",
+                        reason_code=gemini_result.get("incompatibility_reason") or "gemini_returned_no_valid_candidate",
+                    )
 
             strong_local = (
                 best_score >= getattr(self, "local_confidence_threshold", 0.92)
