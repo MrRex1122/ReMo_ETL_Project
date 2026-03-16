@@ -20,6 +20,7 @@ ACTIVE_STATUSES = ("queued", "running")
 logger = logging.getLogger(__name__)
 
 _ACTIVE_RUN_THREADS: dict[str, threading.Thread] = {}
+_ACTIVE_RUN_CANCEL_EVENTS: dict[str, threading.Event] = {}
 _ACTIVE_RUN_THREADS_LOCK = threading.Lock()
 
 
@@ -76,17 +77,20 @@ def _cleanup_dead_threads_locked() -> None:
     dead_run_ids = [run_id for run_id, thread in _ACTIVE_RUN_THREADS.items() if not thread.is_alive()]
     for run_id in dead_run_ids:
         _ACTIVE_RUN_THREADS.pop(run_id, None)
+        _ACTIVE_RUN_CANCEL_EVENTS.pop(run_id, None)
 
 
 def register_processing_run_thread(run_id: str, thread: threading.Thread) -> None:
     with _ACTIVE_RUN_THREADS_LOCK:
         _cleanup_dead_threads_locked()
         _ACTIVE_RUN_THREADS[run_id] = thread
+        _ACTIVE_RUN_CANCEL_EVENTS[run_id] = threading.Event()
 
 
 def unregister_processing_run_thread(run_id: str) -> None:
     with _ACTIVE_RUN_THREADS_LOCK:
         _ACTIVE_RUN_THREADS.pop(run_id, None)
+        _ACTIVE_RUN_CANCEL_EVENTS.pop(run_id, None)
 
 
 def get_active_processing_run_ids() -> set[str]:
@@ -99,6 +103,29 @@ def is_processing_run_active(run_id: str) -> bool:
     with _ACTIVE_RUN_THREADS_LOCK:
         _cleanup_dead_threads_locked()
         return run_id in _ACTIVE_RUN_THREADS
+
+
+def get_processing_run_cancel_event(run_id: str) -> threading.Event | None:
+    with _ACTIVE_RUN_THREADS_LOCK:
+        _cleanup_dead_threads_locked()
+        return _ACTIVE_RUN_CANCEL_EVENTS.get(run_id)
+
+
+def request_processing_run_cancel(run_id: str) -> bool:
+    with _ACTIVE_RUN_THREADS_LOCK:
+        _cleanup_dead_threads_locked()
+        cancel_event = _ACTIVE_RUN_CANCEL_EVENTS.get(run_id)
+        if cancel_event is None:
+            return False
+        cancel_event.set()
+        return True
+
+
+def is_processing_run_cancel_requested(run_id: str) -> bool:
+    with _ACTIVE_RUN_THREADS_LOCK:
+        _cleanup_dead_threads_locked()
+        cancel_event = _ACTIVE_RUN_CANCEL_EVENTS.get(run_id)
+        return bool(cancel_event and cancel_event.is_set())
 
 
 def ensure_processing_runs_table_exists(conn: sqlite3.Connection) -> None:

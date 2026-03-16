@@ -120,6 +120,39 @@ class ProcessExcelExistingColumnsTests(unittest.TestCase):
         self.assertIn("не найдена", str(result_df.loc[1, "Причина отсутствия"]).lower())
         self.assertEqual(result_df.loc[1, "Этап отказа"], "local_recall")
 
+    def test_process_excel_can_return_interrupted_partial_result(self):
+        df = pd.DataFrame(
+            {
+                "A": [1, 2],
+                "Наименование оборудования, материалов и кабелей": ["Позиция 1", "Позиция 2"],
+            }
+        )
+        cancel_state = {"calls": 0}
+
+        def cancel_requested() -> bool:
+            cancel_state["calls"] += 1
+            return cancel_state["calls"] > 1
+
+        fd, input_path = tempfile.mkstemp(suffix=".xlsx")
+        os.close(fd)
+        output_path = input_path.replace(".xlsx", "_out.xlsx")
+        try:
+            df.to_excel(input_path, index=False)
+            result_df, stats = self.matcher.process_excel(
+                input_path,
+                output_path,
+                cancel_requested=cancel_requested,
+            )
+        finally:
+            for path in (input_path, output_path):
+                if os.path.exists(path):
+                    os.unlink(path)
+
+        self.assertTrue(stats.get("_interrupted"))
+        self.assertEqual(stats.get("processed"), 1)
+        self.assertEqual(result_df.loc[0, "Найденная номенклатура"], "Номенклатура 1")
+        self.assertTrue(pd.isna(result_df.loc[1, "Найденная номенклатура"]))
+
 
 if __name__ == "__main__":
     unittest.main()

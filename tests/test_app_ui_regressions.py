@@ -51,6 +51,10 @@ class AppUiRegressionTests(unittest.TestCase):
         self.assertIn("Advanced matcher controls", app_source)
         self.assertIn("Retrieval mode: `whole category` by derived branch.", app_source)
 
+    def test_processing_run_cancel_ui_is_present(self):
+        app_source = Path("app.py").read_text(encoding="utf-8")
+        self.assertIn("Остановить прогон", app_source)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -57,10 +57,12 @@ from main import convert_csv
 from processing_runs import (
     build_run_artifacts,
     create_processing_run,
+    get_processing_run_cancel_event,
     get_latest_active_processing_run,
     get_preferred_run_for_restore,
     get_processing_run,
     has_processing_run_draft,
+    is_processing_run_cancel_requested,
     list_processing_runs,
     load_processing_run_coverage_audit,
     load_processing_run_dataframe,
@@ -69,8 +71,10 @@ from processing_runs import (
     load_processing_run_stats,
     mark_processing_run_completed,
     mark_processing_run_failed,
+    mark_processing_run_interrupted,
     mark_processing_run_started,
     mark_stale_running_runs_as_interrupted,
+    request_processing_run_cancel,
     register_processing_run_thread,
     save_processing_run_draft,
     unregister_processing_run_thread,
@@ -454,6 +458,11 @@ def get_matcher() -> ReMoMatcher:
 
 
 def _run_processing_job(run_id: str, matcher_settings: dict[str, Any]) -> None:
+    cancel_event = get_processing_run_cancel_event(run_id)
+
+    def _is_cancel_requested() -> bool:
+        return bool(cancel_event and cancel_event.is_set())
+
     try:
         run = get_processing_run(run_id)
         if run is None:
@@ -469,6 +478,8 @@ def _run_processing_job(run_id: str, matcher_settings: dict[str, Any]) -> None:
         logger.info("🚀 Processing run started in background: %s", run_id)
 
         matcher = _create_matcher_instance(str(run.catalog_source_path), matcher_settings)
+        if _is_cancel_requested():
+            raise InterruptedError("Run cancelled by user")
         artifacts = build_run_artifacts(run_id)
         write_processing_run_progress(
             run_id,
@@ -505,7 +516,27 @@ def _run_processing_job(run_id: str, matcher_settings: dict[str, Any]) -> None:
             str(run.input_file_path),
             output_path=str(artifacts.result_xlsx_path),
             progress_callback=_progress_callback,
+            cancel_requested=_is_cancel_requested,
         )
+
+        if bool(stats.get("_interrupted")) or _is_cancel_requested():
+            partial_total = int(stats.get("total", len(df_result)))
+            partial_processed = int(stats.get("processed", 0))
+            try:
+                save_processing_run_draft(run_id, df_result)
+            except Exception:
+                logger.exception("Failed to save interrupted run draft: %s", run_id)
+            write_processing_run_progress(
+                run_id,
+                stage="interrupted",
+                current=partial_processed,
+                total=partial_total,
+                percent=(partial_processed / partial_total) if partial_total > 0 else 0.0,
+                message="Обработка остановлена пользователем. Частичный черновик сохранен.",
+            )
+            mark_processing_run_interrupted(run_id, "Run cancelled by user")
+            logger.info("🛑 Processing run interrupted by user: %s processed=%s total=%s", run_id, partial_processed, partial_total)
+            return
 
         diagnostics_rows = getattr(matcher, "last_match_diagnostics_rows", None)
         write_processing_run_progress(
@@ -563,6 +594,14 @@ def _run_processing_job(run_id: str, matcher_settings: dict[str, Any]) -> None:
             "ℹ️ Coverage audit is not built synchronously during background run %s; use the manual audit action in Results.",
             run_id,
         )
+    except InterruptedError as exc:
+        logger.info("🛑 Processing run interrupted: %s reason=%s", run_id, exc)
+        write_processing_run_progress(
+            run_id,
+            stage="interrupted",
+            message=str(exc) or "Обработка остановлена пользователем",
+        )
+        mark_processing_run_interrupted(run_id, str(exc) or "Run cancelled by user")
     except Exception as exc:
         logger.error("❌ Processing run failed: %s", run_id, exc_info=True)
         error_text = str(exc)
@@ -1930,6 +1969,7 @@ def main():
                     "matching": "Сопоставление позиций",
                     "saving_results": "Сохранение результатов",
                     "completed": "Завершено",
+                    "interrupted": "Остановлено",
                     "failed": "Ошибка",
                 }
                 progress_stage = str(progress_state.get("stage") or "").strip()
@@ -1966,7 +2006,7 @@ def main():
             elif run_for_display.error_text:
                 st.warning(run_for_display.error_text)
 
-            status_col1, status_col2, status_col3 = st.columns(3)
+            status_col1, status_col2, status_col3, status_col4 = st.columns(4)
             with status_col1:
                 if st.button("🔄 Обновить статус", key="refresh_active_run_status"):
                     st.rerun()
@@ -1983,6 +2023,27 @@ def main():
                     st.session_state.active_run_status = run_for_display.status
                     st.info("Перейдите на вкладку «Результаты», чтобы открыть этот прогон.")
             with status_col3:
+                if auto_refresh_allowed:
+                    cancel_already_requested = is_processing_run_cancel_requested(run_for_display.run_id)
+                    if cancel_already_requested:
+                        st.caption("Остановка уже запрошена")
+                    if st.button(
+                        "⏹ Остановить прогон",
+                        key="cancel_active_run",
+                        disabled=cancel_already_requested,
+                    ):
+                        current_progress = _load_run_progress_safe(run_for_display.run_id) or {}
+                        request_processing_run_cancel(run_for_display.run_id)
+                        write_processing_run_progress(
+                            run_for_display.run_id,
+                            stage=str(current_progress.get("stage") or "processing"),
+                            current=current_progress.get("current"),
+                            total=current_progress.get("total"),
+                            percent=current_progress.get("percent"),
+                            message="Запрошена остановка прогона. Ожидаем безопасного завершения текущих задач.",
+                        )
+                        st.warning("Остановка запрошена. Прогон завершится на ближайшей безопасной точке.")
+            with status_col4:
                 if st.button("🧹 Сбросить выбор", key="clear_active_run_selection"):
                     st.session_state.active_run_id = None
                     st.session_state.active_run_status = None

@@ -10,7 +10,7 @@ import sqlite3
 import threading
 import time
 from collections import Counter, defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from datetime import datetime
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -3497,30 +3497,60 @@ class ReMoMatcher:
         except Exception as exc:
             logger.warning("History write error: %s", exc)
 
-    def _run_matches_parallel(self, tasks: List[Tuple[int, str]]) -> Iterator[Tuple[int, Dict[str, Any]]]:
+    def _run_matches_parallel(
+        self,
+        tasks: List[Tuple[int, str]],
+        *,
+        cancel_requested: Callable[[], bool] | None = None,
+    ) -> Iterator[Tuple[int, Dict[str, Any]]]:
         if not tasks:
             return
 
         workers = min(max(1, int(getattr(self, "parallel_requests", 1))), len(tasks))
         if workers <= 1:
             for idx, query in tasks:
+                if cancel_requested is not None and cancel_requested():
+                    logger.info("🛑 Match processing cancelled before row idx=%s", idx)
+                    return
                 yield idx, self.match(query, use_cache=True)
             return
 
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            future_map = {pool.submit(self.match, query, True): idx for idx, query in tasks}
-            completed = 0
-            total = len(tasks)
-            for future in as_completed(future_map):
-                idx = future_map[future]
-                try:
-                    result = future.result()
-                except Exception as exc:
-                    result = self._build_missing_result("", "", error=str(exc))
-                completed += 1
-                if completed % 10 == 0 or completed == total:
-                    logger.info("Processed %s/%s rows", completed, total)
-                yield idx, result
+        pool = ThreadPoolExecutor(max_workers=workers)
+        future_map = {pool.submit(self.match, query, True): idx for idx, query in tasks}
+        pending = set(future_map)
+        completed = 0
+        total = len(tasks)
+        cancelled = False
+        try:
+            while pending:
+                if cancel_requested is not None and cancel_requested():
+                    cancelled = True
+                    logger.info(
+                        "🛑 Match processing cancellation requested: completed=%s total=%s pending=%s",
+                        completed,
+                        total,
+                        len(pending),
+                    )
+                    for future in pending:
+                        future.cancel()
+                    break
+
+                done, pending = wait(pending, timeout=0.25, return_when=FIRST_COMPLETED)
+                if not done:
+                    continue
+
+                for future in done:
+                    idx = future_map[future]
+                    try:
+                        result = future.result()
+                    except Exception as exc:
+                        result = self._build_missing_result("", "", error=str(exc))
+                    completed += 1
+                    if completed % 10 == 0 or completed == total:
+                        logger.info("Processed %s/%s rows", completed, total)
+                    yield idx, result
+        finally:
+            pool.shutdown(wait=not cancelled, cancel_futures=cancelled)
 
     def _prioritize_match_tasks(self, tasks: List[Tuple[int, str]]) -> List[Tuple[int, str]]:
         prioritized: List[Tuple[Tuple[int, int, int, int, int], int, str]] = []
@@ -3592,6 +3622,7 @@ class ReMoMatcher:
         excel_path: str,
         output_path: str | None = None,
         progress_callback: Callable[..., None] | None = None,
+        cancel_requested: Callable[[], bool] | None = None,
     ) -> Tuple[pd.DataFrame, Dict[str, int]]:
         logger.info("Start processing Excel: %s", excel_path)
         if progress_callback is not None:
@@ -3689,7 +3720,7 @@ class ReMoMatcher:
             )
         task_query_map = {idx: query for idx, query in tasks}
         processed_count = 0
-        for idx, result in self._run_matches_parallel(tasks):
+        for idx, result in self._run_matches_parallel(tasks, cancel_requested=cancel_requested):
             processed_count += 1
             found_name = result.get("found_name") or MISSING_POSITION_TEXT
             df.at[idx, "Цена"] = result.get("price")
@@ -3786,6 +3817,10 @@ class ReMoMatcher:
                     message=f"Обработано позиций: {processed_count} из {len(tasks)}",
                 )
 
+            if cancel_requested is not None and cancel_requested():
+                logger.info("🛑 Excel processing interrupted after %s/%s rows", processed_count, len(tasks))
+                break
+
         stats["diagnostic_stage_counts"] = dict(sorted(diagnostic_stage_counts.items()))
         stats["diagnostic_reason_class_counts"] = dict(sorted(diagnostic_reason_class_counts.items()))
         stats["diagnostic_reason_code_counts"] = dict(sorted(diagnostic_reason_code_counts.items()))
@@ -3796,6 +3831,17 @@ class ReMoMatcher:
             "gemini_total_ms_total",
         ):
             stats[key] = round(float(stats.get(key) or 0.0), 2)
+
+        if cancel_requested is not None and cancel_requested():
+            self.last_match_diagnostics_rows = diagnostic_rows
+            self.last_match_diagnostics_payload = build_match_diagnostics_payload(
+                diagnostic_rows,
+                run_id=str(Path(excel_path).stem),
+            )
+            stats["_interrupted"] = True
+            stats["processed"] = processed_count
+            logger.info("Result processing interrupted before final save: processed=%s total=%s", processed_count, len(tasks))
+            return df, stats
 
         if output_path is None:
             src = Path(excel_path)

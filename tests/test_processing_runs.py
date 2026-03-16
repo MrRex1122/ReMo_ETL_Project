@@ -1,5 +1,6 @@
 import os
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -8,10 +9,12 @@ import pandas as pd
 from processing_runs import (
     build_run_artifacts,
     create_processing_run,
+    get_processing_run_cancel_event,
     get_latest_completed_processing_run,
     get_preferred_run_for_restore,
     get_processing_run,
     has_processing_run_draft,
+    is_processing_run_cancel_requested,
     load_processing_run_dataframe,
     load_processing_run_coverage_audit,
     load_processing_run_match_diagnostics,
@@ -19,7 +22,10 @@ from processing_runs import (
     mark_processing_run_completed,
     mark_processing_run_started,
     mark_stale_running_runs_as_interrupted,
+    register_processing_run_thread,
+    request_processing_run_cancel,
     save_processing_run_draft,
+    unregister_processing_run_thread,
     write_processing_run_coverage_audit,
     write_processing_run_match_diagnostics,
     write_processing_run_result,
@@ -196,6 +202,29 @@ class ProcessingRunsTests(unittest.TestCase):
         assert loaded_payload is not None
         self.assertEqual(loaded_payload["run_id"], run.run_id)
         self.assertEqual(loaded_payload["summary"]["rows_unresolved"], 1)
+
+    def test_processing_run_cancel_event_can_be_requested_for_active_thread(self):
+        run = create_processing_run(
+            input_filename="input.xlsx",
+            catalog_source_path=Path("catalog.csv"),
+            catalog_source_kind="search",
+        )
+        stop_event = threading.Event()
+        worker = threading.Thread(target=stop_event.wait, name="test-run-worker")
+        worker.start()
+        register_processing_run_thread(run.run_id, worker)
+        try:
+            cancel_event = get_processing_run_cancel_event(run.run_id)
+            self.assertIsNotNone(cancel_event)
+            self.assertFalse(is_processing_run_cancel_requested(run.run_id))
+            self.assertTrue(request_processing_run_cancel(run.run_id))
+            self.assertTrue(is_processing_run_cancel_requested(run.run_id))
+            assert cancel_event is not None
+            self.assertTrue(cancel_event.is_set())
+        finally:
+            stop_event.set()
+            worker.join(timeout=1.0)
+            unregister_processing_run_thread(run.run_id)
 
 
 if __name__ == "__main__":
