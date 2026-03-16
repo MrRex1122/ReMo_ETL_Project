@@ -293,6 +293,9 @@ class ReMoMatcher:
         self.legacy_genai = None
         self.model_name: str | None = None
         self.parallel_requests = min(25, max(1, int(parallel_requests or get_matcher_parallel_requests())))
+        self._gemini_request_limit = self.parallel_requests
+        self._gemini_request_semaphore = threading.BoundedSemaphore(self._gemini_request_limit)
+        self.gemini_chunk_parallelism = max(1, min(4, self.parallel_requests))
         self.catalog_sample_items = max(50, int(catalog_sample_items))
         self.match_mode = self._sanitize_match_mode(match_mode)
         self.gemini_shortlist_limit = self._sanitize_int_setting(
@@ -2563,6 +2566,87 @@ class ReMoMatcher:
             result.append(model_name)
         return result
 
+    def _get_gemini_request_limit(self) -> int:
+        configured = int(getattr(self, "_gemini_request_limit", 0) or 0)
+        if configured > 0:
+            return max(1, configured)
+        return min(25, max(1, int(getattr(self, "parallel_requests", 1) or 1)))
+
+    def _get_gemini_request_semaphore(self) -> threading.BoundedSemaphore:
+        limit = self._get_gemini_request_limit()
+        semaphore = getattr(self, "_gemini_request_semaphore", None)
+        current_limit = int(getattr(self, "_gemini_request_limit", 0) or 0)
+        if semaphore is None or current_limit != limit:
+            semaphore = threading.BoundedSemaphore(limit)
+            self._gemini_request_semaphore = semaphore
+            self._gemini_request_limit = limit
+        return semaphore
+
+    def _get_gemini_chunk_parallelism(self) -> int:
+        configured = int(getattr(self, "gemini_chunk_parallelism", 0) or 0)
+        if configured > 0:
+            return max(1, min(configured, self._get_gemini_request_limit(), max(1, int(getattr(self, "gemini_max_chunks", 8) or 1))))
+        return max(
+            1,
+            min(
+                4,
+                self._get_gemini_request_limit(),
+                max(1, int(getattr(self, "gemini_max_chunks", 8) or 1)),
+            ),
+        )
+
+    def _generate_gemini_text_limited(self, prompt: str, model_name: str) -> str:
+        semaphore = self._get_gemini_request_semaphore()
+        semaphore.acquire()
+        try:
+            return self._generate_gemini_text(prompt, model_name)
+        finally:
+            semaphore.release()
+
+    def _evaluate_gemini_prompt(
+        self,
+        query: str,
+        prompt: str,
+        candidate_lookup: Dict[str, Dict[str, Any]],
+        article_lookup: Dict[str, Dict[str, Any]],
+        source: str,
+    ) -> Dict[str, Any]:
+        last_missing: Dict[str, Any] | None = None
+        last_error: Exception | None = None
+        last_raw_text = ""
+        last_model_name = ""
+        for model_name in self._candidate_models():
+            try:
+                raw_text = self._generate_gemini_text_limited(prompt, model_name)
+                parsed = self._parse_gemini_result(query, raw_text, candidate_lookup, article_lookup, source, model_name)
+                if parsed["found_name"] == MISSING_POSITION_TEXT:
+                    last_missing = parsed
+                    last_raw_text = raw_text
+                    last_model_name = model_name
+                    continue
+                return {
+                    "status": "success",
+                    "parsed": parsed,
+                    "raw_text": raw_text,
+                    "model_name": model_name,
+                }
+            except Exception as exc:
+                last_error = exc
+                last_model_name = model_name
+                logger.warning("Model %s failed: %s", model_name, exc)
+        if last_missing is not None:
+            return {
+                "status": "missing",
+                "parsed": last_missing,
+                "raw_text": last_raw_text,
+                "model_name": last_model_name,
+            }
+        return {
+            "status": "error",
+            "error": last_error if last_error is not None else RuntimeError("Gemini did not return result"),
+            "model_name": last_model_name,
+        }
+
     def _generate_gemini_text(self, prompt: str, model_name: str) -> str:
         if self.backend == "google-genai" and self.client is not None:
             request_kwargs: Dict[str, Any] = {"model": model_name, "contents": prompt}
@@ -2768,21 +2852,100 @@ class ReMoMatcher:
                 '{"found_name":"Точное название из каталога или null","article":"Артикул или null","confidence":0.0,"reasoning":"краткое объяснение","compatibility":"compatible|weakly_compatible|incompatible","rejection_reason":"краткая причина или пусто"}'
             )
 
+        prompts = [build_prompt(context_text) for context_text in context_chunks]
         last_missing: Dict[str, Any] | None = None
         last_error: Exception | None = None
         last_raw_text = ""
+        last_model_name = ""
+        chunk_parallelism = min(len(prompts), self._get_gemini_chunk_parallelism())
+        if len(prompts) > 1 and chunk_parallelism > 1:
+            logger.info(
+                "Gemini chunk execution: query=%s prompts=%s chunk_parallelism=%s global_limit=%s",
+                self._clean_text_value(query)[:120],
+                len(prompts),
+                chunk_parallelism,
+                self._get_gemini_request_limit(),
+            )
+            pool = ThreadPoolExecutor(max_workers=chunk_parallelism)
+            future_map: Dict[Any, int] = {}
+            resolved_results: Dict[int, Dict[str, Any]] = {}
+            next_to_submit = 0
+            next_to_resolve = 0
+            cancelled = False
 
-        for context_text in context_chunks:
-            prompt = build_prompt(context_text)
-            for model_name in self._candidate_models():
-                try:
-                    raw_text = self._generate_gemini_text(prompt, model_name)
-                    parsed = self._parse_gemini_result(query, raw_text, candidate_lookup, article_lookup, source, model_name)
-                    self.model_name = model_name
-                    if parsed["found_name"] == MISSING_POSITION_TEXT:
-                        last_missing = parsed
-                        last_raw_text = raw_text
+            def submit_chunk(chunk_idx: int) -> None:
+                future = pool.submit(
+                    self._evaluate_gemini_prompt,
+                    query,
+                    prompts[chunk_idx],
+                    candidate_lookup,
+                    article_lookup,
+                    source,
+                )
+                future_map[future] = chunk_idx
+
+            try:
+                while next_to_submit < chunk_parallelism:
+                    submit_chunk(next_to_submit)
+                    next_to_submit += 1
+
+                while future_map:
+                    done, _pending = wait(set(future_map), timeout=0.25, return_when=FIRST_COMPLETED)
+                    if not done:
                         continue
+                    for future in done:
+                        chunk_idx = future_map.pop(future)
+                        try:
+                            resolved_results[chunk_idx] = future.result()
+                        except Exception as exc:
+                            resolved_results[chunk_idx] = {"status": "error", "error": exc, "model_name": ""}
+
+                    while next_to_resolve in resolved_results:
+                        outcome = resolved_results.pop(next_to_resolve)
+                        status = str(outcome.get("status") or "")
+                        if status == "success":
+                            parsed = dict(outcome.get("parsed") or {})
+                            raw_text = str(outcome.get("raw_text") or "")
+                            model_name = str(outcome.get("model_name") or "")
+                            self.model_name = model_name or getattr(self, "model_name", None)
+                            for pending_future in future_map:
+                                pending_future.cancel()
+                            cancelled = True
+                            self._save_to_cache(
+                                query,
+                                parsed["found_name"],
+                                parsed["price"],
+                                parsed["article"] or "",
+                                parsed["similarity_score"],
+                                raw_text,
+                            )
+                            return parsed
+                        if status == "missing":
+                            last_missing = dict(outcome.get("parsed") or {})
+                            last_raw_text = str(outcome.get("raw_text") or "")
+                            last_model_name = str(outcome.get("model_name") or "")
+                        else:
+                            error = outcome.get("error")
+                            if isinstance(error, Exception):
+                                last_error = error
+                            else:
+                                last_error = RuntimeError(str(error or "Gemini did not return result"))
+                            last_model_name = str(outcome.get("model_name") or "")
+                        next_to_resolve += 1
+                        if next_to_submit < len(prompts):
+                            submit_chunk(next_to_submit)
+                            next_to_submit += 1
+            finally:
+                pool.shutdown(wait=not cancelled, cancel_futures=cancelled)
+        else:
+            for prompt in prompts:
+                outcome = self._evaluate_gemini_prompt(query, prompt, candidate_lookup, article_lookup, source)
+                status = str(outcome.get("status") or "")
+                if status == "success":
+                    parsed = dict(outcome.get("parsed") or {})
+                    raw_text = str(outcome.get("raw_text") or "")
+                    model_name = str(outcome.get("model_name") or "")
+                    self.model_name = model_name or getattr(self, "model_name", None)
                     self._save_to_cache(
                         query,
                         parsed["found_name"],
@@ -2792,11 +2955,21 @@ class ReMoMatcher:
                         raw_text,
                     )
                     return parsed
-                except Exception as exc:
-                    last_error = exc
-                    logger.warning("Model %s failed: %s", model_name, exc)
+                if status == "missing":
+                    last_missing = dict(outcome.get("parsed") or {})
+                    last_raw_text = str(outcome.get("raw_text") or "")
+                    last_model_name = str(outcome.get("model_name") or "")
+                else:
+                    error = outcome.get("error")
+                    if isinstance(error, Exception):
+                        last_error = error
+                    else:
+                        last_error = RuntimeError(str(error or "Gemini did not return result"))
+                    last_model_name = str(outcome.get("model_name") or "")
 
         if last_missing is not None:
+            if last_model_name:
+                self.model_name = last_model_name
             self._save_to_cache(
                 query,
                 last_missing["found_name"],
@@ -2811,7 +2984,7 @@ class ReMoMatcher:
             query,
             "",
             error=str(last_error) if last_error else "Gemini did not return result",
-            gemini_model=str(getattr(self, "model_name", "") or ""),
+            gemini_model=last_model_name or str(getattr(self, "model_name", "") or ""),
             gemini_result_status="runtime_error" if last_error else "no_valid_candidate",
         )
 
