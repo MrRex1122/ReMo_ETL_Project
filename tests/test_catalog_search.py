@@ -212,9 +212,25 @@ class CatalogSearchTests(unittest.TestCase):
             "pdu_basic",
         )
 
+    def test_classify_item_type_does_not_treat_ups_or_bypass_with_pdu_model_as_pdu(self):
+        self.assertNotEqual(
+            classify_item_type("Источник бесперебойного питания KEOR PDU 800ВА 8 IEC"),
+            "pdu_basic",
+        )
+        self.assertNotEqual(
+            classify_item_type("Байпас ручной 19 inch 1U с PDU для ИБП"),
+            "pdu_basic",
+        )
+
     def test_classify_item_type_does_not_treat_non_telecom_commutation_panel_as_patch_panel(self):
         self.assertNotEqual(
             classify_item_type("Панель коммутационная Ridan WD на 8 каналов и 14 приводов"),
+            "patch_panel",
+        )
+
+    def test_classify_item_type_does_not_treat_generic_19inch_panel_as_patch_panel(self):
+        self.assertNotEqual(
+            classify_item_type('Панель 19" 1U Коммутационные панели'),
             "patch_panel",
         )
 
@@ -248,12 +264,24 @@ class CatalogSearchTests(unittest.TestCase):
             "rj45_outlet",
         )
 
+    def test_classify_item_type_does_not_treat_rj45_assembly_as_pure_connector(self):
+        self.assertNotEqual(
+            classify_item_type("Connect Влагостойкая основа IP66 с розеткой и коннектором RJ45"),
+            "rj45_connector",
+        )
+
     def test_classify_item_type_does_not_treat_optical_cable_for_patch_cords_as_patch_cord(self):
         self.assertNotEqual(
             classify_item_type(
                 "Кабель волоконно-оптический многомодовый для патч кордов и кабельных сборок с коннекторами MPO/MTP"
             ),
             "optical_patch_cord",
+        )
+
+    def test_classify_item_type_does_not_treat_non_network_patch_cord_as_patch_cord(self):
+        self.assertNotEqual(
+            classify_item_type("CX3 EMS Патч корд 250мм"),
+            "patch_cord",
         )
 
     def test_extract_item_markers_normalizes_category_and_panel_markers(self):

@@ -302,6 +302,21 @@ def _looks_like_pdu_device(normalized: str) -> bool:
     )
     if any(marker in normalized for marker in fastener_noise_markers):
         return False
+    non_pdu_power_markers = (
+        "\u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a \u0431\u0435\u0441\u043f\u0435\u0440\u0435\u0431\u043e\u0439\u043d",
+        "\u0431\u0435\u0441\u043f\u0435\u0440\u0435\u0431\u043e\u0439\u043d",
+        "\u0431\u0430\u0442\u0430\u0440\u0435\u0439\u043d",
+        "\u0437\u0430\u0440\u044f\u0434\u043d",
+        "ups",
+        "online",
+        "line interactive",
+        "keor",
+        "info pdu",
+    )
+    if any(marker in normalized for marker in non_pdu_power_markers):
+        return False
+    if "bypass" in normalized or "\u0431\u0430\u0439\u043f\u0430\u0441" in normalized:
+        return False
     if _looks_like_primary_cable_product(normalized) and any(
         marker in normalized for marker in ("iec320", "c13", "c14", "c19", "c20")
     ):
@@ -342,9 +357,31 @@ def _looks_like_patch_panel(normalized: str, phrase_normalized: str) -> bool:
         "keystone",
         "кейстоун",
         "krone",
-        "19 inch",
     )
     return any(marker in normalized for marker in telecom_markers)
+
+
+def _looks_like_patch_cord(normalized: str, phrase_normalized: str) -> bool:
+    if "патч корд" not in phrase_normalized and "patch cord" not in phrase_normalized:
+        return False
+    telecom_markers = (
+        "rj45",
+        "rj 45",
+        "8p8c",
+        "ethernet",
+        "lan",
+        "utp",
+        "ftp",
+        "sftp",
+        "cat",
+        "категор",
+        "коммутацион",
+        "витая пара",
+    )
+    if any(marker in normalized for marker in telecom_markers):
+        return True
+    connector_pair = _detect_connector_pair(normalized)
+    return connector_pair == "rj45-rj45"
 
 
 def _detect_port_count(normalized: str) -> str:
@@ -451,6 +488,24 @@ def _looks_like_keystone_module(normalized: str) -> bool:
     return any(marker in normalized for marker in module_markers)
 
 
+def _looks_like_rj45_connector(normalized: str) -> bool:
+    if "коннектор" not in normalized or not re.search(r"\brj[\s-]?45\b", normalized, flags=re.IGNORECASE):
+        return False
+    assembly_noise = (
+        "\u043e\u0441\u043d\u043e\u0432",
+        "\u0440\u043e\u0437\u0435\u0442\u043a",
+        "\u043d\u0430\u043a\u043b\u0430\u0434\u043a",
+        "\u0430\u0434\u0430\u043f\u0442\u0435\u0440",
+        "\u043b\u0438\u0446\u0435\u0432\u0430\u044f \u043f\u0430\u043d\u0435\u043b",
+        "\u0432\u043b\u0430\u0433\u043e\u0441\u0442\u043e\u0439\u043a",
+        "\u043a\u043e\u043d\u0441\u0442\u0440\u0443\u043a\u0442\u0438\u0432",
+        "\u0432 \u0441\u0431\u043e\u0440\u0435",
+        "faceplate",
+        "cover",
+    )
+    return not any(marker in normalized for marker in assembly_noise)
+
+
 def _looks_like_rj45_outlet(normalized: str) -> bool:
     if not re.search(r"\brj[\s-]?45\b", normalized, flags=re.IGNORECASE):
         return False
@@ -531,7 +586,7 @@ def classify_item_type(text: str, synonyms: Mapping[str, str] | None = None) -> 
         return "keystone_adapter"
     if _looks_like_keystone_module(normalized):
         return "keystone_module"
-    if "коннектор" in normalized and re.search(r"\brj[\s-]?45\b", normalized, flags=re.IGNORECASE):
+    if _looks_like_rj45_connector(normalized):
         return "rj45_connector"
     if _looks_like_rj45_outlet(normalized):
         return "rj45_outlet"
@@ -551,7 +606,7 @@ def classify_item_type(text: str, synonyms: Mapping[str, str] | None = None) -> 
         return "iec_power_cable"
     if _looks_like_patch_panel(normalized, phrase_normalized):
         return "patch_panel"
-    if "патч корд" in phrase_normalized:
+    if _looks_like_patch_cord(normalized, phrase_normalized):
         return "patch_cord"
     bulk_markers = ("витая пара", "utp", "ftp", "f utp", "u utp", "бухта", "305м", "500м")
     if any(marker in normalized for marker in bulk_markers):
