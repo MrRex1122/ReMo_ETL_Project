@@ -163,7 +163,6 @@ class PriceETL:
                 df = df.drop(columns=cols_to_drop)
 
         key_fields = {
-            CANONICAL_ARTICLE_COLUMN: "UNKNOWN",
             "Единица измерения": "шт",
             "Ставка НДС": 20,
             "Страна": "РФ",
@@ -254,7 +253,6 @@ class PriceETL:
 
         # 8. Fill missing values in key fields.
         key_fields = {
-            CANONICAL_ARTICLE_COLUMN: "UNKNOWN",
             "Единица измерения": "шт",
             "Ставка НДС": 20,
             "Страна": "РФ",

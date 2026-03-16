@@ -38,6 +38,21 @@ class CatalogMergeTests(unittest.TestCase):
         cable = merged[merged["Артикул"] == "A-1"].iloc[0]
         self.assertEqual(float(cable["Цена розничная"]), 100)
 
+    def test_merge_catalog_frames_treats_unknown_article_as_missing(self):
+        df1 = pd.DataFrame([
+            {"Наименование": "Кабель UTP cat6", "Артикул": "UNKNOWN", "Цена розничная": 100},
+            {"Наименование": "PDU 19", "Артикул": "PDU-1", "Цена розничная": 200},
+        ])
+        df2 = pd.DataFrame([
+            {"Наименование": "Кабель UTP cat6", "Артикул": "", "Цена розничная": 110},
+            {"Наименование": "Розетка RJ45", "Артикул": "UNKNOWN", "Цена розничная": 300},
+        ])
+
+        merged = merge_catalog_frames([df1, df2])
+
+        self.assertEqual(len(merged), 3)
+        self.assertEqual(int((merged["Наименование"] == "Кабель UTP cat6").sum()), 1)
+
     def test_build_merged_catalog_from_directory(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

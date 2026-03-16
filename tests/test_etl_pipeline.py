@@ -47,7 +47,7 @@ class PriceETLTests(unittest.TestCase):
             self.assertEqual(clean_df.loc[0, "Наименование"], "Кабель ВВГ")
             self.assertEqual(clean_df.loc[0, "Артикул"], "ART-1")
             self.assertAlmostEqual(float(clean_df.loc[0, "Цена розничная"]), 1200.50, places=2)
-            self.assertEqual(clean_df.loc[1, "Артикул"], "UNKNOWN")
+            self.assertTrue(pd.isna(clean_df.loc[1, "Артикул"]) or str(clean_df.loc[1, "Артикул"]).strip() == "")
 
     def test_run_chunked_keeps_stable_csv_schema_when_chunk_has_empty_columns(self):
         with tempfile.TemporaryDirectory() as tmpdir:

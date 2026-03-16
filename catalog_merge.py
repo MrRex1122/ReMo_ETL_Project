@@ -113,6 +113,13 @@ def _normalize_text(text: str) -> str:
     return " ".join(lowered.split())
 
 
+def _normalize_article_for_merge(value: object) -> str:
+    article = str(value or "").strip()
+    if article.lower() in {"", "unknown", "nan", "none", "null"}:
+        return ""
+    return article
+
+
 def _sanitize_temp_stem(value: str) -> str:
     sanitized = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value or "").strip())
     sanitized = sanitized.strip("._")
@@ -320,7 +327,9 @@ def refresh_merged_catalog(clean_dir: Path) -> Path:
 
 
 def _build_dedupe_key(df: pd.DataFrame) -> pd.Series:
-    article_key = df[CANONICAL_ARTICLE_COLUMN].fillna("").astype(str).str.strip().str.lower()
+    article_key = df[CANONICAL_ARTICLE_COLUMN].fillna("").astype(str).str.strip()
+    article_key = article_key.mask(article_key.str.lower().isin({"", "unknown", "nan", "none", "null"}), "")
+    article_key = article_key.str.lower()
     name_key = df[CANONICAL_NAME_COLUMN].fillna("").astype(str).map(_normalize_text)
     return article_key.where(article_key != "", name_key)
 
@@ -377,7 +386,7 @@ def _build_upsert_record(
     source_order: int,
     payload_columns: list[str],
 ) -> tuple[str, int, int, int, str]:
-    article_value = str(row.get(CANONICAL_ARTICLE_COLUMN) or "").strip()
+    article_value = _normalize_article_for_merge(row.get(CANONICAL_ARTICLE_COLUMN))
     name_value = str(row.get(CANONICAL_NAME_COLUMN) or "").strip()
     dedupe_key = article_value.lower() if article_value else _normalize_text(name_value)
     payload = {column: _json_safe_value(row.get(column)) for column in payload_columns}
@@ -524,7 +533,14 @@ def merge_catalog_frames(frames: Iterable[pd.DataFrame]) -> pd.DataFrame:
             if column not in current.columns:
                 current[column] = None
         current["__source_order"] = source_order
-        current["__has_article"] = current[CANONICAL_ARTICLE_COLUMN].fillna("").astype(str).str.strip() != ""
+        current["__has_article"] = ~(
+            current[CANONICAL_ARTICLE_COLUMN]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+            .str.lower()
+            .isin({"", "unknown", "nan", "none", "null"})
+        )
         current["__has_price"] = pd.to_numeric(current[CANONICAL_PRICE_COLUMN], errors="coerce").notna()
         current["__dedupe_key"] = _build_dedupe_key(current)
         prepared_frames.append(current)
