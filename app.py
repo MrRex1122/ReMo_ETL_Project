@@ -512,33 +512,20 @@ def _run_processing_job(run_id: str, matcher_settings: dict[str, Any]) -> None:
             stage="saving_results",
             current=int(stats.get("total", len(df_result))),
             total=int(stats.get("total", len(df_result))),
-            percent=0.99,
-            message="Формирование диагностики и сохранение результатов",
+            percent=0.98,
+            message="Сохранение результатов и runtime-диагностики",
         )
-        coverage_audit_payload = None
-        try:
-            coverage_audit_payload = build_catalog_coverage_audit(
-                df_result,
-                run_id=run_id,
-                catalog_source_path=Path(run.catalog_source_path),
-                catalog_source_kind=str(run.catalog_source_kind or ""),
-            )
-            write_processing_run_coverage_audit(run_id, coverage_audit_payload)
-        except Exception:
-            logger.exception("Failed to build coverage audit for run %s", run_id)
-
+        diagnostics_payload = None
         try:
             if isinstance(diagnostics_rows, list):
                 diagnostics_payload = build_match_diagnostics_payload(
                     diagnostics_rows,
                     run_id=run_id,
-                    coverage_audit_payload=coverage_audit_payload,
                 )
             else:
                 diagnostics_payload = reconstruct_match_diagnostics(
                     df_result,
                     run_id=run_id,
-                    coverage_audit_payload=coverage_audit_payload,
                 )
             write_processing_run_match_diagnostics(run_id, diagnostics_payload)
             apply_match_diagnostics_to_result_dataframe(df_result, diagnostics_payload)
@@ -571,6 +558,10 @@ def _run_processing_job(run_id: str, matcher_settings: dict[str, Any]) -> None:
             message="Обработка завершена",
         )
         logger.info("✅ Processing run completed: %s", run_id)
+        logger.info(
+            "ℹ️ Coverage audit is not built synchronously during background run %s; use the manual audit action in Results.",
+            run_id,
+        )
     except Exception as exc:
         logger.error("❌ Processing run failed: %s", run_id, exc_info=True)
         error_text = str(exc)
