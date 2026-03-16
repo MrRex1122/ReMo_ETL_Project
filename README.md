@@ -1,444 +1,305 @@
-# 🔍 ReMo Matcher v1.0
+# ReMo Matcher
 
-**Семантическое сопоставление номенклатуры коммерческих предложений с товарной БД**
+Система для сопоставления позиций из коммерческих предложений с товарным каталогом поставщика.
 
-Система автоматически находит товары из товарной базы, соответствующие позициям в коммерческих предложениях, даже если названия отличаются. Использует Gemini API для точного семантического понимания.
+Проект уже ушел далеко от исходной идеи “поискать похожий текст через LLM”. Сейчас это пайплайн с:
+- подготовкой входной БД и поисковой БД;
+- локальной таксономией и маркерами совместимости;
+- DuckDB-backed retrieval;
+- Gemini как слоем выбора внутри релевантного candidate set;
+- persisted run-артефактами, аудитом покрытия каталога и диагностикой причин ненахода.
 
----
+## Что есть сейчас
 
-## 📋 Функциональность
+### Матчинг
+- Сопоставление Excel КП с каталогом поставщика.
+- Локальная классификация query/item по семействам: `patch_panel`, `patch_cord`, `keystone`, `rj45_connector`, `rj45_outlet`, `bulk_twisted_pair`, `iec_power_cable`, `optical_cross`, `optical_patch_cord`, `ats_sts`, `airflow_blanking_panel` и др.
+- Strict / semi-strict / generic логика совместимости.
+- Gemini используется не как “поиск по всему каталогу”, а как слой уточнения внутри локально отобранных кандидатов.
+- Кэш результатов сопоставления в SQLite.
 
-✅ **Автоматическое сопоставление**
-- Анализирует номенклатуру из KП (столбец B)
-- Находит соответствующие товары в price_clean.csv
-- Вставляет данные в столбцы G (Цена), H (Название), I (Артикул)
+### Каталоги
+- Сырой источник истины: merged CSV, например `price_clean_merged.csv`.
+- Компактная поисковая БД: `price_clean_search.duckdb`.
+- Search catalog строится из merged catalog кнопкой `🪶 Обновить поисковую БД`.
+- В DuckDB хранятся нормализованные поля и search-признаки; это значительно меньше и быстрее, чем широкий CSV.
 
-✅ **Высокая точность**
-- Использует Google Gemini API
-- Понимает синонимы и альтернативные формулировки
-- Учитывает технические характеристики
+### Retrieval
+- Основной режим: `DuckDB whole-category retrieval by derived branch`.
+- Matcher больше не обязан preload’ить весь каталог в память для search-пути.
+- Whole-category retrieval применяется к typed family по derived branch / family routing.
+- Старые слайдеры shortlist/chunk/local recall сохранены, но убраны в `Advanced`, потому что в DuckDB-режиме они уже не являются главным retrieval-механизмом.
 
-✅ **Оптимизация**
-- Кэширование результатов (SQLite)
-- Поддержка batch-обработки
-- Быстрый fallback: нормализованное текстовое совпадение до обращения к LLM
-- Время обработки 100 позиций: 5-10 сек
+### Run-артефакты
+Для каждого прогона сохраняются:
+- `result.csv`
+- `result.xlsx`
+- `stats.json`
+- `progress.json`
+- `coverage_audit.json`
+- `match_diagnostics.json`
 
-✅ **Удобство использования**
-- Streamlit UI с визуализацией
-- Ручная коррекция ошибок
-- История всех операций
-- Экспорт в Excel/CSV
+### Диагностика
+- В UI есть `Аудит покрытия каталога`.
+- В UI есть `Диагностика причин ненахода`.
+- Диагностика разделяет:
+  - `pipeline_stage` — где строка остановилась;
+  - `root_cause_class/root_cause_code` — почему не нашли.
+- Для historical run возможна reconstructed diagnostics.
+- Экспорт диагностики и аудита доступен одним `.xlsx` workbook.
 
----
+### Экспорт каталогов
+- Выгрузка входной БД в Cloudflare R2.
+- Выгрузка поисковой БД в Cloudflare R2.
+- Локальные/Google Drive кнопки экспорта каталогов из UI убраны; для каталогов оставлен Cloudflare-only поток.
 
-## 🚀 Быстрый старт
+### UI и UX
+- Фоновая обработка run с persisted progress.
+- Автообновление статуса активного прогона — opt-in.
+- Есть ручной пересчет аудита и диагностики.
+- Есть отдельный блок состояния поисковой БД.
 
-### 1. Установка зависимостей
+## Архитектура
+
+```text
+Excel КП
+  -> ReMoMatcher
+     -> query classification
+     -> derived branch / family routing
+     -> DuckDB whole-category retrieval
+     -> local scoring + compatibility filter
+     -> Gemini shortlist confirmation
+     -> result / diagnostics / audit
+
+Catalog pipeline
+  merged CSV
+    -> search build
+    -> price_clean_search.duckdb
+```
+
+Основные модули:
+- `app.py` — Streamlit UI, background run orchestration, экспорт, аудит, диагностика.
+- `matcher.py` — основной matcher.
+- `catalog_merge.py` — сборка merged catalog.
+- `catalog_search.py` — сборка search catalog в CSV/DuckDB.
+- `catalog_coverage_audit.py` — аудит покрытия каталога для выбранного run.
+- `match_diagnostics.py` — runtime/reconstructed диагностика причин ненахода.
+- `processing_runs.py` — persisted run storage.
+- `cloudflare_r2_export.py` — выгрузка больших артефактов в Cloudflare R2.
+
+## Быстрый старт
+
+### 1. Установка
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. Получение API ключа Gemini
+### 2. Gemini API key
 
-1. Перейти на https://aistudio.google.com/app/apikey
-2. Кликнуть "Create API Key"
-3. Скопировать ключ
+Вариант через `.streamlit/secrets.toml`:
 
-### 3. Конфигурация
-
-**Вариант A: Через файл** (рекомендуется)
-
-Отредактировать `.streamlit/secrets.toml`:
 ```toml
-GEMINI_API_KEY = "ваш_ключ_от_gemini"
+GEMINI_API_KEY = "your_key"
 ```
 
-**Вариант B: Переменная окружения** (PowerShell)
+Или через env:
 
 ```powershell
-$env:GEMINI_API_KEY = "ваш_ключ"
+$env:GEMINI_API_KEY = "your_key"
 ```
 
-### 4. Запуск приложения
+### 3. Запуск
 
 ```bash
 streamlit run app.py
 ```
-> Для загрузки очень больших CSV (до нескольких ГБ) в проекте выставлены повышенные лимиты Streamlit в `.streamlit/config.toml` и Docker CMD (`maxUploadSize/maxMessageSize`).
 
-Приложение откроется на локальном URL, который покажет Streamlit в консоли (порт по умолчанию задается в `.streamlit/config.toml`)
+## Основные настройки
 
+Ключевые переменные окружения:
 
-### 4.1 Google Drive синхронизация (одна преднастроенная папка)
+### Пути и данные
+- `REMO_UPLOAD_DIR` — базовая папка данных.
+- `REMO_DB_CSV` — путь к активному merged catalog CSV или папке с `*_clean.csv`.
+- `REMO_MATCHER_CACHE_DB` — путь к `matcher_cache.db`.
+- `RAILWAY_VOLUME_MOUNT_PATH` — volume mount на Railway; если `REMO_UPLOAD_DIR` не задан, проект использует его автоматически.
 
-В UI есть только кнопка **«Выгрузить файлы из Google Drive»** (без полей ввода).
-Нужно заранее задать переменные в `secrets.toml` или env:
+### Gemini / matcher
+- `REMO_MATCHER_MODELS`
+- `REMO_MATCHER_PARALLEL_REQUESTS`
+- `REMO_MATCHER_CONTEXT_CHUNK_SIZE`
+- `REMO_MATCHER_MAX_CONTEXT_CHUNKS`
+- `REMO_MATCHER_RETRIEVAL_CANDIDATES`
+- `REMO_MATCHER_GEMINI_SHORTLIST_LIMIT`
+- `REMO_MATCHER_GEMINI_CHUNK_SIZE`
+- `REMO_MATCHER_GEMINI_MAX_CHUNKS`
+- `REMO_MATCHER_LOCAL_RECALL_POOL`
+- `REMO_MATCHER_SKIP_WEAK_SHORTLIST`
+- `REMO_MATCHER_LOCAL_CONFIDENCE_THRESHOLD`
+- `REMO_MATCHER_LOCAL_MARGIN_THRESHOLD`
 
-```toml
-GOOGLE_DRIVE_FOLDER_ID = "<folder_id_или_url>"
-GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON = "{...json...}"
-```
+### Cloudflare R2
+- `CLOUDFLARE_R2_ACCOUNT_ID`
+- `CLOUDFLARE_R2_BUCKET`
+- `CLOUDFLARE_R2_ACCESS_KEY_ID`
+- `CLOUDFLARE_R2_SECRET_ACCESS_KEY`
+- `CLOUDFLARE_R2_PUBLIC_BASE_URL` — опционально, если нужен публичный URL.
 
-Альтернативно можно использовать `GOOGLE_DRIVE_FOLDER_URL` вместо `GOOGLE_DRIVE_FOLDER_ID`.
+## Как работать с каталогами
 
-### 5. Batch-режим (обработка набора файлов)
+### Входная БД
+- В проект можно указать либо конкретный merged CSV, либо папку с `*_clean.csv`.
+- Если указана папка, merged catalog будет пересобран из источников.
+
+### Поисковая БД
+- Нажмите `🪶 Обновить поисковую БД`.
+- Если все готово, активной поисковой БД становится `price_clean_search.duckdb`.
+- Если search DuckDB недоступен или устарел, matcher умеет безопасно откатиться на legacy path.
+
+Почему это важно:
+- merged CSV может быть очень широким и тяжелым;
+- search DuckDB существенно компактнее;
+- это уменьшает cold start и ускоряет retrieval.
+
+## Как выглядит текущий production-пайплайн
+
+### На вкладке загрузки
+1. Загружаете Excel КП.
+2. Запускаете обработку.
+3. Следите за persisted progress.
+4. После завершения переходите к run в результатах.
+
+### На вкладке результатов
+Доступны:
+- итоговая таблица;
+- статистика прогона;
+- аудит покрытия каталога;
+- диагностика причин ненахода;
+- экспорт диагностики workbook;
+- экспорт аудита workbook.
+
+## Аудит и диагностика
+
+### Аудит покрытия каталога
+Отвечает на вопрос:
+- есть ли в каталоге нужное семейство;
+- есть ли семейство, но не хватает specs;
+- или в каталоге реально были compatible candidates.
+
+Типовые диагнозы:
+- `catalog_missing_family`
+- `catalog_has_family_but_no_compatible_specs`
+- `catalog_has_compatible_candidates`
+- `non_target_family`
+
+Для `catalog gap` дополнительно считаются техпричины:
+- `missing_family`
+- `category_mismatch`
+- `connector_mismatch`
+- `component_kind_mismatch`
+- `installation_kind_mismatch`
+- `port_count_mismatch`
+- `shielding_mismatch`
+- `fiber_mode_mismatch`
+- `environment_mismatch`
+- `multiple_spec_mismatches`
+
+### Диагностика причин ненахода
+Отвечает на два разных вопроса:
+
+1. Где остановилась строка?
+- `query_input`
+- `query_classification`
+- `local_recall`
+- `compatibility_filter`
+- `gemini_selection`
+- `fallback_policy`
+- `resolved`
+
+2. Почему не нашли?
+- `catalog_gap`
+- `matcher_retrieval_or_ranking`
+- `gemini_or_decision_policy`
+- `not_audited_family`
+- `input_or_query_shape`
+- `runtime_error`
+
+Это позволяет не путать “где сломалось” и “почему в итоге не нашли”.
+
+## Railway
+
+Рекомендуемая схема деплоя:
+- приложение на Railway;
+- данные на Railway Volume;
+- merged catalog и search DuckDB лежат на volume;
+- экспорты крупных артефактов идут в Cloudflare R2.
+
+Практически это выглядит так:
+- `REMO_UPLOAD_DIR=/data/remo`
+- merged catalog живет в volume;
+- search catalog `price_clean_search.duckdb` тоже живет в volume и переживает деплой.
+
+Это снимает необходимость гонять полную ETL/merge/search сборку после каждого релиза.
+
+## Актуальные важные изменения по сравнению со старой версией
+
+- Search catalog переведен на DuckDB.
+- Matcher переведен на whole-category retrieval по derived branch.
+- Убрана зависимость от full preload всего search-каталога в память для DuckDB-path.
+- Введены persisted processing runs.
+- Добавлены progress bar и persisted progress state.
+- Добавлены `coverage_audit.json` и `match_diagnostics.json`.
+- Диагностика теперь двухосевая: `pipeline stage` и `root cause`.
+- Экспорты диагностики и аудита стали workbook-based.
+- Экспорт catalog/search catalog в UI оставлен через Cloudflare R2.
+
+## Ограничения текущего состояния
+
+Важно понимать текущее поведение системы:
+- если каталог реально не содержит нужного семейства/specs, matcher не “дотягивает” мусор до совпадения;
+- большое число `unresolved` может быть честным следствием покрытия каталога, а не только багом retrieval;
+- для некоторых доменов качество определяется не только matcher-логикой, но и наполнением входной БД.
+
+## Тесты
+
+Проект покрыт набором unit/regression тестов по:
+- taxonomy/classification,
+- catalog search build,
+- matcher modes и candidate routing,
+- coverage audit,
+- match diagnostics,
+- UI regressions.
+
+Пример запуска:
 
 ```bash
-python batch_process.py --input-dir "<input-dir>" --output-dir "batch_output"
+python -m unittest tests.test_match_diagnostics tests.test_catalog_coverage_audit -q
+python -m unittest tests.test_match_taxonomy tests.test_match_candidates tests.test_process_excel -q
 ```
 
-Скрипт обработает все `.xlsx/.xls` в папке, создаст выходные файлы и два отчёта:
-- `batch_report_*.json`
-- `batch_report_*.csv`
-
-### 6. Настройка путей к данным (без хардкода)
-
-По умолчанию проект использует каталог `./data` (рядом с проектом), но путь можно переопределить:
-- UI: поле "Путь к price_clean.csv" в боковой панели (можно указать и папку с `*_clean.csv`)
-- CLI: флаг `--db-csv` (batch/e2e), `--input`/`--output` (etl/main)
-- ENV:
-  - `REMO_DB_CSV` — путь к `price_clean.csv` **или** к папке с `*_clean.csv`
-  - `REMO_UPLOAD_DIR` — базовая папка данных
-  - `REMO_MATCHER_CACHE_DB` — путь к `matcher_cache.db`
-  - `REMO_MATCH_PROMPT_TEMPLATE_PATH` — путь к кастомному шаблону prompt для Gemini (`{query}` и `{catalog_context}` обязательны)
-  - `REMO_MATCHER_MODELS` — список Gemini-моделей через запятую (порядок fallback)
-  - `REMO_MATCHER_CANDIDATE_LIMIT` — число кандидатов retrieval перед Gemini
-  - `REMO_MATCHER_CONTEXT_LINES` — сколько строк кандидатов передавать в prompt
-  - `REMO_MATCHER_CATALOG_SAMPLE_ITEMS` — размер sample для fallback-контекста каталога
-  - `REMO_PRICE_RAW_CSV`, `REMO_PRICE_CONVERTED_CSV`, `REMO_SAMPLE_XLSX` — точечные override
-  - `REMO_MATCHER_PARALLEL_REQUESTS` — количество параллельных LLM-запросов (1..10, по умолчанию 1)
-  - `REMO_MATCHER_MODELS` — список Gemini-моделей через запятую (по умолчанию `gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.0-flash,gemini-2.0-flash-lite`)
-  - `REMO_MATCHER_CONTEXT_CHUNK_SIZE` и `REMO_MATCHER_MAX_CONTEXT_CHUNKS` — размер/кол-во чанков контекста для retry
-  - `REMO_MATCHER_RETRIEVAL_CANDIDATES` — лимит кандидатов retrieval перед отправкой в LLM (100..10000, по умолчанию 1200)
-
-- В UI (боковая панель) доступна проверка входной БД:
-  - кнопка **"Подготовить выгрузку входной БД"**
-  - выгрузка активной базы в CSV/Excel
-  - опция "Объединять все *_clean.csv из папки" (даже если в поле указан один `price*_clean.csv`)
-  - отдельная выгрузка дублей (по артикулу/наименованию)
-
-- В UI (боковая панель) доступны параметры тонкой настройки matcher:
-  - **Параллельные запросы к Gemini** (1..10)
-  - **Размер сэмпла каталога для контекста** (100..5000)
-  - Контекст подбирается детерминированно: из релевантных токен-групп запроса (без случайного `sample`)
-  Изменения применяются кнопкой **"Применить параметры matcher"**.
-
-
-
-### Railway: как не прогонять ETL после каждого деплоя
-
-Чтобы `price_clean.csv` не пропадал после релиза, храните данные на **Railway Volume**:
-
-1. Создайте Volume в Railway и примонтируйте его к сервису.
-2. Задайте `REMO_UPLOAD_DIR` в переменных окружения, например:
-   - `REMO_UPLOAD_DIR=/data/remo`
-3. Один раз загрузите/сгенерируйте в этом каталоге:
-   - `/data/remo/price_converted.csv`
-   - `/data/remo/price_clean.csv`
-4. Дальше при деплоях файлы сохраняются в volume, ETL не нужно гонять заново.
-
-Примечание: если `REMO_UPLOAD_DIR` не задан, приложение автоматически использует `RAILWAY_VOLUME_MOUNT_PATH/remo_data` (если переменная доступна в Railway).
-
----
-
-## 📖 Инструкция по использованию
-
-### Загрузка файла КП
-
-1. **Подготовка Excel:**
-   - Файл должен содержать столбец "Наименование оборудования, материалов и кабелей"
-   - Рекомендуется столбец B (второй столбец)
-   - Поддерживаются форматы .xlsx и .xls
-
-2. **Загрузка:**
-   - Нажать "Выберите Excel файл"
-   - Выбрать файл КП
-
-3. **Обработка:**
-   - Нажать "🚀 Начать обработку"
-   - Дождаться завершения (индикатор прогресса покажет статус)
-
-### Просмотр результатов
-
-После обработки доступны три вкладки:
-
-**📤 Загрузка** - статус обработки, статистика
-**📋 Результаты** - таблица с найденными товарами, фильтры, сортировка
-**📊 История** - все ранее обработанные позиции
-
-### Коррекция результатов
-
-Для исправления неправильных совпадений:
-
-1. Перейти на вкладку "📋 Результаты"
-2. Отредактировать таблицу:
-   - "Найденная номенклатура" (столбец H)
-   - "Цена" (столбец G)
-   - "Артикул" (столбец I)
-3. Результаты сохраняются автоматически
-
-### Скачивание результата
-
-- **Excel:** Сохранит исходный формат с заполненными столбцами G, H, I
-- **CSV:** UTF-8 с разделителем `;`
-
----
-
-## 🏗️ Архитектура
-
-```
-┌─────────────────────────────────┐
-│  Streamlit UI (app.py)           │
-│  • Загрузка файлов              │
-│  • Просмотр + редактирование    │
-│  • Экспорт результатов          │
-└──────────┬──────────────────────┘
-           │
-┌──────────┴──────────────────────┐
-│  ReMoMatcher (matcher.py)        │
-│  • Парсинг Excel                │
-│  • Интеграция с Gemini API      │
-│  • Кэширование SQLite           │
-└──────────┬──────────────────────┘
-           │
-    ┌──────┴──────┐
-    │              │
-┌───┴────┐  ┌────┴──────────┐
-│Price   │  │ Gemini API    │
-│Clean   │  │ (2 моноли)    │
-│CSV     │  │ • Поиск       │
-│(17259) │  │ • Уточнение   │
-└────────┘  └───────────────┘
-```
-
-### Компоненты
-
-> В текущем UI используется **один активный каталог** — это путь из поля `Путь к price_clean.csv`.
-> Если указать **папку** с файлами `*_clean.csv`, приложение автоматически соберёт единый `price_clean_merged.csv`
-> (с дедупликацией по артикулу, а при пустом артикуле — по нормализованному наименованию) и будет работать уже с ним.
-
-
-| Файл | Назначение |
-|------|-----------|
-| `matcher.py` | Основной класс ReMoMatcher, работа с Gemini |
-| `app.py` | Streamlit UI приложение |
-| `config.py` | Единая конфигурация путей и env-переопределений |
-| `price_clean.csv` | Товарная база (17259 товаров) |
-| `matcher_cache.db` | SQLite база кэша и истории |
-| `requirements.txt` | Python зависимости |
-
----
-
-## ⚙️ Нефункциональные характеристики
-
-| Параметр | Значение |
-|----------|---------|
-| **Время отклика** | 2-3 сек (UI) |
-| **Время обработки** | 5-10 сек (100 позиций) |
-| **Точность** | 95%+ (зависит от качества формулировки) |
-| **Одновременные пользователи** | 1 (легко расширить на 5-10) |
-| **Доступность** | 99.5% (зависит от Gemini API) |
-| **Резервное копирование** | Автоматическое (matcher_cache.db) |
-
----
-
-## 🛠️ API Gemini
-
-Система использует пул актуальных моделей Gemini (по умолчанию начинается с `gemini-2.5-flash`):
-
-**Особенности:**
-- ✅ Многоязычная поддержка (РФ, EN, DE, IT и т.д.)
-- ✅ Понимание синонимов ("кабель" = "провод" = "Cu провод")
-- ✅ Технические характеристики (сечение, материал, напряжение)
-- ✅ Низкая стоимость (~$0.075 / 1M входящих токенов)
-
-**Формат запроса:**
-```
-Запрос: "Кабель медный 4кв.мм сечение"
-Ответ:
-{
-    "found_name": "Кабель КОНТРОЛ 4 К-4",
-    "article": "ART-12345",
-    "confidence": 0.98,
-    "reasoning": "Совпадает по материалу (медь) и сечению (4кв.мм)"
-}
-```
-
----
-
-## 📊 Статистика обработки
-
-После каждой обработки выводятся метрики:
-
-- **Всего элементов** - количество позиций в КП
-- **Найдено** - успешно найденные товары (%)
-- **Не найдено** - отсутствуют в БД
-- **Из кэша** - использованы закэшированные результаты
-- **Ошибок** - ошибки API или парсинга
-
-Пример:
-```
-Всего элементов: 50
-Найдено: 47 (94%)
-Не найдено: 3
-Из кэша: 12
-Ошибок: 0
-```
-
----
-
-## 🔒 Безопасность
-
-- ✅ API ключ хранится в `.streamlit/secrets.toml` (не коммитится в Git)
-- ✅ Локальное кэширование (SQLite на диске)
-- ✅ Логирование всех операций
-- ✅ Обработка ошибок без краша системы
-
-**.gitignore** (обязательно добавить):
-```
-.streamlit/secrets.toml
-matcher_cache.db
-*.xlsx
-*.xls
-__pycache__/
-*.pyc
-```
-
----
-
-## 🐛 Troubleshooting
-
-### 404 NOT_FOUND по моделям Gemini
-```
-Модель ... не сработала: 404 NOT_FOUND
-```
-Это значит, что выбранная модель недоступна в вашем проекте/регионе или для `v1beta` метода `generateContent`.
-
-Что делать:
-1. Задайте `REMO_MATCHER_MODELS` только из поддерживаемых моделей вашего API-ключа.
-2. Оставьте порядок от более сильной к более дешевой модели.
-3. Перезапустите приложение.
-
-### API ключ не работает
-```
-❌ Error: GEMINI_API_KEY не установлен
-```
-
-**Решение:**
-1. Проверить `.streamlit/secrets.toml`
-2. Убедиться что ключ скопирован правильно
-3. Перезагрузить приложение: `Ctrl+C` → `streamlit run app.py`
-
-### Файл не загружается
-```
-❌ Ошибка: Не удалось прочитать Excel
-```
-
-**Решение:**
-1. Проверить формат (.xlsx или .xls)
-2. Убедиться что файл открывается в Excel
-3. Удалить скрытые строки/столбцы
-
-### Gemini API ошибка
-```
-❌ Error: API rate limit exceeded
-```
-
-**Решение:**
-1. Проверить квоту в Google Cloud Console
-2. Увеличить бюджет API
-3. Подождать несколько минут и повторить
-
-### Низкая точность сопоставления
-```
-❌ Найдено: Некорректное названиеconf: 0.45
-```
-
-**Решение:**
-1. Проверить правильность названия товара в КП
-2. Убедиться что товар есть в price_clean.csv
-3. Вручную исправить в UI
-
----
-
-## 📈 Масштабирование
-
-### Для 1000+ пользователей
-
-Замените Streamlit на REST API:
-
-```python
-# api.py (FastAPI)
-from fastapi import FastAPI
-from matcher import ReMoMatcher
-
-app = FastAPI()
-matcher = ReMoMatcher(api_key, db_csv)
-
-@app.post("/match")
-def match_item(query: str):
-    return matcher.match(query)
-
-@app.post("/process")
-def process_file(file: UploadFile):
-    df, stats = matcher.process_excel(file.filename)
-    return {"stats": stats}
-```
-
-Запуск:
-```bash
-pip install fastapi uvicorn
-uvicorn api:app --host 0.0.0.0 --port 8000
-```
-
-### Docker контейнеризация
-
-```dockerfile
-FROM python:3.11-slim
-
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt
-
-COPY . .
-
-CMD ["streamlit", "run", "app.py", "--server.port=8502"]
-```
-
----
-
-## 📝 Логирование
-
-Логи писываются в `matcher.log` (настроить в `matcher.py`):
-
-```python
-# DEBUG: поиск в Gemini
-# INFO: результат найден
-# WARNING: результат не найден
-# ERROR: ошибка API
-```
-
----
-
-## 📞 Поддержка
-
-При проблемах проверить:
-
-1. **Логи**: Изучить вывод в терминале
-2. **Кэш**: Очистить `matcher_cache.db` и переобработать
-3. **API ключ**: Проверить актуальность в Google Cloud
-4. **Версии**: Убедиться что установлены правильные версии (см. requirements.txt)
-
----
-
-## 📄 Лицензия
-
-Внутреннее использование. Авторское право ReMo.
-
----
-
-**Версия:** 1.0  
-**Дата:** Февраль 2026  
-**Разработчик:** Data Engineering Team
+## Troubleshooting
+
+### Поисковая БД не готова
+- Сначала соберите merged catalog.
+- Затем нажмите `🪶 Обновить поисковую БД`.
+
+### `result.csv` и workbook diagnostics расходятся
+На новых прогонах они должны быть синхронизированы автоматически.
+Если это historical run, пересчитайте аудит и диагностику вручную из UI.
+
+### Прогресс кажется “застывшим”
+- Проверьте, включено ли автообновление статуса.
+- На повторных прогонах matcher теперь приоритизирует cache-hit и более легкие задачи, поэтому счетчик должен двигаться заметно раньше.
+
+### Cloudflare R2 export не работает
+Проверьте:
+- `CLOUDFLARE_R2_ACCOUNT_ID`
+- `CLOUDFLARE_R2_BUCKET`
+- `CLOUDFLARE_R2_ACCESS_KEY_ID`
+- `CLOUDFLARE_R2_SECRET_ACCESS_KEY`
+
+## Лицензия / заметка по эксплуатации
+
+README описывает текущее рабочее состояние проекта, а не “идеальную архитектуру в вакууме”.
+Если вы меняете matcher policy, taxonomy или search storage, обновляйте README одновременно с кодом: в этом проекте это реально важно, потому что UI, run-артефакты и operational flow тесно связаны.
