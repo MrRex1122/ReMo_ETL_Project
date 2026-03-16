@@ -417,6 +417,78 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.assertEqual(len(filtered), 1)
         self.assertIn("органайзер", filtered[0]["normalized_name"])
 
+    def test_whole_category_secondary_filter_narrows_bulk_twisted_pair_by_markers(self):
+        features = self.matcher._extract_query_features(
+            "Кабель витая пара, LSZH, неэкранированный, категория 6, внешний"
+        )
+        candidates = [
+            {
+                "name": "Кабель витая пара cat6 U/UTP LSZH outdoor 305m",
+                "normalized_name": "кабель витая пара cat6 u/utp lszh outdoor 305m",
+                "branch_path": "телеком > кабели > витая пара > cat6",
+                "entity_type": "bulk_twisted_pair",
+                "item_markers": {"category": "cat6", "shielding": "utp", "cable_environment": "outdoor"},
+            },
+            {
+                "name": "Кабель витая пара cat6 U/UTP LSZH indoor 305m",
+                "normalized_name": "кабель витая пара cat6 u/utp lszh indoor 305m",
+                "branch_path": "телеком > кабели > витая пара > cat6",
+                "entity_type": "bulk_twisted_pair",
+                "item_markers": {"category": "cat6", "shielding": "utp", "cable_environment": "indoor"},
+            },
+            {
+                "name": "Кабель витая пара cat6a U/UTP LSZH outdoor 305m",
+                "normalized_name": "кабель витая пара cat6a u/utp lszh outdoor 305m",
+                "branch_path": "телеком > кабели > витая пара > cat6",
+                "entity_type": "bulk_twisted_pair",
+                "item_markers": {"category": "cat6a", "shielding": "utp", "cable_environment": "outdoor"},
+            },
+            {
+                "name": "Кабель витая пара cat6 F/UTP LSZH outdoor 305m",
+                "normalized_name": "кабель витая пара cat6 f/utp lszh outdoor 305m",
+                "branch_path": "телеком > кабели > витая пара > cat6",
+                "entity_type": "bulk_twisted_pair",
+                "item_markers": {"category": "cat6", "shielding": "ftp", "cable_environment": "outdoor"},
+            },
+        ]
+
+        filtered = self.matcher._apply_whole_category_secondary_filter(features, candidates)
+
+        self.assertEqual(len(filtered), 1)
+        self.assertIn("u/utp", filtered[0]["normalized_name"])
+        self.assertIn("outdoor", filtered[0]["normalized_name"])
+
+    def test_whole_category_secondary_filter_narrows_brush_panel_by_entry_signal(self):
+        features = self.matcher._extract_query_features("Щеточный ввод для ввода кабеля")
+        candidates = [
+            {
+                "name": "Щеточный ввод для ввода кабеля 1U",
+                "normalized_name": "щеточный ввод для ввода кабеля 1u",
+                "branch_path": "телеком > аксессуары > шкафные аксессуары",
+                "entity_type": "rack_brush_panel",
+                "item_markers": {"mount_kind": "brush_panel", "rack_unit": "1"},
+            },
+            {
+                "name": "Щеточная панель 1U 19 inch",
+                "normalized_name": "щеточная панель 1u 19 inch",
+                "branch_path": "телеком > аксессуары > шкафные аксессуары",
+                "entity_type": "rack_brush_panel",
+                "item_markers": {"mount_kind": "brush_panel", "rack_unit": "1"},
+            },
+            {
+                "name": "Панель-заглушка 1U 19 inch",
+                "normalized_name": "панель заглушка 1u 19 inch",
+                "branch_path": "телеком > аксессуары > шкафные аксессуары",
+                "entity_type": "rack_blank_panel",
+                "item_markers": {"mount_kind": "blank_panel", "rack_unit": "1"},
+            },
+        ]
+
+        filtered = self.matcher._apply_whole_category_secondary_filter(features, candidates)
+
+        self.assertEqual(len(filtered), 1)
+        self.assertIn("ввод", filtered[0]["normalized_name"])
+
     def test_duckdb_whole_category_queries_do_not_use_free_gemini_without_candidates(self):
         self.matcher._uses_duckdb_query_backend = lambda: True
         features = self.matcher._extract_query_features("Заглушка для управления потоком воздуха")

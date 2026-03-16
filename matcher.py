@@ -704,41 +704,227 @@ class ReMoMatcher:
 
         return groups
 
+    def _candidate_secondary_filter_haystack(self, item: Dict[str, Any]) -> str:
+        return self._normalize_text(
+            " ".join(
+                filter(
+                    None,
+                    [
+                        self._clean_text_value(item.get("name")),
+                        self._clean_text_value(item.get("normalized_name")),
+                    ],
+                )
+            )
+        )
+
+    def _apply_optional_secondary_filter(
+        self,
+        candidates: List[Dict[str, Any]],
+        predicate: Callable[[Dict[str, Any]], bool],
+    ) -> List[Dict[str, Any]]:
+        if not candidates:
+            return candidates
+        filtered = [item for item in candidates if predicate(item)]
+        return filtered if filtered else candidates
+
+    def _bulk_twisted_pair_secondary_filter(
+        self,
+        query_features: Dict[str, Any],
+        candidates: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        filtered = candidates
+        markers = query_features.get("markers", {}) or {}
+        normalized_query = self._normalize_text(self._clean_text_value(query_features.get("original_text")))
+        query_category = self._clean_text_value(markers.get("category"))
+        query_shielding = self._clean_text_value(markers.get("shielding"))
+        query_environment = self._clean_text_value(markers.get("cable_environment"))
+
+        if query_category:
+            filtered = self._apply_optional_secondary_filter(
+                filtered,
+                lambda item: (
+                    self._clean_text_value((item.get("item_markers") or {}).get("category")) == query_category
+                    if self._clean_text_value((item.get("item_markers") or {}).get("category"))
+                    else bool(
+                        re.search(
+                            rf"\b{re.escape(query_category)}\b",
+                            self._candidate_secondary_filter_haystack(item),
+                            flags=re.IGNORECASE,
+                        )
+                    )
+                ),
+            )
+
+        if query_shielding:
+            shielding_patterns = {
+                "utp": (
+                    r"(?<![a-z])u\s*/\s*utp\b",
+                    r"(?<![a-z])u\s+utp\b",
+                    r"неэкранир",
+                    r"(?<![a-z/])utp\b",
+                ),
+                "ftp": (
+                    r"(?<![a-z])f\s*/\s*utp\b",
+                    r"(?<![a-z])f\s+utp\b",
+                    r"(?<![a-z])ftp\b",
+                ),
+                "sftp": (
+                    r"(?<![a-z])s\s*/\s*ftp\b",
+                    r"(?<![a-z])sftp\b",
+                    r"(?<![a-z])sf\s*/\s*utp\b",
+                    r"(?<![a-z])f\s*/\s*ftp\b",
+                ),
+                "shielded": (
+                    r"(?<![a-z])s\s*/\s*ftp\b",
+                    r"(?<![a-z])sftp\b",
+                    r"(?<![a-z])sf\s*/\s*utp\b",
+                    r"(?<![a-z])f\s*/\s*ftp\b",
+                    r"(?<![a-z])f\s*/\s*utp\b",
+                    r"(?<![a-z])f\s+utp\b",
+                    r"(?<![a-z])ftp\b",
+                    r"экранир",
+                ),
+            }
+
+            def _shielding_matches(item: Dict[str, Any]) -> bool:
+                item_shielding = self._clean_text_value((item.get("item_markers") or {}).get("shielding"))
+                if query_shielding == "shielded":
+                    if item_shielding:
+                        return item_shielding in {"ftp", "sftp", "shielded"}
+                elif item_shielding:
+                    return item_shielding == query_shielding
+                haystack = self._candidate_secondary_filter_haystack(item)
+                return any(
+                    re.search(pattern, haystack, flags=re.IGNORECASE)
+                    for pattern in shielding_patterns.get(query_shielding, ())
+                )
+
+            filtered = self._apply_optional_secondary_filter(filtered, _shielding_matches)
+
+        if query_environment == "outdoor":
+            filtered = self._apply_optional_secondary_filter(
+                filtered,
+                lambda item: (
+                    self._clean_text_value((item.get("item_markers") or {}).get("cable_environment")) == "outdoor"
+                    if self._clean_text_value((item.get("item_markers") or {}).get("cable_environment"))
+                    else any(
+                        token in self._candidate_secondary_filter_haystack(item)
+                        for token in ("outdoor", "внешн", "наружн", "улич")
+                    )
+                ),
+            )
+
+        if "lszh" in normalized_query:
+            filtered = self._apply_optional_secondary_filter(
+                filtered,
+                lambda item: "lszh" in self._candidate_secondary_filter_haystack(item),
+            )
+
+        return filtered
+
+    def _rack_accessory_secondary_filter(
+        self,
+        query_features: Dict[str, Any],
+        candidates: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        filtered = candidates
+        markers = query_features.get("markers", {}) or {}
+        normalized_query = self._normalize_text(self._clean_text_value(query_features.get("original_text")))
+        query_mount = self._clean_text_value(markers.get("mount_kind"))
+        query_rack_unit = self._clean_text_value(markers.get("rack_unit"))
+
+        if query_mount:
+            mount_text_tokens = {
+                "brush_panel": ("щеточ",),
+                "blank_panel": ("заглуш", "blanking", "blank panel"),
+                "shelf": ("полк", "shelf"),
+                "rail": ("рельс", "rail", "направля"),
+            }
+            filtered = self._apply_optional_secondary_filter(
+                filtered,
+                lambda item: (
+                    self._clean_text_value((item.get("item_markers") or {}).get("mount_kind")) == query_mount
+                    or any(
+                        token in self._candidate_secondary_filter_haystack(item)
+                        for token in mount_text_tokens.get(query_mount, ())
+                    )
+                ),
+            )
+
+        if query_rack_unit and query_rack_unit != "zero u":
+            filtered = self._apply_optional_secondary_filter(
+                filtered,
+                lambda item: (
+                    self._clean_text_value((item.get("item_markers") or {}).get("rack_unit")) == query_rack_unit
+                    or any(
+                        token in self._candidate_secondary_filter_haystack(item)
+                        for token in (f"{query_rack_unit}u", f"{query_rack_unit} u")
+                    )
+                ),
+            )
+
+        if query_mount == "brush_panel" and "ввод" in normalized_query:
+            filtered = self._apply_optional_secondary_filter(
+                filtered,
+                lambda item: any(
+                    token in self._candidate_secondary_filter_haystack(item)
+                    for token in ("ввод", "ввода", "cable entry", "entry panel")
+                ),
+            )
+
+        if query_mount == "brush_panel" and "кабел" in normalized_query:
+            filtered = self._apply_optional_secondary_filter(
+                filtered,
+                lambda item: any(
+                    token in self._candidate_secondary_filter_haystack(item)
+                    for token in ("кабел", "cable")
+                ),
+            )
+
+        if query_mount == "blank_panel" and ("свободн" in normalized_query or "юнит" in normalized_query):
+            filtered = self._apply_optional_secondary_filter(
+                filtered,
+                lambda item: any(
+                    token in self._candidate_secondary_filter_haystack(item)
+                    for token in ("свободн", "юнит", "blanking", "blank panel")
+                ),
+            )
+
+        return filtered
+
     def _apply_whole_category_secondary_filter(
         self,
         query_features: Dict[str, Any],
         candidates: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
+        original_count = len(candidates)
+        filtered = candidates
         groups = self._whole_category_secondary_filter_groups(query_features)
-        if not groups or not candidates:
-            return candidates
+        if groups and filtered:
+            group_filtered: List[Dict[str, Any]] = []
+            for item in filtered:
+                haystack = self._candidate_secondary_filter_haystack(item)
+                if all(any(term in haystack for term in group) for group in groups):
+                    group_filtered.append(item)
+            if group_filtered:
+                filtered = group_filtered
 
-        filtered: List[Dict[str, Any]] = []
-        for item in candidates:
-            haystack = self._normalize_text(
-                " ".join(
-                    filter(
-                        None,
-                        [
-                            self._clean_text_value(item.get("name")),
-                            self._clean_text_value(item.get("normalized_name")),
-                        ],
-                    )
-                )
-            )
-            if all(any(term in haystack for term in group) for group in groups):
-                filtered.append(item)
+        family = self._entity_family(query_features.get("entity_type", ""))
+        if family == "bulk_twisted_pair" and filtered:
+            filtered = self._bulk_twisted_pair_secondary_filter(query_features, filtered)
+        elif family == "rack_accessory_strict" and filtered:
+            filtered = self._rack_accessory_secondary_filter(query_features, filtered)
 
-        if filtered:
+        if filtered and len(filtered) != original_count:
             logger.info(
                 "🧠 Whole-category secondary filter: query=%s family=%s before=%s after=%s",
                 self._clean_text_value(query_features.get("original_text"))[:120],
-                self._entity_family(query_features.get("entity_type", "")) or "other",
-                len(candidates),
+                family or "other",
+                original_count,
                 len(filtered),
             )
             return filtered
-        return candidates
+        return filtered
 
     def _should_query_gemini_without_candidates(self, query_features: Dict[str, Any]) -> bool:
         if self._clean_text_value(query_features.get("row_type")) != "item":
