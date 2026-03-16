@@ -1836,7 +1836,7 @@ def main():
             st.slider(
                 "Параллельных строк matcher",
                 min_value=1,
-                max_value=10,
+                max_value=25,
                 step=1,
                 key="matcher_parallel_requests",
                 help="Сколько строк matcher обрабатывает одновременно. Ускоряет прогон, но повышает нагрузку на Gemini API и CPU.",

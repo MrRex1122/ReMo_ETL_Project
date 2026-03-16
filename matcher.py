@@ -292,7 +292,7 @@ class ReMoMatcher:
         self.client = None
         self.legacy_genai = None
         self.model_name: str | None = None
-        self.parallel_requests = min(10, max(1, int(parallel_requests or get_matcher_parallel_requests())))
+        self.parallel_requests = min(25, max(1, int(parallel_requests or get_matcher_parallel_requests())))
         self.catalog_sample_items = max(50, int(catalog_sample_items))
         self.match_mode = self._sanitize_match_mode(match_mode)
         self.gemini_shortlist_limit = self._sanitize_int_setting(
