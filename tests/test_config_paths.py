@@ -73,9 +73,9 @@ class ConfigPathTests(unittest.TestCase):
             config.DEFAULT_MATCHER_PARALLEL_REQUESTS,
         )
 
-    def test_matcher_parallel_requests_default_is_six(self):
+    def test_matcher_parallel_requests_default_is_ten(self):
         os.environ.pop("REMO_MATCHER_PARALLEL_REQUESTS", None)
-        self.assertEqual(config.get_matcher_parallel_requests(), 6)
+        self.assertEqual(config.get_matcher_parallel_requests(), 10)
 
     def test_matcher_cache_db_path_uses_env_override(self):
         os.environ["REMO_MATCHER_CACHE_DB"] = "cache/custom.db"
