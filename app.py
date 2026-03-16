@@ -45,6 +45,7 @@ from config import (
     get_matcher_gemini_max_chunks,
     get_matcher_gemini_shortlist_limit,
     get_matcher_local_recall_pool,
+    get_matcher_parallel_requests,
     get_matcher_skip_weak_shortlist,
     get_upload_dir,
 )
@@ -148,7 +149,7 @@ if 'db_csv_path' not in st.session_state:
 if 'matcher_db_csv' not in st.session_state:
     st.session_state.matcher_db_csv = None
 if 'matcher_parallel_requests' not in st.session_state:
-    st.session_state.matcher_parallel_requests = 1
+    st.session_state.matcher_parallel_requests = get_matcher_parallel_requests()
 if 'matcher_mode' not in st.session_state:
     st.session_state.matcher_mode = 'exact'
 if 'matcher_gemini_shortlist_limit' not in st.session_state:
@@ -372,7 +373,7 @@ def _safe_matcher_mode_select(current_mode: str, mode_options: list[str]) -> str
 
 def _current_matcher_runtime_settings() -> dict[str, Any]:
     return {
-        "parallel_requests": int(st.session_state.get('matcher_parallel_requests', 1)),
+        "parallel_requests": int(st.session_state.get('matcher_parallel_requests', get_matcher_parallel_requests())),
         "match_mode": str(st.session_state.get('matcher_mode', 'exact')),
         "gemini_shortlist_limit": int(
             st.session_state.get('matcher_gemini_shortlist_limit', get_matcher_gemini_shortlist_limit())
@@ -401,7 +402,7 @@ def _create_matcher_instance(db_csv: str, settings: dict[str, Any]) -> ReMoMatch
     return ReMoMatcher(
         api_key,
         db_csv,
-        parallel_requests=int(settings.get("parallel_requests", 1)),
+        parallel_requests=int(settings.get("parallel_requests", get_matcher_parallel_requests())),
         match_mode=str(settings.get("match_mode", "exact")),
         gemini_shortlist_limit=int(settings.get("gemini_shortlist_limit", get_matcher_gemini_shortlist_limit())),
         gemini_chunk_size=int(settings.get("gemini_chunk_size", get_matcher_gemini_chunk_size())),
@@ -1778,9 +1779,10 @@ def main():
                 )
 
         st.subheader("2️⃣ Тонкая настройка matcher")
+        parallel_requests = int(st.session_state.get("matcher_parallel_requests", get_matcher_parallel_requests()))
         st.info(
-            "Параллелизм установлен на максимум: одновременно отправляется число запросов, "
-            "равное числу позиций в файле."
+            f"Текущий параллелизм matcher: до {parallel_requests} строк одновременно. "
+            "Это главный рычаг ускорения, если Gemini и сеть выдерживают нагрузку."
         )
         st.success("Активный режим retrieval: `DuckDB whole-category retrieval by derived branch`.")
         st.caption(
@@ -1791,6 +1793,14 @@ def main():
             st.caption(
                 "Эти параметры больше не являются основным retrieval-механизмом в DuckDB-режиме, "
                 "но остаются полезными для fallback и Gemini chunking."
+            )
+            st.slider(
+                "Параллельных строк matcher",
+                min_value=1,
+                max_value=10,
+                step=1,
+                key="matcher_parallel_requests",
+                help="Сколько строк matcher обрабатывает одновременно. Ускоряет прогон, но повышает нагрузку на Gemini API и CPU.",
             )
             st.slider(
                 "Кандидатов для Gemini",
