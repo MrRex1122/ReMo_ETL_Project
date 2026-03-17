@@ -959,14 +959,23 @@ class ReMoMatcher:
         self,
         gemini_result: Dict[str, Any],
         compatible_entries: List[Dict[str, Any]],
+        query_features: Dict[str, Any],
         retrieval_mode: str,
     ) -> bool:
         compatibility = self._clean_text_value(gemini_result.get("compatibility_status"))
         if compatibility != "weakly_compatible":
             return True
+        if self._should_reject_weak_resolution_in_exact_mode(query_features):
+            return False
         if retrieval_mode == "whole_category" and compatible_entries:
             return False
         return True
+
+    def _should_reject_weak_resolution_in_exact_mode(self, query_features: Dict[str, Any]) -> bool:
+        if getattr(self, "match_mode", MATCH_MODE_EXACT) != MATCH_MODE_EXACT:
+            return False
+        query_family = self._entity_family(query_features.get("entity_type", ""))
+        return query_family in {"cable", "wire", "coax", "bulk_twisted_pair"}
 
     def _duckdb_category_candidates(self, query_features: Dict[str, Any]) -> Tuple[str, List[Dict[str, Any]], float]:
         branch_paths = [path for path in self._default_branch_paths_for_family(query_features) if path and path != "прочее"]
@@ -3608,17 +3617,28 @@ class ReMoMatcher:
                 return result
             return None
         matched_item = self._lookup_catalog_item_by_name(found_name, candidate_pool=shortlist)
-        if strictness == "strict" and str(result.get("compatibility_status") or "").strip() == "weakly_compatible":
+        reject_weak_exact = self._should_reject_weak_resolution_in_exact_mode(query_features)
+        if str(result.get("compatibility_status") or "").strip() == "weakly_compatible" and (
+            strictness == "strict" or reject_weak_exact
+        ):
             return self._build_missing_result(
                 query,
                 "Gemini нашел только частично совместимый кандидат; для этой позиции требуется строго совместимое совпадение.",
                 compatibility_status="unresolved_no_compatible_candidates",
-                incompatibility_reason="strict_class_requires_compatible_match",
+                incompatibility_reason=(
+                    "exact_mode_requires_compatible_match"
+                    if reject_weak_exact and strictness != "strict"
+                    else "strict_class_requires_compatible_match"
+                ),
                 gemini_shortlist_count=len(shortlist),
                 gemini_visible_candidates=visible_candidates,
                 gemini_truncated_candidates=truncated_candidates,
                 gemini_model=str(result.get("gemini_model") or ""),
-                gemini_result_status="weakly_compatible_rejected_strict",
+                gemini_result_status=(
+                    "weakly_compatible_rejected_exact_mode"
+                    if reject_weak_exact and strictness != "strict"
+                    else "weakly_compatible_rejected_strict"
+                ),
             )
         if matched_item and not self._is_gemini_result_family_valid(query_features, matched_item):
             query_family = self._entity_family(query_features.get("entity_type", ""))
@@ -4128,7 +4148,12 @@ class ReMoMatcher:
                         }
                     )
             if gemini_result:
-                if not self._should_accept_weak_gemini_result(gemini_result, compatible_entries_all, retrieval_mode):
+                if not self._should_accept_weak_gemini_result(
+                    gemini_result,
+                    compatible_entries_all,
+                    query_features,
+                    retrieval_mode,
+                ):
                     logger.info(
                         "🧠 Weak Gemini result rejected in favor of local compatible candidates: query=%s compatible=%s retrieval_mode=%s",
                         query_text[:120],
@@ -4282,7 +4307,7 @@ class ReMoMatcher:
                 )
                 return _finalize(result, stage_of_failure="resolved", reason_code="resolved")
 
-            if strictness != "strict" and best_weak is not None:
+            if best_weak is not None and not self._should_reject_weak_resolution_in_exact_mode(query_features):
                 trace_steps.append({"stage": "fallback_policy", "status": "accepted", "fallback": "weak_compatible_fallback"})
                 weak_reason = self._explain_incompatibility(query_features, best_weak["item"]) or "weak_compatible_shortlist"
                 result = self._build_result_from_item(
@@ -4304,6 +4329,14 @@ class ReMoMatcher:
                     "weak_compatible_fallback",
                 )
                 return _finalize(result, stage_of_failure="resolved", reason_code="resolved")
+            if best_weak is not None:
+                trace_steps.append(
+                    {
+                        "stage": "fallback_policy",
+                        "status": "rejected",
+                        "reason_code": "weakly_compatible_rejected_exact_mode",
+                    }
+                )
 
             trace_steps.append(
                 {

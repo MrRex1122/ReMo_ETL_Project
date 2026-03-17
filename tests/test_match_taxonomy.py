@@ -40,6 +40,10 @@ class MatchTaxonomyTests(unittest.TestCase):
             self.matcher,
             ReMoMatcher,
         )
+        self.matcher._should_reject_weak_resolution_in_exact_mode = ReMoMatcher._should_reject_weak_resolution_in_exact_mode.__get__(
+            self.matcher,
+            ReMoMatcher,
+        )
         self.matcher._should_use_whole_category_retrieval = ReMoMatcher._should_use_whole_category_retrieval.__get__(self.matcher, ReMoMatcher)
         self.matcher._whole_category_secondary_filter_groups = ReMoMatcher._whole_category_secondary_filter_groups.__get__(self.matcher, ReMoMatcher)
         self.matcher._apply_whole_category_secondary_filter = ReMoMatcher._apply_whole_category_secondary_filter.__get__(self.matcher, ReMoMatcher)
@@ -566,6 +570,27 @@ class MatchTaxonomyTests(unittest.TestCase):
 
         self.assertEqual(reason, "")
 
+    def test_exact_mode_rejects_weak_resolution_for_cable_family(self):
+        self.matcher.match_mode = "exact"
+        features = self.matcher._extract_query_features("Кабель ВВГнг(A)-LS 4x4")
+
+        self.assertTrue(self.matcher._should_reject_weak_resolution_in_exact_mode(features))
+
+    def test_analog_mode_allows_weak_resolution_for_cable_family(self):
+        self.matcher.match_mode = "analog"
+        features = self.matcher._extract_query_features("Кабель ВВГнг(A)-LS 4x4")
+
+        self.assertFalse(self.matcher._should_reject_weak_resolution_in_exact_mode(features))
+
+    def test_weak_gemini_result_rejected_for_exact_mode_cable_query(self):
+        self.matcher.match_mode = "exact"
+        features = self.matcher._extract_query_features("Кабель ВВГнг(A)-LS 4x4")
+        gemini_result = {"compatibility_status": "weakly_compatible"}
+
+        accepted = self.matcher._should_accept_weak_gemini_result(gemini_result, [], features, "heuristic_fallback")
+
+        self.assertFalse(accepted)
+
     def test_duckdb_whole_category_queries_do_not_use_free_gemini_without_candidates(self):
         self.matcher._uses_duckdb_query_backend = lambda: True
         features = self.matcher._extract_query_features("Заглушка для управления потоком воздуха")
@@ -576,11 +601,13 @@ class MatchTaxonomyTests(unittest.TestCase):
     def test_weak_gemini_result_is_rejected_when_local_compatible_candidates_exist(self):
         gemini_result = {"compatibility_status": "weakly_compatible"}
         compatible_entries = [{"item": {"name": "Органайзер 1U"}, "score": 0.81}]
+        features = self.matcher._extract_query_features('Горизонтальный кабельный органайзер 19" в шкаф')
 
         self.assertFalse(
             self.matcher._should_accept_weak_gemini_result(
                 gemini_result,
                 compatible_entries,
+                features,
                 "whole_category",
             )
         )
