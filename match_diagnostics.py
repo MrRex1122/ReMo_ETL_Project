@@ -6,7 +6,7 @@ from typing import Any
 
 import pandas as pd
 
-MATCH_DIAGNOSTICS_VERSION = 4
+MATCH_DIAGNOSTICS_VERSION = 5
 MISSING_POSITION_TEXT = "Позиция отсутствует"
 
 HEADER_QUERY_VALUES = {
@@ -516,6 +516,10 @@ def reconstruct_match_diagnostics(
                 "entity_type": "",
                 "query_family": query_family,
                 "resolution_source": _clean_text_value(row.get("Источник решения")),
+                "query_article": "",
+                "article_source": "none",
+                "article_lookup_hit": False,
+                "article_lookup_conflict": False,
                 "compatibility_status": _clean_text_value(row.get("Совместимость решения")),
                 "incompatibility_reason": _clean_text_value(row.get("Причина несовместимости")),
                 "pipeline_stage": stage_of_failure,
@@ -589,6 +593,10 @@ def prepare_match_diagnostics_table(payload: dict[str, Any]) -> pd.DataFrame:
                 "Family": row.get("query_family"),
                 "Pipeline stage": row.get("pipeline_stage") or row.get("stage_of_failure"),
                 "Pipeline reason": row.get("pipeline_reason_code") or row.get("reason_code"),
+                "Query article": row.get("query_article"),
+                "Article source": row.get("article_source"),
+                "Article hit": row.get("article_lookup_hit"),
+                "Article conflict": row.get("article_lookup_conflict"),
                 "Root cause class": row.get("root_cause_class") or row.get("reason_class"),
                 "Root cause code": row.get("root_cause_code") or row.get("reason_code"),
                 "Coverage scope": row.get("coverage_scope"),

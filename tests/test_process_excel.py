@@ -1,5 +1,6 @@
 import os
 import tempfile
+import threading
 import unittest
 
 import pandas as pd
@@ -12,7 +13,8 @@ class DummyMatcher(ReMoMatcher):
 
     def __init__(self):
         # Skip parent initialization (API, catalog, cache).
-        pass
+        self._match_context_local = threading.local()
+        self.parallel_requests = 1
 
     def match(self, query: str, use_cache: bool = True):
         if query == "Позиция 1":
@@ -33,6 +35,38 @@ class DummyMatcher(ReMoMatcher):
             "from_cache": False,
             "success": True,
             "error": None,
+        }
+
+
+class ContextAwareDummyMatcher(DummyMatcher):
+    def match(self, query: str, use_cache: bool = True):
+        context = self._current_match_input_context()
+        query_article = context.get("query_article") or None
+        article_source = context.get("article_source") or "none"
+        return {
+            "found_name": f"FOUND::{query}",
+            "price": 42.0,
+            "article": query_article,
+            "similarity_score": 1.0 if query_article else 0.9,
+            "from_cache": False,
+            "success": True,
+            "error": None,
+            "reason": "",
+            "category_path": None,
+            "confidence_level": "high",
+            "requires_review": "нет",
+            "alternatives": "",
+            "resolution_source": "article_exact" if article_source == "column" else (
+                "article_extracted_exact" if article_source == "text" else "name_exact"
+            ),
+            "compatibility_status": "compatible",
+            "incompatibility_reason": "",
+            "stage_of_failure": "resolved",
+            "reason_code": "resolved",
+            "reason_class": "resolved",
+            "gemini_shortlist_count": 0,
+            "gemini_visible_candidates": 0,
+            "gemini_truncated_candidates": 0,
         }
 
 
@@ -152,6 +186,39 @@ class ProcessExcelExistingColumnsTests(unittest.TestCase):
         self.assertEqual(stats.get("processed"), 1)
         self.assertEqual(result_df.loc[0, "Найденная номенклатура"], "Номенклатура 1")
         self.assertTrue(pd.isna(result_df.loc[1, "Найденная номенклатура"]))
+
+    def test_process_excel_promotes_embedded_header_row_and_detects_article_column(self):
+        self.matcher = ContextAwareDummyMatcher()
+        df = pd.DataFrame(
+            [
+                ["№", "Наименование", "Артикул", "Ед. изм"],
+                [1, "Кабель силовой", "ART-100", "м"],
+            ],
+            columns=["Unnamed: 0", "Unnamed: 1", "Unnamed: 2", "Unnamed: 3"],
+        )
+
+        result_df, stats = self._run_process(df)
+
+        self.assertEqual(stats["input_query_column"], "Наименование")
+        self.assertEqual(stats["input_article_column"], "Артикул")
+        self.assertEqual(result_df.loc[0, "Найденная номенклатура"], "FOUND::Кабель силовой")
+        self.assertEqual(result_df.loc[0, "Артикул"], "ART-100")
+        self.assertEqual(result_df.loc[0, "Источник решения"], "article_exact")
+
+    def test_process_excel_extracts_article_from_text_when_article_column_is_missing(self):
+        self.matcher = ContextAwareDummyMatcher()
+        df = pd.DataFrame(
+            {
+                "Наименование": ["Кабель, артикул ART-200"],
+            }
+        )
+
+        result_df, stats = self._run_process(df)
+
+        self.assertEqual(stats["input_query_column"], "Наименование")
+        self.assertEqual(stats["input_article_column"], "")
+        self.assertEqual(result_df.loc[0, "Артикул"], "ART-200")
+        self.assertEqual(result_df.loc[0, "Источник решения"], "article_extracted_exact")
 
 
 if __name__ == "__main__":

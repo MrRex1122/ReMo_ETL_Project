@@ -1,6 +1,6 @@
 import unittest
 
-from matcher import MATCH_MODE_ANALOG, MATCH_MODE_EXACT, ReMoMatcher
+from matcher import MATCH_MODE_ANALOG, MATCH_MODE_ASSEMBLY, MATCH_MODE_EXACT, ReMoMatcher
 
 
 class MatchModesTests(unittest.TestCase):
@@ -33,6 +33,9 @@ class MatchModesTests(unittest.TestCase):
             "Витая пара U/UTP кат 5e 4x2xAWG24 Standart Cu PVC IN 305м",
         )
         self.assertTrue(blocked)
+
+    def test_sanitize_match_mode_accepts_assembly(self):
+        self.assertEqual(self.matcher._sanitize_match_mode("assembly"), MATCH_MODE_ASSEMBLY)
 
 
 if __name__ == "__main__":

@@ -1,12 +1,15 @@
 import os
+import sqlite3
 import tempfile
 import threading
 import unittest
+from unittest import mock
 from pathlib import Path
 
 import pandas as pd
 
 from processing_runs import (
+    _execute_write_with_retry,
     build_run_artifacts,
     create_processing_run,
     get_processing_run_cancel_event,
@@ -225,6 +228,18 @@ class ProcessingRunsTests(unittest.TestCase):
             stop_event.set()
             worker.join(timeout=1.0)
             unregister_processing_run_thread(run.run_id)
+
+    def test_locked_processing_run_write_can_be_swallowed(self):
+        with mock.patch("processing_runs.SQLITE_LOCK_RETRY_ATTEMPTS", 1), mock.patch(
+            "processing_runs.SQLITE_LOCK_RETRY_DELAY_SEC", 0
+        ):
+            result = _execute_write_with_retry(
+                lambda _conn: (_ for _ in ()).throw(sqlite3.OperationalError("database is locked")),
+                description="test_locked_write",
+                swallow_errors=True,
+            )
+
+        self.assertIsNone(result)
 
 
 if __name__ == "__main__":

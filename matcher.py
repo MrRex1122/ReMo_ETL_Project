@@ -78,6 +78,7 @@ logger = logging.getLogger(__name__)
 MISSING_POSITION_TEXT = "Позиция отсутствует"
 MATCH_MODE_EXACT = "exact"
 MATCH_MODE_ANALOG = "analog"
+MATCH_MODE_ASSEMBLY = "assembly"
 BRANCH_PATH_SEPARATOR = " > "
 TOP_BRANCH_COUNT = 3
 DEFAULT_TAXONOMY_RULES_PATH = Path(__file__).with_name("taxonomy_rules.json")
@@ -271,6 +272,7 @@ class ReMoMatcher:
         self.catalog: pd.DataFrame | None = None
         self.catalog_dict: Dict[str, Dict[str, Any]] = {}
         self.catalog_normalized_dict: Dict[str, Dict[str, Any]] = {}
+        self.catalog_article_dict: Dict[str, Dict[str, Any]] = {}
         self.catalog_items: List[Dict[str, Any]] = []
         self.token_index: Dict[str, List[Dict[str, Any]]] = {}
         self.group_index: Dict[str, List[Dict[str, Any]]] = {}
@@ -289,6 +291,7 @@ class ReMoMatcher:
         self.matcher_init_ms = 0.0
         self._duckdb_path: str | None = None
         self._duckdb_local = threading.local()
+        self._match_context_local = threading.local()
         self.client = None
         self.legacy_genai = None
         self.model_name: str | None = None
@@ -404,7 +407,7 @@ class ReMoMatcher:
 
     def _sanitize_match_mode(self, value: str | None) -> str:
         mode = str(value or "").strip().lower()
-        if mode in {MATCH_MODE_EXACT, MATCH_MODE_ANALOG}:
+        if mode in {MATCH_MODE_EXACT, MATCH_MODE_ANALOG, MATCH_MODE_ASSEMBLY}:
             return mode
         return MATCH_MODE_EXACT
 
@@ -589,6 +592,25 @@ class ReMoMatcher:
         column = self._quote_sql_identifier(CANONICAL_NAME_COLUMN)
         items = self._duckdb_fetch_items(where_sql=f"lower({column}) = ?", params=[normalized_name], limit=1)
         return items[0] if items else None
+
+    def _lookup_catalog_item_by_article(self, article: str) -> Dict[str, Any] | None:
+        article_key = self._normalize_article_lookup_value(article)
+        if not article_key:
+            return None
+        cached = (getattr(self, "catalog_article_dict", {}) or {}).get(article_key)
+        if cached is not None:
+            return cached
+        if not self._uses_duckdb_query_backend():
+            return None
+        column = self._quote_sql_identifier(CANONICAL_ARTICLE_COLUMN)
+        items = self._duckdb_fetch_items(
+            where_sql=f"regexp_replace(lower(trim({column})), '\\s+', ' ', 'g') = ?",
+            params=[article_key],
+            limit=2,
+        )
+        if len(items) == 1:
+            return items[0]
+        return None
 
     def _lookup_catalog_item_by_normalized_name(self, normalized_name: str) -> Dict[str, Any] | None:
         cleaned = self._clean_text_value(normalized_name)
@@ -1105,6 +1127,168 @@ class ReMoMatcher:
     @staticmethod
     def _clean_text_value(value: object) -> str:
         return shared_clean_text_value(value)
+
+    def _normalize_article_lookup_value(self, value: object) -> str:
+        cleaned = self._clean_text_value(value)
+        if not cleaned:
+            return ""
+        return re.sub(r"\s+", " ", cleaned).strip().lower()
+
+    def _extract_query_article_from_text(self, query: str) -> str:
+        cleaned_query = self._clean_text_value(query)
+        if not cleaned_query:
+            return ""
+        collapsed = re.sub(r"\s+", " ", cleaned_query).strip()
+        patterns = (
+            r"(?:^|[\s,;/\(\)])(?:артикул|арт\.?|sku|part\s*number|partnumber|vendor\s*code)\s*[:№#-]?\s*(.+?)\s*$",
+        )
+        for pattern in patterns:
+            match = re.search(pattern, collapsed, flags=re.IGNORECASE)
+            if not match:
+                continue
+            article = re.sub(r"\s+", " ", match.group(1)).strip(" \t\r\n,;:.")
+            if article:
+                return article
+        return ""
+
+    @staticmethod
+    def _is_placeholder_input_column_name(column_name: object) -> bool:
+        cleaned = str(column_name or "").strip().lower()
+        return cleaned.startswith("unnamed:")
+
+    def _looks_like_embedded_header_row(self, row_values: List[object]) -> bool:
+        normalized_values = [normalize_header(value).lower() for value in row_values if self._clean_text_value(value)]
+        if not normalized_values:
+            return False
+
+        query_hits = sum(
+            1
+            for value in normalized_values
+            if (
+                "наименован" in value
+                or "номенклатур" in value
+                or value in {"name", "product name"}
+            )
+        )
+        article_hits = sum(
+            1
+            for value in normalized_values
+            if any(marker in value for marker in ("артикул", "sku", "партномер", "vendor code", "part number"))
+        )
+        supporting_hits = sum(
+            1
+            for value in normalized_values
+            if (
+                "колич" in value
+                or "ед." in value
+                or "ед изм" in value
+                or "стоимость" in value
+                or value in {"№", "no", "n"}
+            )
+        )
+        return query_hits > 0 and (article_hits > 0 or supporting_hits >= 2)
+
+    def _promote_embedded_header_row(self, df: pd.DataFrame) -> pd.DataFrame:
+        if df.empty:
+            return df
+        placeholder_columns = [self._is_placeholder_input_column_name(column) for column in df.columns]
+        if not placeholder_columns or sum(placeholder_columns) < max(2, len(df.columns) // 2):
+            return df
+
+        first_row = df.iloc[0].tolist()
+        if not self._looks_like_embedded_header_row(first_row):
+            return df
+
+        promoted_headers: List[object] = []
+        for index, value in enumerate(first_row):
+            header_value = self._clean_text_value(value)
+            promoted_headers.append(header_value or df.columns[index])
+
+        promoted = df.iloc[1:].copy()
+        promoted.columns = promoted_headers
+        promoted.reset_index(drop=True, inplace=True)
+        return promoted
+
+    def _score_query_column(self, column_name: object) -> int:
+        normalized = normalize_header(column_name).lower()
+        if not normalized:
+            return 0
+        if normalized == "наименование оборудования, материалов и кабелей":
+            return 100
+        if normalized in {"наименование", "номенклатура", "product name", "name"}:
+            return 90
+        score = 0
+        if "наименован" in normalized:
+            score += 60
+        if "номенклатур" in normalized:
+            score += 55
+        if any(marker in normalized for marker in ("оборудован", "материал", "кабел")):
+            score += 20
+        if "найден" in normalized:
+            score -= 100
+        return score
+
+    def _score_article_column(self, column_name: object) -> int:
+        normalized = normalize_header(column_name).lower()
+        if not normalized:
+            return 0
+        if normalized in {"артикул", "sku", "партномер", "vendor code", "part number"}:
+            return 100
+        score = 0
+        if "артикул" in normalized:
+            score += 80
+        if "sku" in normalized:
+            score += 80
+        if "партномер" in normalized or "vendor code" in normalized or "part number" in normalized:
+            score += 70
+        if "найден" in normalized:
+            score -= 100
+        return score
+
+    def _resolve_input_columns(self, df: pd.DataFrame) -> Tuple[str, str | None]:
+        if df.empty:
+            raise ValueError("Input dataframe is empty")
+
+        best_query_column = ""
+        best_query_score = -1
+        best_article_column = ""
+        best_article_score = -1
+
+        for column in df.columns:
+            query_score = self._score_query_column(column)
+            if query_score > best_query_score:
+                best_query_score = query_score
+                best_query_column = str(column)
+
+            article_score = self._score_article_column(column)
+            if article_score > best_article_score:
+                best_article_score = article_score
+                best_article_column = str(column)
+
+        if best_query_score <= 0:
+            if len(df.columns) > 1:
+                best_query_column = str(df.columns[1])
+            elif len(df.columns) == 1:
+                best_query_column = str(df.columns[0])
+            else:
+                raise ValueError("Required nomenclature column not found")
+
+        article_column: str | None = None
+        if best_article_score > 0 and best_article_column != best_query_column:
+            article_column = best_article_column
+        elif len(df.columns) > 2:
+            candidate = str(df.columns[2])
+            if candidate != best_query_column:
+                article_column = candidate
+
+        return best_query_column, article_column
+
+    def _current_match_input_context(self) -> Dict[str, Any]:
+        local_context = getattr(self, "_match_context_local", None)
+        if local_context is None:
+            return {}
+        payload = getattr(local_context, "payload", None)
+        return dict(payload) if isinstance(payload, dict) else {}
 
     @staticmethod
     def _parse_price_value(value: object) -> Optional[float]:
@@ -1668,6 +1852,146 @@ class ReMoMatcher:
                 break
         return _log_and_return()
 
+    def _is_assembly_mode_enabled(self) -> bool:
+        return getattr(self, "match_mode", MATCH_MODE_EXACT) == MATCH_MODE_ASSEMBLY
+
+    def _supports_assembly_fallback(self, query_features: Dict[str, Any]) -> bool:
+        return (
+            self._is_assembly_mode_enabled()
+            and self._clean_text_value(query_features.get("row_type")) == "item"
+            and self._entity_family(query_features.get("entity_type", "")) == "patch_cord"
+        )
+
+    def _is_patch_cord_assembly_candidate(self, query_features: Dict[str, Any], item: Dict[str, Any]) -> bool:
+        item_family = self._entity_family(item.get("entity_type", ""))
+        if item_family not in {"bulk_twisted_pair", "cable"}:
+            return False
+
+        haystack = self._candidate_secondary_filter_haystack(item)
+        if not any(token in haystack for token in ("patch", "патч")):
+            return False
+        if any(token in haystack for token in ("оптическ", "fiber", "волокон", "коакси", "rg-")):
+            return False
+
+        query_markers = query_features.get("markers", {}) or {}
+        item_markers = item.get("item_markers", {}) or {}
+
+        query_category = self._clean_text_value(query_markers.get("category"))
+        item_category = self._clean_text_value(item_markers.get("category"))
+        if query_category:
+            if item_category and item_category != query_category:
+                return False
+            if not item_category and not re.search(rf"\b{re.escape(query_category)}\b", haystack, flags=re.IGNORECASE):
+                return False
+
+        query_shielding = self._clean_text_value(query_markers.get("shielding"))
+        item_shielding = self._clean_text_value(item_markers.get("shielding"))
+        shielding_patterns = {
+            "utp": (
+                r"(?<![a-z])u\s*/\s*utp\b",
+                r"(?<![a-z])u\s+utp\b",
+                r"неэкранир",
+                r"(?<![a-z/])utp\b",
+            ),
+            "ftp": (
+                r"(?<![a-z])f\s*/\s*utp\b",
+                r"(?<![a-z])f\s+utp\b",
+                r"(?<![a-z])ftp\b",
+            ),
+            "sftp": (
+                r"(?<![a-z])s\s*/\s*ftp\b",
+                r"(?<![a-z])sftp\b",
+                r"(?<![a-z])sf\s*/\s*utp\b",
+                r"(?<![a-z])f\s*/\s*ftp\b",
+            ),
+            "shielded": (
+                r"(?<![a-z])s\s*/\s*ftp\b",
+                r"(?<![a-z])sftp\b",
+                r"(?<![a-z])sf\s*/\s*utp\b",
+                r"(?<![a-z])f\s*/\s*ftp\b",
+                r"(?<![a-z])f\s+utp\b",
+                r"(?<![a-z])ftp\b",
+                r"экранир",
+            ),
+        }
+        if query_shielding:
+            if query_shielding == "shielded":
+                if item_shielding:
+                    if item_shielding not in {"ftp", "sftp", "shielded"}:
+                        return False
+                elif not any(re.search(pattern, haystack, flags=re.IGNORECASE) for pattern in shielding_patterns["shielded"]):
+                    return False
+            elif item_shielding:
+                if item_shielding != query_shielding:
+                    return False
+            elif not any(
+                re.search(pattern, haystack, flags=re.IGNORECASE)
+                for pattern in shielding_patterns.get(query_shielding, ())
+            ):
+                return False
+
+        return True
+
+    def _assembly_candidate_pool(self, query_features: Dict[str, Any], *, limit: int = 160) -> List[Dict[str, Any]]:
+        if not self._supports_assembly_fallback(query_features):
+            return []
+
+        query_markers = query_features.get("markers", {}) or {}
+        limit = max(20, min(int(limit), 400))
+        candidates: List[Dict[str, Any]]
+
+        if self._uses_duckdb_query_backend():
+            branch_column = self._quote_sql_identifier("search_branch_path")
+            entity_column = self._quote_sql_identifier("search_entity_type")
+            name_column = self._quote_sql_identifier("search_normalized_name")
+            filters = [
+                f"({branch_column} = ? OR {branch_column} LIKE ?)",
+                f"{entity_column} IN (?, ?)",
+                f"({name_column} LIKE ? OR {name_column} LIKE ?)",
+            ]
+            params: List[Any] = [
+                "электрика > кабели",
+                f"электрика > кабели{BRANCH_PATH_SEPARATOR}%",
+                "bulk_twisted_pair",
+                "cable",
+                "%patch%",
+                "%патч%",
+            ]
+            query_category = self._clean_text_value(query_markers.get("category"))
+            if query_category:
+                filters.append(f"{name_column} LIKE ?")
+                params.append(f"%{query_category}%")
+            candidates = self._duckdb_fetch_items(
+                where_sql=" AND ".join(filters),
+                params=params,
+                limit=max(limit * 3, 120),
+            )
+        else:
+            candidates = self._collect_branch_candidates(["электрика > кабели"], limit=max(limit * 3, 120))
+
+        filtered: List[Dict[str, Any]] = []
+        seen: set[int] = set()
+        for item in candidates:
+            if not self._is_patch_cord_assembly_candidate(query_features, item):
+                continue
+            row_idx = int(item.get("row_idx", -1))
+            if row_idx in seen:
+                continue
+            filtered.append(item)
+            seen.add(row_idx)
+            if len(filtered) >= limit:
+                break
+        return filtered
+
+    def _assembly_scored_entries(self, query_features: Dict[str, Any]) -> List[Dict[str, Any]]:
+        if not self._supports_assembly_fallback(query_features):
+            return []
+        candidates = self._assembly_candidate_pool(
+            query_features,
+            limit=max(int(getattr(self, "gemini_shortlist_limit", 96)) * 2, 120),
+        )
+        return self._score_candidates_locally(query_features, candidates)
+
     def _init_cache_db(self) -> None:
         conn = sqlite3.connect(self.cache_db)
         cursor = conn.cursor()
@@ -1760,6 +2084,7 @@ class ReMoMatcher:
         self.catalog = None
         self.catalog_dict = {}
         self.catalog_normalized_dict = {}
+        self.catalog_article_dict = {}
         self.catalog_items = []
         self.token_index = {}
         self.group_index = {}
@@ -1828,6 +2153,9 @@ class ReMoMatcher:
                 self.catalog_dict.setdefault(item["name_lc"], item)
                 if item["normalized_name"] and item["normalized_name"] not in self.catalog_normalized_dict:
                     self.catalog_normalized_dict[item["normalized_name"]] = item
+                article_key = self._normalize_article_lookup_value(item["article"])
+                if article_key and article_key not in self.catalog_article_dict:
+                    self.catalog_article_dict[article_key] = item
 
                 self.catalog_items.append(item)
                 for token in item["tokens"]:
@@ -2041,6 +2369,12 @@ class ReMoMatcher:
     def _hash_query(self, query: str) -> str:
         normalized = self._normalize_text(query)
         value = normalized if normalized else str(query).lower()
+        context = self._current_match_input_context()
+        context_article = self._normalize_article_lookup_value(
+            context.get("query_article") or context.get("input_article") or ""
+        )
+        if context_article:
+            value = f"{value}||article:{context_article}"
         return hashlib.md5(value.encode("utf-8")).hexdigest()
 
     def _rank_candidates(
@@ -2704,6 +3038,10 @@ class ReMoMatcher:
         result: Dict[str, Any],
         *,
         query_text: str,
+        query_article: str = "",
+        article_source: str = "none",
+        article_lookup_hit: bool = False,
+        article_lookup_conflict: bool = False,
         query_features: Dict[str, Any] | None,
         stage_of_failure: str,
         reason_code: str,
@@ -2718,6 +3056,10 @@ class ReMoMatcher:
         query_family = self._entity_family(entity_type)
         diagnostic_trace = {
             "query_text": self._clean_text_value(query_text),
+            "query_article": self._clean_text_value(query_article),
+            "article_source": self._clean_text_value(article_source) or "none",
+            "article_lookup_hit": bool(article_lookup_hit),
+            "article_lookup_conflict": bool(article_lookup_conflict),
             "row_type": row_type,
             "entity_type": entity_type,
             "query_family": query_family,
@@ -3278,6 +3620,18 @@ class ReMoMatcher:
 
     def match(self, query: str, use_cache: bool = True) -> Dict[str, Any]:
         query_text = self._clean_text_value(query)
+        input_context = self._current_match_input_context()
+        column_article = self._clean_text_value(input_context.get("input_article"))
+        extracted_article_from_context = self._clean_text_value(input_context.get("extracted_article"))
+        extracted_article = extracted_article_from_context or self._extract_query_article_from_text(query_text)
+        normalized_column_article = self._normalize_article_lookup_value(column_article)
+        normalized_text_article = self._normalize_article_lookup_value(extracted_article)
+        article_lookup_conflict = bool(
+            normalized_column_article and normalized_text_article and normalized_column_article != normalized_text_article
+        )
+        query_article = column_article or extracted_article
+        article_source = "column" if column_article else ("text" if extracted_article else "none")
+        article_lookup_hit = False
         query_features: Dict[str, Any] = {}
         trace_steps: List[Dict[str, Any]] = []
         local_candidate_pool: List[Dict[str, Any]] = []
@@ -3360,6 +3714,10 @@ class ReMoMatcher:
             return self._attach_diagnostic_trace(
                 result,
                 query_text=query_text or str(query or ""),
+                query_article=query_article,
+                article_source=article_source,
+                article_lookup_hit=article_lookup_hit,
+                article_lookup_conflict=article_lookup_conflict,
                 query_features=query_features,
                 stage_of_failure=stage_of_failure,
                 reason_code=str(reason_code or "resolved"),
@@ -3367,6 +3725,17 @@ class ReMoMatcher:
                 pipeline_counts=_build_pipeline_counts(),
                 candidate_snapshots=_build_candidate_snapshots(),
                 gemini_payload=_build_gemini_payload(result),
+            )
+
+        if query_article:
+            trace_steps.append(
+                {
+                    "stage": "article_lookup",
+                    "status": "pending",
+                    "article_source": article_source,
+                    "query_article": query_article,
+                    "article_lookup_conflict": article_lookup_conflict,
+                }
             )
 
         if use_cache and query_text:
@@ -3416,14 +3785,51 @@ class ReMoMatcher:
             preferred_result: Dict[str, Any] | None = None
             preferred_entry: Dict[str, Any] | None = None
 
+            article_match = self._lookup_catalog_item_by_article(query_article) if query_article else None
+            if query_article:
+                article_lookup_hit = article_match is not None
+                trace_steps.append(
+                    {
+                        "stage": "article_lookup",
+                        "status": "hit" if article_lookup_hit else "miss",
+                        "article_source": article_source,
+                        "query_article": query_article,
+                        "article_lookup_conflict": article_lookup_conflict,
+                    }
+                )
+            if article_match is not None:
+                article_reason = "Exact article match from input column."
+                resolution_source = "article_exact"
+                if article_source == "text":
+                    article_reason = "Exact article match extracted from row text."
+                    resolution_source = "article_extracted_exact"
+                elif article_lookup_conflict:
+                    article_reason = "Exact article match from input column; column article took priority over text."
+                result = self._build_result_from_item(
+                    article_match,
+                    1.0,
+                    resolution_source,
+                    False,
+                    "",
+                    article_reason,
+                )
+                return _finalize(result, stage_of_failure="resolved", reason_code="resolved")
+
             exact_match = self._lookup_catalog_item_by_name(query_text)
             if exact_match:
-                preferred_result = self._build_result_from_item(exact_match, 1.0, "exact_match", False, "", "")
+                preferred_result = self._build_result_from_item(exact_match, 1.0, "name_exact", False, "", "")
                 preferred_entry = {"item": exact_match, "score": 1.0, "lexical_score": 1.0}
             else:
                 normalized_match = self._lookup_catalog_item_by_normalized_name(normalized_query)
                 if normalized_match:
-                    preferred_result = self._build_result_from_item(normalized_match, 0.98, "normalized_match", False, "", "")
+                    preferred_result = self._build_result_from_item(
+                        normalized_match,
+                        0.98,
+                        "normalized_name_exact",
+                        False,
+                        "",
+                        "",
+                    )
                     preferred_entry = {"item": normalized_match, "score": 0.98, "lexical_score": 0.98}
                 else:
                     local_direct = self._try_local_semantic_match(query_text)
@@ -3718,6 +4124,36 @@ class ReMoMatcher:
             best_weak = self._best_compatible_local_entry(query_features, scored_entries, allow_weak=True)
             if strictness == "strict":
                 if best_compatible is None:
+                    assembly_entries = self._assembly_scored_entries(query_features)
+                    if assembly_entries:
+                        best_assembly = assembly_entries[0]
+                        best_assembly_item = best_assembly["item"]
+                        best_assembly_family = self._entity_family(best_assembly_item.get("entity_type", ""))
+                        assembly_reason = (
+                            "assembly_possible_from_patch_cable"
+                            if best_assembly_family == "cable"
+                            else "assembly_possible_from_bulk_cable"
+                        )
+                        trace_steps.append(
+                            {
+                                "stage": "fallback_policy",
+                                "status": "accepted",
+                                "fallback": "assembly_possible_local_fallback",
+                                "reason_code": assembly_reason,
+                                "assembly_candidates": len(assembly_entries),
+                            }
+                        )
+                        result = self._build_result_from_item(
+                            best_assembly_item,
+                            float(best_assembly["score"]),
+                            "assembly_possible_local_fallback",
+                            True,
+                            self._format_alternatives(assembly_entries, skip_first=True),
+                            "Готовый патч-корд с нужными параметрами не найден; сохранена patch-like кабельная заготовка как материал под сборку. Требуется инженерная проверка.",
+                            compatibility_status="assembly_possible",
+                            incompatibility_reason=assembly_reason,
+                        )
+                        return _finalize(result, stage_of_failure="resolved", reason_code="resolved")
                     trace_steps.append(
                         {
                             "stage": "compatibility_filter",
@@ -3856,9 +4292,37 @@ class ReMoMatcher:
         except Exception as exc:
             logger.warning("History write error: %s", exc)
 
+    @staticmethod
+    def _unpack_match_task(task: Tuple[Any, ...]) -> Tuple[int, str, Dict[str, Any]]:
+        if len(task) >= 3:
+            idx, query, context = task[0], task[1], task[2]
+            return int(idx), str(query), dict(context) if isinstance(context, dict) else {}
+        idx, query = task[0], task[1]
+        return int(idx), str(query), {}
+
+    def _probe_cache_with_context(self, query: str, context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        local_context = getattr(self, "_match_context_local", None)
+        if local_context is not None:
+            local_context.payload = dict(context or {})
+        try:
+            return self._get_from_cache(query)
+        finally:
+            if local_context is not None:
+                local_context.payload = None
+
+    def _execute_match_task(self, query: str, context: Dict[str, Any], *, use_cache: bool = True) -> Dict[str, Any]:
+        local_context = getattr(self, "_match_context_local", None)
+        if local_context is not None:
+            local_context.payload = dict(context or {})
+        try:
+            return self.match(query, use_cache=use_cache)
+        finally:
+            if local_context is not None:
+                local_context.payload = None
+
     def _run_matches_parallel(
         self,
-        tasks: List[Tuple[int, str]],
+        tasks: List[Tuple[Any, ...]],
         *,
         cancel_requested: Callable[[], bool] | None = None,
     ) -> Iterator[Tuple[int, Dict[str, Any]]]:
@@ -3867,15 +4331,19 @@ class ReMoMatcher:
 
         workers = min(max(1, int(getattr(self, "parallel_requests", 1))), len(tasks))
         if workers <= 1:
-            for idx, query in tasks:
+            for task in tasks:
+                idx, query, context = self._unpack_match_task(task)
                 if cancel_requested is not None and cancel_requested():
                     logger.info("🛑 Match processing cancelled before row idx=%s", idx)
                     return
-                yield idx, self.match(query, use_cache=True)
+                yield idx, self._execute_match_task(query, context, use_cache=True)
             return
 
         pool = ThreadPoolExecutor(max_workers=workers)
-        future_map = {pool.submit(self.match, query, True): idx for idx, query in tasks}
+        future_map: Dict[Any, int] = {}
+        for task in tasks:
+            idx, query, context = self._unpack_match_task(task)
+            future_map[pool.submit(self._execute_match_task, query, context, use_cache=True)] = idx
         pending = set(future_map)
         completed = 0
         total = len(tasks)
@@ -3911,14 +4379,15 @@ class ReMoMatcher:
         finally:
             pool.shutdown(wait=not cancelled, cancel_futures=cancelled)
 
-    def _prioritize_match_tasks(self, tasks: List[Tuple[int, str]]) -> List[Tuple[int, str]]:
-        prioritized: List[Tuple[Tuple[int, int, int, int, int], int, str]] = []
+    def _prioritize_match_tasks(self, tasks: List[Tuple[Any, ...]]) -> List[Tuple[Any, ...]]:
+        prioritized: List[Tuple[Tuple[int, int, int, int, int, int], Tuple[Any, ...]]] = []
         cache_hits = 0
-        for idx, query in tasks:
+        for task in tasks:
+            idx, query, context = self._unpack_match_task(task)
             query_text = self._clean_text_value(query)
             cache_rank = 1
             try:
-                if query_text and self._get_from_cache(query_text):
+                if query_text and self._probe_cache_with_context(query_text, context):
                     cache_rank = 0
                     cache_hits += 1
             except Exception as exc:
@@ -3927,6 +4396,7 @@ class ReMoMatcher:
             row_type_rank = 1
             broad_family_rank = 0
             query_length_rank = len(query_text)
+            article_rank = 0 if self._normalize_article_lookup_value(context.get("query_article")) else 1
             if cache_rank != 0 and query_text:
                 try:
                     query_features = self._extract_query_features(query_text)
@@ -3936,7 +4406,9 @@ class ReMoMatcher:
                 except Exception as exc:
                     logger.debug("Task prioritization feature probe failed for query=%s: %s", query_text[:120], exc)
 
-            prioritized.append(((cache_rank, row_type_rank, broad_family_rank, query_length_rank, idx), idx, query))
+            prioritized.append(
+                ((cache_rank, article_rank, row_type_rank, broad_family_rank, query_length_rank, idx), task)
+            )
 
         prioritized.sort(key=lambda entry: entry[0])
         if prioritized:
@@ -3946,7 +4418,7 @@ class ReMoMatcher:
                 cache_hits,
                 min(max(1, int(getattr(self, "parallel_requests", 1))), len(prioritized)),
             )
-        return [(idx, query) for _priority, idx, query in prioritized]
+        return [task for _priority, task in prioritized]
 
     def _compose_not_found_reason(self, query: str, result: Dict[str, Any]) -> str:
         query_text = str(query or "").strip()
@@ -3982,22 +4454,13 @@ class ReMoMatcher:
         output_path: str | None = None,
         progress_callback: Callable[..., None] | None = None,
         cancel_requested: Callable[[], bool] | None = None,
-    ) -> Tuple[pd.DataFrame, Dict[str, int]]:
+    ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
         logger.info("Start processing Excel: %s", excel_path)
         if progress_callback is not None:
             progress_callback(stage="reading_excel", message="Чтение Excel-файла")
         df = pd.read_excel(excel_path)
-
-        col_b = None
-        for col in df.columns:
-            normalized_col = str(col).strip().lower()
-            if "наименование" in normalized_col and "оборудован" in normalized_col:
-                col_b = col
-                break
-        if col_b is None and len(df.columns) > 1:
-            col_b = df.columns[1]
-        if col_b is None:
-            raise ValueError("Required nomenclature column not found")
+        df = self._promote_embedded_header_row(df)
+        query_column, article_column = self._resolve_input_columns(df)
 
         if "Цена" not in df.columns:
             df["Цена"] = pd.Series([None] * len(df), dtype="float64")
@@ -4041,13 +4504,20 @@ class ReMoMatcher:
             "unresolved_no_compatible_candidates": 0,
             "compatible_local_fallback_count": 0,
             "weak_compatible_fallback_count": 0,
+            "assembly_possible_count": 0,
             "strict_class_unresolved_count": 0,
+            "article_exact_count": 0,
+            "article_extracted_exact_count": 0,
+            "name_exact_count": 0,
+            "normalized_name_exact_count": 0,
             "diagnostic_stage_counts": {},
             "diagnostic_reason_class_counts": {},
             "diagnostic_reason_code_counts": {},
             "matcher_init_ms": round(float(getattr(self, "matcher_init_ms", 0.0)), 2),
             "retrieval_backend": str(getattr(self, "retrieval_backend", "memory") or "memory"),
             "retrieval_mode": str(getattr(self, "retrieval_mode", "legacy_limited") or "legacy_limited"),
+            "input_query_column": str(query_column),
+            "input_article_column": str(article_column or ""),
             "duckdb_category_query_ms_total": 0.0,
             "python_scoring_ms_total": 0.0,
             "compatibility_filter_ms_total": 0.0,
@@ -4059,14 +4529,29 @@ class ReMoMatcher:
         diagnostic_stage_counts: Counter[str] = Counter()
         diagnostic_reason_class_counts: Counter[str] = Counter()
         diagnostic_reason_code_counts: Counter[str] = Counter()
-        tasks: List[Tuple[int, str]] = []
+        tasks: List[Tuple[int, str, Dict[str, Any]]] = []
         for idx, row in df.iterrows():
-            query = str(row[col_b]).strip()
+            query = str(row[query_column]).strip()
             if not query or query.lower() == "nan":
                 continue
             if query.strip().lower() in {"наименование", "наименование оборудования, материалов и кабелей", "nomenclature"}:
                 continue
-            tasks.append((idx, query))
+            input_article = self._clean_text_value(row.get(article_column)) if article_column else ""
+            extracted_article = self._extract_query_article_from_text(query)
+            tasks.append(
+                (
+                    idx,
+                    query,
+                    {
+                        "input_article": input_article,
+                        "extracted_article": extracted_article,
+                        "query_article": input_article or extracted_article,
+                        "article_source": "column" if input_article else ("text" if extracted_article else "none"),
+                        "query_column": str(query_column),
+                        "article_column": str(article_column or ""),
+                    },
+                )
+            )
 
         tasks = self._prioritize_match_tasks(tasks)
         stats["total"] = len(tasks)
@@ -4077,7 +4562,7 @@ class ReMoMatcher:
                 total=len(tasks),
                 message=f"Подготовлено строк к обработке: {len(tasks)}",
             )
-        task_query_map = {idx: query for idx, query in tasks}
+        task_query_map = {idx: query for idx, query, _context in tasks}
         processed_count = 0
         for idx, result in self._run_matches_parallel(tasks, cancel_requested=cancel_requested):
             processed_count += 1
@@ -4133,6 +4618,16 @@ class ReMoMatcher:
                 stats["compatible_local_fallback_count"] += 1
             elif resolution_source == "weak_compatible_fallback":
                 stats["weak_compatible_fallback_count"] += 1
+            elif resolution_source == "assembly_possible_local_fallback":
+                stats["assembly_possible_count"] += 1
+            elif resolution_source == "article_exact":
+                stats["article_exact_count"] += 1
+            elif resolution_source == "article_extracted_exact":
+                stats["article_extracted_exact_count"] += 1
+            elif resolution_source == "name_exact":
+                stats["name_exact_count"] += 1
+            elif resolution_source == "normalized_name_exact":
+                stats["normalized_name_exact_count"] += 1
 
             incompatibility_reason = str(result.get("incompatibility_reason") or "").strip()
             if compatibility_status == "unresolved_no_compatible_candidates" and incompatibility_reason.startswith("strict_class"):

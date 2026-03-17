@@ -358,16 +358,23 @@ def _validate_runtime_readiness(db_csv: str) -> list[str]:
 def _safe_matcher_mode_select(current_mode: str, mode_options: list[str]) -> str:
     """Безопасно получить режим matcher из selectbox без падения UI."""
     fallback_mode = current_mode if current_mode in mode_options else "exact"
+    mode_labels = {
+        "exact": "Точный матч",
+        "analog": "Аналог/замена",
+        "assembly": "Сборка/заготовка",
+    }
     try:
         return st.selectbox(
             "Режим сопоставления",
             options=mode_options,
             index=mode_options.index(fallback_mode),
-            format_func=lambda value: "Точный матч" if value == "exact" else "Аналог/замена",
+            format_func=lambda value: mode_labels.get(value, value),
             help=(
                 "exact: только строгие совпадения по типу товара. "
                 "analog: допускает близкие аналоги, но не подменяет тип товара "
-                "(например, патч-корд не заменяется витой парой в бухте)."
+                "(например, патч-корд не заменяется витой парой в бухте). "
+                "assembly: для patch_cord может вернуть patch-like кабель или заготовку как материал под сборку, "
+                "но не выдает это за точное совпадение."
             ),
         )
     except Exception as e:
@@ -1888,7 +1895,7 @@ def main():
         )
         st.warning("Рост этих advanced-лимитов увеличивает время обработки и стоимость Gemini, но не заменяет category retrieval.")
 
-        mode_options = ["exact", "analog"]
+        mode_options = ["exact", "analog", "assembly"]
         current_mode = str(st.session_state.get("matcher_mode", "exact"))
         st.session_state.matcher_mode = _safe_matcher_mode_select(current_mode, mode_options)
 
@@ -2057,7 +2064,7 @@ def main():
         uploaded_file = st.file_uploader(
             "Выберите Excel файл коммерческого предложения",
             type=['xlsx', 'xls'],
-            help="Файл должен содержать столбец 'Наименование оборудования, материалов и кабелей'"
+            help="Поддерживаются ReMo-шаблоны и близкие Excel-файлы с колонками вроде 'Наименование' / 'Артикул'. Если заголовки лежат в первой строке таблицы, сервис попробует поднять их автоматически."
         )
         
         if uploaded_file:

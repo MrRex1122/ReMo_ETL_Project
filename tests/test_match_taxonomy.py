@@ -1,6 +1,6 @@
 import unittest
 
-from matcher import ReMoMatcher
+from matcher import MATCH_MODE_ASSEMBLY, ReMoMatcher
 
 
 class MatchTaxonomyTests(unittest.TestCase):
@@ -9,6 +9,7 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.matcher.taxonomy_rules = ReMoMatcher._load_taxonomy_rules(self.matcher)
         self.matcher._normalize_query_terms = ReMoMatcher._normalize_query_terms.__get__(self.matcher, ReMoMatcher)
         self.matcher._normalize_text = ReMoMatcher._normalize_text.__get__(self.matcher, ReMoMatcher)
+        self.matcher._clean_text_value = ReMoMatcher._clean_text_value
         self.matcher._tokenize = ReMoMatcher._tokenize.__get__(self.matcher, ReMoMatcher)
         self.matcher._classify_item_type = ReMoMatcher._classify_item_type.__get__(self.matcher, ReMoMatcher)
         self.matcher._detect_query_row_type = ReMoMatcher._detect_query_row_type.__get__(self.matcher, ReMoMatcher)
@@ -26,12 +27,22 @@ class MatchTaxonomyTests(unittest.TestCase):
             self.matcher,
             ReMoMatcher,
         )
+        self.matcher._candidate_secondary_filter_haystack = ReMoMatcher._candidate_secondary_filter_haystack.__get__(
+            self.matcher,
+            ReMoMatcher,
+        )
         self.matcher._is_hard_incompatible_match = ReMoMatcher._is_hard_incompatible_match.__get__(self.matcher, ReMoMatcher)
         self.matcher._should_use_whole_category_retrieval = ReMoMatcher._should_use_whole_category_retrieval.__get__(self.matcher, ReMoMatcher)
         self.matcher._whole_category_secondary_filter_groups = ReMoMatcher._whole_category_secondary_filter_groups.__get__(self.matcher, ReMoMatcher)
         self.matcher._apply_whole_category_secondary_filter = ReMoMatcher._apply_whole_category_secondary_filter.__get__(self.matcher, ReMoMatcher)
         self.matcher._should_query_gemini_without_candidates = ReMoMatcher._should_query_gemini_without_candidates.__get__(self.matcher, ReMoMatcher)
         self.matcher._should_accept_weak_gemini_result = ReMoMatcher._should_accept_weak_gemini_result.__get__(self.matcher, ReMoMatcher)
+        self.matcher._is_assembly_mode_enabled = ReMoMatcher._is_assembly_mode_enabled.__get__(self.matcher, ReMoMatcher)
+        self.matcher._supports_assembly_fallback = ReMoMatcher._supports_assembly_fallback.__get__(self.matcher, ReMoMatcher)
+        self.matcher._is_patch_cord_assembly_candidate = ReMoMatcher._is_patch_cord_assembly_candidate.__get__(
+            self.matcher,
+            ReMoMatcher,
+        )
         self.matcher.match_mode = "exact"
         self.matcher.branch_index = {
             "телеком > питание > pdu": [],
@@ -488,6 +499,32 @@ class MatchTaxonomyTests(unittest.TestCase):
 
         self.assertEqual(len(filtered), 1)
         self.assertIn("ввод", filtered[0]["normalized_name"])
+
+    def test_patch_cord_assembly_candidate_accepts_patch_like_bulk_cable(self):
+        self.matcher.match_mode = MATCH_MODE_ASSEMBLY
+        features = self.matcher._extract_query_features("Медный патч-корд категории 6а экранированный (3м)")
+        candidate = {
+            "name": "Витая пара ParLan Patch S/FTP Cat 6A PVC 4х2х0.60",
+            "normalized_name": "витая пара parlan patch s/ftp cat 6a pvc 4х2х0.60",
+            "branch_path": "электрика > кабели",
+            "entity_type": "bulk_twisted_pair",
+            "item_markers": {"category": "cat6a", "shielding": "ftp"},
+        }
+
+        self.assertTrue(self.matcher._is_patch_cord_assembly_candidate(features, candidate))
+
+    def test_patch_cord_assembly_candidate_rejects_plain_bulk_cable_without_patch_signal(self):
+        self.matcher.match_mode = MATCH_MODE_ASSEMBLY
+        features = self.matcher._extract_query_features("Медный патч-корд категории 6 неэкранированный (2м)")
+        candidate = {
+            "name": "Витая пара U/UTP Cat 6 PVC 305м",
+            "normalized_name": "витая пара u/utp cat 6 pvc 305м",
+            "branch_path": "электрика > кабели",
+            "entity_type": "bulk_twisted_pair",
+            "item_markers": {"category": "cat6", "shielding": "utp"},
+        }
+
+        self.assertFalse(self.matcher._is_patch_cord_assembly_candidate(features, candidate))
 
     def test_duckdb_whole_category_queries_do_not_use_free_gemini_without_candidates(self):
         self.matcher._uses_duckdb_query_backend = lambda: True

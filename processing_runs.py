@@ -4,6 +4,7 @@ import json
 import logging
 import sqlite3
 import threading
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -18,6 +19,10 @@ RUN_STATUS = Literal["queued", "running", "completed", "failed", "interrupted"]
 ACTIVE_STATUSES = ("queued", "running")
 
 logger = logging.getLogger(__name__)
+
+SQLITE_BUSY_TIMEOUT_MS = 30000
+SQLITE_LOCK_RETRY_ATTEMPTS = 6
+SQLITE_LOCK_RETRY_DELAY_SEC = 0.2
 
 _ACTIVE_RUN_THREADS: dict[str, threading.Thread] = {}
 _ACTIVE_RUN_CANCEL_EVENTS: dict[str, threading.Event] = {}
@@ -67,10 +72,61 @@ def _now_iso() -> str:
 def _connect() -> sqlite3.Connection:
     db_path = Path(get_matcher_cache_db_path())
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(db_path))
+    conn = sqlite3.connect(str(db_path), timeout=SQLITE_BUSY_TIMEOUT_MS / 1000)
     conn.row_factory = sqlite3.Row
+    conn.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+    except sqlite3.DatabaseError:
+        logger.debug("SQLite WAL pragmas are unavailable for %s", db_path)
     ensure_processing_runs_table_exists(conn)
     return conn
+
+
+def _is_locked_error(exc: BaseException) -> bool:
+    return isinstance(exc, sqlite3.OperationalError) and "locked" in str(exc).lower()
+
+
+def _execute_write_with_retry(
+    operation,
+    *,
+    description: str,
+    swallow_errors: bool = False,
+):
+    last_error: BaseException | None = None
+    for attempt in range(1, SQLITE_LOCK_RETRY_ATTEMPTS + 1):
+        conn: sqlite3.Connection | None = None
+        try:
+            conn = _connect()
+            result = operation(conn)
+            conn.commit()
+            return result
+        except Exception as exc:
+            last_error = exc
+            if _is_locked_error(exc) and attempt < SQLITE_LOCK_RETRY_ATTEMPTS:
+                logger.warning(
+                    "SQLite is busy during %s; retrying attempt=%s/%s",
+                    description,
+                    attempt,
+                    SQLITE_LOCK_RETRY_ATTEMPTS,
+                )
+                time.sleep(SQLITE_LOCK_RETRY_DELAY_SEC * attempt)
+                continue
+            if swallow_errors:
+                logger.warning("Skipping %s after SQLite/write error: %s", description, exc)
+                return None
+            raise
+        finally:
+            if conn is not None:
+                conn.close()
+
+    if swallow_errors:
+        logger.warning("Skipping %s after retries exhausted: %s", description, last_error)
+        return None
+    if last_error is not None:
+        raise last_error
+    return None
 
 
 def _cleanup_dead_threads_locked() -> None:
@@ -226,30 +282,30 @@ def create_processing_run(
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:8]
     timestamp = _now_iso()
     artifacts = build_run_artifacts(run_id)
-    conn = _connect()
-    try:
-        conn.execute(
-            """
-            INSERT INTO processing_runs (
-                run_id, status, input_filename, input_file_path, catalog_source_path, catalog_source_kind,
-                created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                run_id,
-                "queued",
-                input_filename,
-                str(artifacts.input_path),
-                str(Path(catalog_source_path)),
-                catalog_source_kind,
-                timestamp,
-                timestamp,
+    row = _execute_write_with_retry(
+        lambda conn: (
+            conn.execute(
+                """
+                INSERT INTO processing_runs (
+                    run_id, status, input_filename, input_file_path, catalog_source_path, catalog_source_kind,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    run_id,
+                    "queued",
+                    input_filename,
+                    str(artifacts.input_path),
+                    str(Path(catalog_source_path)),
+                    catalog_source_kind,
+                    timestamp,
+                    timestamp,
+                ),
             ),
-        )
-        conn.commit()
-        row = conn.execute("SELECT * FROM processing_runs WHERE run_id = ?", (run_id,)).fetchone()
-    finally:
-        conn.close()
+            conn.execute("SELECT * FROM processing_runs WHERE run_id = ?", (run_id,)).fetchone(),
+        )[1],
+        description="create_processing_run",
+    )
     if row is None:
         raise RuntimeError(f"Failed to create processing run {run_id}")
     return _row_to_record(row)
@@ -257,31 +313,28 @@ def create_processing_run(
 
 def mark_processing_run_started(run_id: str) -> None:
     timestamp = _now_iso()
-    conn = _connect()
-    try:
-        conn.execute(
+    _execute_write_with_retry(
+        lambda conn: conn.execute(
             """
             UPDATE processing_runs
             SET status = ?, started_at = COALESCE(started_at, ?), updated_at = ?
             WHERE run_id = ?
             """,
             ("running", timestamp, timestamp, run_id),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+        ),
+        description="mark_processing_run_started",
+    )
 
 
-def touch_processing_run(run_id: str) -> None:
-    conn = _connect()
-    try:
-        conn.execute(
+def touch_processing_run(run_id: str, *, ignore_errors: bool = False) -> None:
+    _execute_write_with_retry(
+        lambda conn: conn.execute(
             "UPDATE processing_runs SET updated_at = ? WHERE run_id = ?",
             (_now_iso(), run_id),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+        ),
+        description="touch_processing_run",
+        swallow_errors=ignore_errors,
+    )
 
 
 def mark_processing_run_completed(
@@ -295,9 +348,8 @@ def mark_processing_run_completed(
     requires_review_count: int,
 ) -> None:
     timestamp = _now_iso()
-    conn = _connect()
-    try:
-        conn.execute(
+    _execute_write_with_retry(
+        lambda conn: conn.execute(
             """
             UPDATE processing_runs
             SET status = ?, result_csv_path = ?, stats_json_path = ?, rows_total = ?, found_count = ?,
@@ -316,27 +368,24 @@ def mark_processing_run_completed(
                 timestamp,
                 run_id,
             ),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+        ),
+        description="mark_processing_run_completed",
+    )
 
 
 def mark_processing_run_failed(run_id: str, error_text: str) -> None:
     timestamp = _now_iso()
-    conn = _connect()
-    try:
-        conn.execute(
+    _execute_write_with_retry(
+        lambda conn: conn.execute(
             """
             UPDATE processing_runs
             SET status = ?, error_text = ?, finished_at = ?, updated_at = ?
             WHERE run_id = ?
             """,
             ("failed", error_text, timestamp, timestamp, run_id),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+        ),
+        description="mark_processing_run_failed",
+    )
 
 
 def mark_processing_run_interrupted(
@@ -344,19 +393,17 @@ def mark_processing_run_interrupted(
     reason: str = "Application restarted during background processing",
 ) -> None:
     timestamp = _now_iso()
-    conn = _connect()
-    try:
-        conn.execute(
+    _execute_write_with_retry(
+        lambda conn: conn.execute(
             """
             UPDATE processing_runs
             SET status = ?, error_text = COALESCE(error_text, ?), finished_at = ?, updated_at = ?
             WHERE run_id = ? AND status IN ('queued', 'running')
             """,
             ("interrupted", reason, timestamp, timestamp, run_id),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+        ),
+        description="mark_processing_run_interrupted",
+    )
 
 
 def get_processing_run(run_id: str) -> ProcessingRunRecord | None:
@@ -485,7 +532,7 @@ def write_processing_run_progress(
         "updated_at": _now_iso(),
     }
     _write_json_atomic(artifacts.progress_json_path, payload)
-    touch_processing_run(run_id)
+    touch_processing_run(run_id, ignore_errors=True)
     logger.info(
         "📈 Run progress updated: run=%s stage=%s current=%s total=%s percent=%s message=%s",
         run_id,
@@ -580,19 +627,17 @@ def save_processing_run_draft(run_id: str, df: pd.DataFrame) -> Path:
     )
     draft_part_path.replace(artifacts.draft_csv_path)
 
-    conn = _connect()
-    try:
-        conn.execute(
+    _execute_write_with_retry(
+        lambda conn: conn.execute(
             """
             UPDATE processing_runs
             SET draft_csv_path = ?, updated_at = ?
             WHERE run_id = ?
             """,
             (str(artifacts.draft_csv_path), _now_iso(), run_id),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+        ),
+        description="save_processing_run_draft",
+    )
     return artifacts.draft_csv_path
 
 
@@ -608,8 +653,7 @@ def write_processing_run_error(run_id: str, error_text: str) -> Path:
 
 def mark_stale_running_runs_as_interrupted() -> int:
     active_run_ids = get_active_processing_run_ids()
-    conn = _connect()
-    try:
+    def _mark(conn: sqlite3.Connection) -> int:
         rows = conn.execute(
             """
             SELECT run_id FROM processing_runs
@@ -639,7 +683,12 @@ def mark_stale_running_runs_as_interrupted() -> int:
                 for run_id in stale_ids
             ],
         )
-        conn.commit()
         return len(stale_ids)
-    finally:
-        conn.close()
+
+    return int(
+        _execute_write_with_retry(
+            _mark,
+            description="mark_stale_running_runs_as_interrupted",
+        )
+        or 0
+    )
