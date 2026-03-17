@@ -31,7 +31,15 @@ class MatchTaxonomyTests(unittest.TestCase):
             self.matcher,
             ReMoMatcher,
         )
+        self.matcher._hard_incompatibility_reason = ReMoMatcher._hard_incompatibility_reason.__get__(
+            self.matcher,
+            ReMoMatcher,
+        )
         self.matcher._is_hard_incompatible_match = ReMoMatcher._is_hard_incompatible_match.__get__(self.matcher, ReMoMatcher)
+        self.matcher._article_match_sanity_reason = ReMoMatcher._article_match_sanity_reason.__get__(
+            self.matcher,
+            ReMoMatcher,
+        )
         self.matcher._should_use_whole_category_retrieval = ReMoMatcher._should_use_whole_category_retrieval.__get__(self.matcher, ReMoMatcher)
         self.matcher._whole_category_secondary_filter_groups = ReMoMatcher._whole_category_secondary_filter_groups.__get__(self.matcher, ReMoMatcher)
         self.matcher._apply_whole_category_secondary_filter = ReMoMatcher._apply_whole_category_secondary_filter.__get__(self.matcher, ReMoMatcher)
@@ -525,6 +533,38 @@ class MatchTaxonomyTests(unittest.TestCase):
         }
 
         self.assertFalse(self.matcher._is_patch_cord_assembly_candidate(features, candidate))
+
+    def test_article_match_sanity_rejects_tray_query_against_light_fixture(self):
+        features = self.matcher._extract_query_features(
+            "Лоток перфорированный 100х50 L=3000мм, артикул 35262"
+        )
+        candidate = {
+            "name": "Светильник светодиодный ДСО-Т03-13-30-3K-IP20",
+            "normalized_name": "светильник светодиодный дсо т03 13 30 3k ip20",
+            "branch_path": "свет > светильники",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        reason = self.matcher._article_match_sanity_reason(features, candidate)
+
+        self.assertEqual(reason, "article_query_candidate_domain_mismatch")
+
+    def test_article_match_sanity_accepts_tray_query_against_tray_candidate(self):
+        features = self.matcher._extract_query_features(
+            "Лоток перфорированный 100х50 L=3000мм, артикул 3526210HDZ"
+        )
+        candidate = {
+            "name": "Лоток перфорированный 100х50 L=3000мм толщина 1.0мм горячеоцинкованный",
+            "normalized_name": "лоток перфорированный 100х50 l 3000мм толщина 1 0мм горячеоцинкованный",
+            "branch_path": "листовые лотки горячеоцинкованные",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        reason = self.matcher._article_match_sanity_reason(features, candidate)
+
+        self.assertEqual(reason, "")
 
     def test_duckdb_whole_category_queries_do_not_use_free_gemini_without_candidates(self):
         self.matcher._uses_duckdb_query_backend = lambda: True

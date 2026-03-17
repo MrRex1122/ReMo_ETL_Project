@@ -78,6 +78,7 @@ class NormalizedMatchTests(unittest.TestCase):
         matcher._get_from_cache = lambda _query: None
         matcher._save_to_cache = lambda *_args, **_kwargs: None
         matcher._match_with_gemini = lambda _query: {"success": False}
+        matcher._article_match_sanity_reason = lambda *_args, **_kwargs: ""
         matcher._extract_query_features = lambda query: {
             "row_type": "item",
             "entity_type": "cable",

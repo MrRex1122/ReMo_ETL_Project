@@ -1620,6 +1620,61 @@ class ReMoMatcher:
     def _is_hard_incompatible_match(self, query_features: Dict[str, Any], item: Dict[str, Any]) -> bool:
         return bool(self._hard_incompatibility_reason(query_features, item))
 
+    def _article_match_sanity_reason(self, query_features: Dict[str, Any], item: Dict[str, Any]) -> str:
+        hard_reason = self._hard_incompatibility_reason(query_features, item)
+        if hard_reason:
+            return hard_reason
+
+        query_text = self._normalize_text(self._clean_text_value(query_features.get("original_text")))
+        candidate_text = self._normalize_text(
+            " ".join(
+                filter(
+                    None,
+                    [
+                        self._clean_text_value(item.get("name")),
+                        self._clean_text_value(item.get("normalized_name")),
+                        self._clean_text_value(item.get("branch_path")),
+                    ],
+                )
+            )
+        )
+        if not query_text or not candidate_text:
+            return ""
+
+        lexical_mismatch_rules = (
+            (
+                "article_query_candidate_domain_mismatch",
+                ("лоток", "крышк", "перегород", "пластин", "ответвител", "угол", "кабельн", "gto", "ptce", "sep"),
+                ("светильник", "светодиод", "треков", "дсо", "дсп", "дпо", "дку", "свет >"),
+            ),
+            (
+                "article_query_candidate_domain_mismatch",
+                ("светильник", "светодиод", "треков", "дсо", "дсп", "дпо", "дку"),
+                ("лоток", "крышк", "перегород", "пластин", "ответвител", "угол", "кабельн"),
+            ),
+            (
+                "article_query_candidate_domain_mismatch",
+                ("программ", "лиценз", "monitoring", "software"),
+                ("камер", "видеокамер", "извещател", "светильник", "шкаф", "кабель", "датчик"),
+            ),
+            (
+                "article_query_candidate_domain_mismatch",
+                ("монитор", "display"),
+                ("ключ", "dongle", "камера", "извещател", "кабель", "датчик"),
+            ),
+        )
+
+        if (query_text.startswith("по ") or " по " in f" {query_text} ") and any(
+            token in candidate_text for token in ("камер", "видеокамер", "извещател", "светильник", "шкаф", "кабель")
+        ):
+            return "article_query_candidate_domain_mismatch"
+
+        for reason, query_tokens, candidate_tokens in lexical_mismatch_rules:
+            if any(token in query_text for token in query_tokens) and any(token in candidate_text for token in candidate_tokens):
+                return reason
+
+        return ""
+
     def _compatibility_penalty(self, query_features: Dict[str, Any], item: Dict[str, Any]) -> float:
         if self._is_hard_incompatible_match(query_features, item):
             return 0.6
@@ -3788,16 +3843,22 @@ class ReMoMatcher:
             article_match = self._lookup_catalog_item_by_article(query_article) if query_article else None
             if query_article:
                 article_lookup_hit = article_match is not None
+                article_sanity_reason = ""
+                article_lookup_status = "miss"
+                if article_match is not None:
+                    article_sanity_reason = self._article_match_sanity_reason(query_features, article_match)
+                    article_lookup_status = "rejected" if article_sanity_reason else "hit"
                 trace_steps.append(
                     {
                         "stage": "article_lookup",
-                        "status": "hit" if article_lookup_hit else "miss",
+                        "status": article_lookup_status,
                         "article_source": article_source,
                         "query_article": query_article,
                         "article_lookup_conflict": article_lookup_conflict,
+                        "reason_code": article_sanity_reason,
                     }
                 )
-            if article_match is not None:
+            if article_match is not None and not article_sanity_reason:
                 article_reason = "Exact article match from input column."
                 resolution_source = "article_exact"
                 if article_source == "text":
