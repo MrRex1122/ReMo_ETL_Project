@@ -32,6 +32,7 @@ from match_diagnostics import (
     enrich_match_diagnostics_payload,
     is_match_diagnostics_fresh,
     prepare_match_diagnostics_reason_table,
+    prepare_match_diagnostics_resolver_table,
     prepare_match_diagnostics_root_cause_table,
     prepare_match_diagnostics_stage_table,
     prepare_match_diagnostics_table,
@@ -1292,6 +1293,7 @@ def _render_match_diagnostics(run, df: pd.DataFrame) -> None:
     stage_table = prepare_match_diagnostics_stage_table(diagnostics_payload)
     root_cause_table = prepare_match_diagnostics_root_cause_table(diagnostics_payload)
     reason_table = prepare_match_diagnostics_reason_table(diagnostics_payload)
+    resolver_table = prepare_match_diagnostics_resolver_table(diagnostics_payload)
     detail_table = prepare_match_diagnostics_table(diagnostics_payload)
 
     diagnostics_summary_table = _summary_mapping_to_df(
@@ -1326,6 +1328,7 @@ def _render_match_diagnostics(run, df: pd.DataFrame) -> None:
             ("root_cause_summary", root_cause_table),
             ("pipeline_summary", stage_table),
             ("root_cause_codes", reason_table),
+            ("resolver_summary", resolver_table),
             ("details", detail_table),
         ]
     )
@@ -1348,6 +1351,10 @@ def _render_match_diagnostics(run, df: pd.DataFrame) -> None:
     if not reason_table.empty:
         st.markdown("**Сводка по root cause code**")
         st.dataframe(_prepare_df_for_display(reason_table), width="stretch")
+
+    if not resolver_table.empty:
+        st.markdown("**Сводка по resolver**")
+        st.dataframe(_prepare_df_for_display(resolver_table), width="stretch")
 
     if not detail_table.empty:
         st.markdown("**Детали по строкам**")

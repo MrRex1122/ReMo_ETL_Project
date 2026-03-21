@@ -37,6 +37,7 @@ class AppUiRegressionTests(unittest.TestCase):
         self.assertIn("Пересчитать диагностику", app_source)
         self.assertIn("Скачать всю диагностику", app_source)
         self.assertIn("Сводка по root cause", app_source)
+        self.assertIn("Сводка по resolver", app_source)
         self.assertIn("not audited family", app_source)
 
 

@@ -15,6 +15,7 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
         "retrieval_mode": "whole_category",
         "strictness": "strict",
         "audited": True,
+        "same_family_gate": True,
         "weak_match_policy": "reject_in_exact",
         "classifier": {
             "priority": 90,
@@ -28,6 +29,7 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
         "retrieval_mode": "whole_category",
         "strictness": "strict",
         "audited": True,
+        "same_family_gate": True,
         "weak_match_policy": "reject_in_exact",
         "classifier": {
             "priority": 95,
@@ -125,6 +127,7 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
         "retrieval_mode": "whole_category",
         "strictness": "strict",
         "audited": True,
+        "same_family_gate": True,
         "weak_match_policy": "reject_in_exact",
         "classifier": {
             "priority": 60,
@@ -138,6 +141,7 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
         "retrieval_mode": "whole_category",
         "strictness": "strict",
         "audited": True,
+        "same_family_gate": True,
         "weak_match_policy": "reject_in_exact",
         "classifier": {
             "priority": 60,
@@ -740,6 +744,10 @@ def family_strictness(
 def family_weak_match_policy(entity_family: str, rules: Mapping[str, Any] | None) -> str:
     value = clean_registry_text(family_spec_for(entity_family, rules).get("weak_match_policy")).lower()
     return value or "allow"
+
+
+def family_requires_same_family_gate(entity_family: str, rules: Mapping[str, Any] | None) -> bool:
+    return bool(family_spec_for(entity_family, rules).get("same_family_gate"))
 
 
 def allowed_cross_family_pairs(rules: Mapping[str, Any] | None) -> set[tuple[str, str]]:

@@ -80,6 +80,7 @@ from taxonomy_registry import (
     family_entity_types as registry_family_entity_types,
     family_retrieval_mode as registry_family_retrieval_mode,
     family_secondary_filter_rules as registry_family_secondary_filter_rules,
+    family_requires_same_family_gate as registry_family_requires_same_family_gate,
     family_strictness as registry_family_strictness,
     family_weak_match_policy as registry_family_weak_match_policy,
     gemini_policy_value as registry_gemini_policy_value,
@@ -679,49 +680,11 @@ class ReMoMatcher:
         return registry_family_entity_types(entity_family, getattr(self, "taxonomy_rules", {}))
 
     def _default_branch_paths_for_family(self, query_features: Dict[str, Any]) -> List[str]:
-        registry_defaults = registry_family_default_branches(
+        return registry_family_default_branches(
             query_features.get("entity_type", ""),
             getattr(self, "taxonomy_rules", {}),
             branch_hint=self._clean_text_value(query_features.get("branch_hint")),
         )
-        if registry_defaults:
-            return registry_defaults
-        family = self._entity_family(query_features.get("entity_type", ""))
-        branch_hint = self._clean_text_value(query_features.get("branch_hint"))
-        defaults: List[str] = []
-        if branch_hint and branch_hint != "прочее":
-            defaults.append(branch_hint)
-        family_defaults = {
-            "airflow_blanking_panel": "телеком > аксессуары > шкафные аксессуары > заглушки",
-            "ats_sts": "телеком > питание > ats",
-            "floor_box": "телеком > аксессуары > лючки",
-            "ground_bar": "телеком > аксессуары > заземление",
-            "iec_power_cable": "электрика > кабели",
-            "keystone": "телеком > коммутация > модули",
-            "optical_cross": "телеком > оптика > кроссы",
-            "optical_patch_cord": "телеком > кабели > оптические патч корды",
-            "patch_cord": "телеком > кабели > патч корды",
-            "patch_panel": "телеком > коммутация > патч панели",
-            "pdu": "телеком > питание > pdu",
-            "rack": "телеком > шкафы",
-            "rack_accessory_strict": "телеком > аксессуары > шкафные аксессуары",
-            "rack_rail": "телеком > аксессуары > шкафные аксессуары",
-            "rack_shelf": "телеком > аксессуары > шкафные аксессуары",
-            "rj45_connector": [
-                "телеком > коммутация > модули",
-                "электрика > кабели",
-            ],
-            "rj45_outlet": "телеком > коммутация > модули",
-            "sensor": "автоматика > датчики",
-        }
-        default_branch = family_defaults.get(family)
-        if isinstance(default_branch, (list, tuple, set)):
-            for branch_path in default_branch:
-                if branch_path and branch_path not in defaults:
-                    defaults.append(branch_path)
-        elif default_branch and default_branch not in defaults:
-            defaults.append(default_branch)
-        return defaults or (["прочее"] if family else [])
 
     def _should_use_whole_category_retrieval(self, query_features: Dict[str, Any]) -> bool:
         if not self._uses_duckdb_query_backend():
@@ -1858,45 +1821,11 @@ class ReMoMatcher:
         return entity_family_for_type(entity_type, getattr(self, "taxonomy_rules", {}))
 
     def _match_strictness_for_query(self, query_features: Dict[str, Any]) -> str:
-        registry_value = registry_family_strictness(
+        return registry_family_strictness(
             query_features.get("entity_type", ""),
             getattr(self, "taxonomy_rules", {}),
             markers=query_features.get("markers", {}) or {},
         )
-        if registry_value:
-            return registry_value
-        entity_family = self._entity_family(query_features.get("entity_type", ""))
-        query_markers = query_features.get("markers", {}) or {}
-        if entity_family == "bulk_twisted_pair" and any(
-            self._clean_text_value(query_markers.get(key)) for key in ("category", "shielding", "cable_environment")
-        ):
-            return "strict"
-        strict_families = {
-            "patch_cord",
-            "patch_panel",
-            "pdu",
-            "sensor",
-            "breaker",
-            "socket",
-            "keystone",
-            "optical_patch_cord",
-            "optical_cross",
-            "iec_power_cable",
-            "ats_sts",
-            "airflow_blanking_panel",
-            "rack_accessory_strict",
-            "rack_shelf",
-            "floor_box",
-            "rj45_connector",
-            "rj45_outlet",
-            "ground_bar",
-        }
-        semi_strict_families = {"cable", "wire", "bulk_twisted_pair", "coax", "rack", "rack_rail"}
-        if entity_family in strict_families:
-            return "strict"
-        if entity_family in semi_strict_families:
-            return "semi_strict"
-        return "generic"
 
     def _hard_incompatibility_reason(self, query_features: Dict[str, Any], item: Dict[str, Any]) -> str:
         query_text = self._clean_text_value(query_features.get("original_text"))
@@ -2364,7 +2293,7 @@ class ReMoMatcher:
         query_family = self._entity_family(query_features.get("entity_type", ""))
         candidate_family = self._entity_family(item.get("entity_type", ""))
         allowed_pairs = registry_allowed_cross_family_pairs(getattr(self, "taxonomy_rules", {}))
-        if query_family in {"patch_panel", "optical_cross", "ats_sts", "airflow_blanking_panel"}:
+        if registry_family_requires_same_family_gate(query_family, getattr(self, "taxonomy_rules", {})):
             return candidate_family == query_family
         if candidate_family == query_family:
             return True
@@ -2374,7 +2303,7 @@ class ReMoMatcher:
         query_family = self._entity_family(query_features.get("entity_type", ""))
         candidate_family = self._entity_family(item.get("entity_type", ""))
         allowed_pairs = registry_allowed_cross_family_pairs(getattr(self, "taxonomy_rules", {}))
-        if query_family in {"patch_panel", "optical_cross", "ats_sts", "airflow_blanking_panel"}:
+        if registry_family_requires_same_family_gate(query_family, getattr(self, "taxonomy_rules", {})):
             return candidate_family == query_family
         if (query_family, candidate_family) in allowed_pairs:
             return True

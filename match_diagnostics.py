@@ -74,6 +74,13 @@ def _safe_int(value: Any) -> int:
         return 0
 
 
+def _safe_float(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _normalize_reason_code(value: Any) -> str:
     reason_code = _clean_text_value(value)
     return reason_code or "resolved"
@@ -294,6 +301,7 @@ def _build_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     pipeline_stage_counts = Counter()
     root_cause_class_counts = Counter()
     root_cause_code_counts = Counter()
+    resolver_name_counts = Counter()
     rows_resolved = 0
     rows_unresolved = 0
 
@@ -305,9 +313,12 @@ def _build_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
             pipeline_reason_code,
         )
         root_cause_code = _normalize_reason_code(row.get("root_cause_code") or row.get("reason_code") or pipeline_reason_code)
+        resolver_name = _clean_text_value(row.get("resolver_name") or row.get("resolution_source"))
         pipeline_stage_counts[pipeline_stage] += 1
         root_cause_class_counts[root_cause_class] += 1
         root_cause_code_counts[root_cause_code] += 1
+        if resolver_name:
+            resolver_name_counts[resolver_name] += 1
         if pipeline_stage == "resolved":
             rows_resolved += 1
         else:
@@ -320,6 +331,7 @@ def _build_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "pipeline_stage_counts": dict(sorted(pipeline_stage_counts.items())),
         "root_cause_class_counts": dict(sorted(root_cause_class_counts.items())),
         "root_cause_code_counts": dict(sorted(root_cause_code_counts.items())),
+        "resolver_name_counts": dict(sorted(resolver_name_counts.items())),
         # Backward-compatible aliases.
         "stage_counts": dict(sorted(pipeline_stage_counts.items())),
         "reason_class_counts": dict(sorted(root_cause_class_counts.items())),
@@ -374,7 +386,25 @@ def apply_match_diagnostics_to_result_dataframe(
     stage_column = "Этап отказа"
     reason_code_column = "Код причины"
     reason_class_column = "Класс причины"
-    for column in (stage_column, reason_code_column, reason_class_column):
+    resolver_name_column = "Резолвер"
+    resolver_confidence_column = "Уверенность резолвера"
+    family_confidence_column = "Уверенность family"
+    article_validation_column = "Статус article validation"
+    gemini_route_column = "Gemini route"
+    gemini_validation_column = "Gemini validation"
+    secondary_filter_column = "Правила secondary filter"
+    for column in (
+        stage_column,
+        reason_code_column,
+        reason_class_column,
+        resolver_name_column,
+        resolver_confidence_column,
+        family_confidence_column,
+        article_validation_column,
+        gemini_route_column,
+        gemini_validation_column,
+        secondary_filter_column,
+    ):
         if column not in df_result.columns:
             df_result[column] = None
 
@@ -396,6 +426,19 @@ def apply_match_diagnostics_to_result_dataframe(
         df_result.at[dataframe_index, stage_column] = pipeline_stage
         df_result.at[dataframe_index, reason_code_column] = root_cause_code
         df_result.at[dataframe_index, reason_class_column] = root_cause_class
+        df_result.at[dataframe_index, resolver_name_column] = _clean_text_value(
+            row.get("resolver_name") or row.get("resolution_source")
+        )
+        df_result.at[dataframe_index, resolver_confidence_column] = round(_safe_float(row.get("resolver_confidence")), 4)
+        df_result.at[dataframe_index, family_confidence_column] = round(_safe_float(row.get("family_confidence")), 4)
+        df_result.at[dataframe_index, article_validation_column] = _clean_text_value(row.get("article_validation_status"))
+        df_result.at[dataframe_index, gemini_route_column] = bool(row.get("gemini_route_used"))
+        df_result.at[dataframe_index, gemini_validation_column] = bool(row.get("gemini_validation_used"))
+        df_result.at[dataframe_index, secondary_filter_column] = ", ".join(
+            str(item)
+            for item in (row.get("secondary_filter_rule_set") or [])
+            if _clean_text_value(item)
+        )
     return df_result
 
 
@@ -514,6 +557,13 @@ def reconstruct_match_diagnostics(
                 "article_source": "none",
                 "article_lookup_hit": False,
                 "article_lookup_conflict": False,
+                "article_validation_status": "",
+                "resolver_name": _clean_text_value(row.get("Источник решения")),
+                "resolver_confidence": 0.0,
+                "family_confidence": 0.0,
+                "gemini_route_used": False,
+                "gemini_validation_used": False,
+                "secondary_filter_rule_set": [],
                 "compatibility_status": _clean_text_value(row.get("Совместимость решения")),
                 "incompatibility_reason": _clean_text_value(row.get("Причина несовместимости")),
                 "pipeline_stage": stage_of_failure,
@@ -591,6 +641,19 @@ def prepare_match_diagnostics_table(payload: dict[str, Any]) -> pd.DataFrame:
                 "Article source": row.get("article_source"),
                 "Article hit": row.get("article_lookup_hit"),
                 "Article conflict": row.get("article_lookup_conflict"),
+                "Article validation": row.get("article_validation_status"),
+                "Resolver": row.get("resolver_name") or row.get("resolution_source"),
+                "Resolver confidence": _safe_float(row.get("resolver_confidence")),
+                "Family confidence": _safe_float(row.get("family_confidence")),
+                "Gemini route used": bool(row.get("gemini_route_used")),
+                "Gemini validation used": bool(row.get("gemini_validation_used")),
+                "Secondary filter rules": ", ".join(
+                    str(item)
+                    for item in (row.get("secondary_filter_rule_set") or [])
+                    if _clean_text_value(item)
+                ),
+                "Secondary filter before": pipeline_counts.get("secondary_filter_before_count"),
+                "Secondary filter after": pipeline_counts.get("secondary_filter_after_count"),
                 "Root cause class": row.get("root_cause_class") or row.get("reason_class"),
                 "Root cause code": row.get("root_cause_code") or row.get("reason_code"),
                 "Coverage scope": row.get("coverage_scope"),
@@ -635,6 +698,16 @@ def prepare_match_diagnostics_reason_table(payload: dict[str, Any]) -> pd.DataFr
         return pd.DataFrame()
     return pd.DataFrame(
         [{"Root cause code": reason_code, "Строк": _safe_int(count)} for reason_code, count in reason_counts.items()]
+    )
+
+
+def prepare_match_diagnostics_resolver_table(payload: dict[str, Any]) -> pd.DataFrame:
+    summary = payload.get("summary") or {}
+    resolver_counts = summary.get("resolver_name_counts") or {}
+    if not isinstance(resolver_counts, dict):
+        return pd.DataFrame()
+    return pd.DataFrame(
+        [{"Resolver": resolver_name, "Строк": _safe_int(count)} for resolver_name, count in resolver_counts.items()]
     )
 
 

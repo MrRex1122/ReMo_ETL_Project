@@ -9,6 +9,7 @@ from match_diagnostics import (
     enrich_match_diagnostics_payload,
     is_match_diagnostics_fresh,
     prepare_match_diagnostics_reason_table,
+    prepare_match_diagnostics_resolver_table,
     prepare_match_diagnostics_root_cause_table,
     prepare_match_diagnostics_stage_table,
     prepare_match_diagnostics_table,
@@ -262,12 +263,26 @@ class MatchDiagnosticsTests(unittest.TestCase):
                     "entity_type": "patch_cord",
                     "query_family": "patch_cord",
                     "resolution_source": "local_tree+gemini",
+                    "resolver_name": "local_tree+gemini",
+                    "resolver_confidence": 0.87,
+                    "family_confidence": 0.78,
+                    "article_validation_status": "validated",
+                    "gemini_route_used": True,
+                    "gemini_validation_used": False,
+                    "secondary_filter_rule_set": ["patch_category_preferred"],
                     "compatibility_status": "compatible",
                     "incompatibility_reason": "",
                     "stage_of_failure": "resolved",
                     "reason_code": "resolved",
                     "reason_class": "resolved",
-                    "pipeline_counts": {"local_pool_count": 8, "scored_count": 4, "same_family_count": 4, "compatible_count": 2},
+                    "pipeline_counts": {
+                        "local_pool_count": 8,
+                        "scored_count": 4,
+                        "same_family_count": 4,
+                        "compatible_count": 2,
+                        "secondary_filter_before_count": 6,
+                        "secondary_filter_after_count": 2,
+                    },
                     "candidate_snapshots": {
                         "display_examples": [{"name": "Патч-корд RJ45", "article": "PC-1"}],
                     },
@@ -282,12 +297,16 @@ class MatchDiagnosticsTests(unittest.TestCase):
         stages = prepare_match_diagnostics_stage_table(payload)
         root_causes = prepare_match_diagnostics_root_cause_table(payload)
         reasons = prepare_match_diagnostics_reason_table(payload)
+        resolvers = prepare_match_diagnostics_resolver_table(payload)
         self.assertIn("Pipeline stage", detail.columns)
+        self.assertIn("Resolver", detail.columns)
+        self.assertIn("Secondary filter rules", detail.columns)
         self.assertIn("Root cause code", detail.columns)
         self.assertIn("Coverage scope", detail.columns)
         self.assertIn("Pipeline stage", stages.columns)
         self.assertIn("Root cause class", root_causes.columns)
         self.assertIn("Root cause code", reasons.columns)
+        self.assertIn("Resolver", resolvers.columns)
 
     def test_apply_match_diagnostics_to_result_dataframe_uses_enriched_root_cause_fields(self):
         df = pd.DataFrame(
@@ -304,6 +323,13 @@ class MatchDiagnosticsTests(unittest.TestCase):
                     "run_row_number": 2,
                     "query_text": "Оптический кросс",
                     "query_family": "optical_cross",
+                    "resolver_name": "candidate_tiebreaker_gemini",
+                    "resolver_confidence": 0.54,
+                    "family_confidence": 0.66,
+                    "article_validation_status": "rejected",
+                    "gemini_route_used": True,
+                    "gemini_validation_used": True,
+                    "secondary_filter_rule_set": ["optical_cross_ports_required"],
                     "stage_of_failure": "local_recall",
                     "reason_code": "no_compatible_candidates",
                     "reason_class": "matcher_retrieval_or_ranking",
@@ -333,6 +359,10 @@ class MatchDiagnosticsTests(unittest.TestCase):
         self.assertEqual(updated.at[0, "Этап отказа"], "local_recall")
         self.assertEqual(updated.at[0, "Код причины"], "missing_family")
         self.assertEqual(updated.at[0, "Класс причины"], "catalog_gap")
+        self.assertEqual(updated.at[0, "Резолвер"], "candidate_tiebreaker_gemini")
+        self.assertEqual(updated.at[0, "Статус article validation"], "rejected")
+        self.assertEqual(updated.at[0, "Gemini route"], True)
+        self.assertEqual(updated.at[0, "Gemini validation"], True)
 
     def test_apply_match_diagnostics_summary_to_stats_uses_enriched_summary(self):
         payload = {
