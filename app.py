@@ -4,7 +4,6 @@ Streamlit интерфейс для семантического сопоста�
 """
 
 import streamlit as st
-import streamlit.components.v1 as components
 from streamlit.errors import StreamlitSecretNotFoundError
 import pandas as pd
 import os
@@ -102,6 +101,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 ACTIVE_RUN_AUTOREFRESH_MS = 5000
+ACTIVE_RUN_FRAGMENT_REFRESH_INTERVAL = f"{max(1, ACTIVE_RUN_AUTOREFRESH_MS // 1000)}s"
 
 # ============ КОНФИГУРАЦИЯ ============
 st.set_page_config(
@@ -861,43 +861,188 @@ def _load_run_progress_safe(run_id: str) -> dict[str, Any] | None:
         return None
 
 
-def _schedule_active_run_autorefresh(run_id: str | None, *, interval_ms: int = ACTIVE_RUN_AUTOREFRESH_MS) -> None:
-    if run_id:
-        script = f"""
-        <script>
-        const root = window.parent;
-        const key = "run:{run_id}";
-        if (!root.__remoAutoRefreshTimers) {{
-          root.__remoAutoRefreshTimers = {{}};
-        }}
-        Object.keys(root.__remoAutoRefreshTimers).forEach((existingKey) => {{
-          if (existingKey !== key) {{
-            clearTimeout(root.__remoAutoRefreshTimers[existingKey]);
-            delete root.__remoAutoRefreshTimers[existingKey];
-          }}
-        }});
-        if (root.__remoAutoRefreshTimers[key]) {{
-          clearTimeout(root.__remoAutoRefreshTimers[key]);
-        }}
-        root.__remoAutoRefreshTimers[key] = setTimeout(() => {{
-          delete root.__remoAutoRefreshTimers[key];
-          root.location.reload();
-        }}, {int(interval_ms)});
-        </script>
-        """
+def _parse_run_timestamp(value: str | None) -> datetime | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    normalized = text.replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+
+
+def _format_elapsed_duration(seconds_total: int) -> str:
+    seconds_total = max(0, int(seconds_total))
+    hours, remainder = divmod(seconds_total, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours}ч {minutes:02d}м {seconds:02d}с"
+    if minutes:
+        return f"{minutes}м {seconds:02d}с"
+    return f"{seconds}с"
+
+
+def _get_run_elapsed_label(run: Any) -> str | None:
+    started_at = _parse_run_timestamp(getattr(run, "started_at", None))
+    if started_at is None:
+        return None
+    if started_at.tzinfo is None:
+        finished_at = _parse_run_timestamp(getattr(run, "updated_at", None)) or datetime.now()
     else:
-        script = """
-        <script>
-        const root = window.parent;
-        if (root.__remoAutoRefreshTimers) {
-          Object.keys(root.__remoAutoRefreshTimers).forEach((existingKey) => {
-            clearTimeout(root.__remoAutoRefreshTimers[existingKey]);
-            delete root.__remoAutoRefreshTimers[existingKey];
-          });
+        finished_at = _parse_run_timestamp(getattr(run, "updated_at", None)) or datetime.now(started_at.tzinfo)
+    if getattr(run, "status", None) in ("queued", "running"):
+        finished_at = datetime.now(started_at.tzinfo) if started_at.tzinfo is not None else datetime.now()
+    return _format_elapsed_duration(int((finished_at - started_at).total_seconds()))
+
+
+def _refresh_active_run_for_display() -> Any:
+    run_for_display = _get_active_or_preferred_run()
+    if run_for_display is None:
+        st.session_state.active_run_auto_refresh_enabled = False
+        return None
+    st.session_state.active_run_status = run_for_display.status
+    return run_for_display
+
+
+def _render_active_run_panel_contents(run_for_display: Any) -> None:
+    status_labels = {
+        "queued": "В очереди",
+        "running": "Выполняется",
+        "completed": "Завершен",
+        "failed": "Ошибка",
+        "interrupted": "Прерван",
+    }
+    auto_refresh_allowed = run_for_display.status in ("queued", "running")
+    if not auto_refresh_allowed and st.session_state.get("active_run_auto_refresh_enabled"):
+        st.session_state.active_run_auto_refresh_enabled = False
+
+    st.subheader("Текущий прогон")
+    st.write(f"**ID:** `{run_for_display.run_id}`")
+    st.write(f"**Файл:** {run_for_display.input_filename}")
+    st.write(f"**Статус:** {status_labels.get(run_for_display.status, run_for_display.status)}")
+    st.write(f"**Источник каталога:** {run_for_display.catalog_source_kind}")
+    st.write(f"**Создан:** {run_for_display.created_at}")
+    if run_for_display.started_at:
+        st.write(f"**Старт:** {run_for_display.started_at}")
+    st.write(f"**Обновлен:** {run_for_display.updated_at}")
+    elapsed_label = _get_run_elapsed_label(run_for_display)
+    if elapsed_label:
+        st.write(f"**Длительность:** {elapsed_label}")
+
+    progress_state = _load_run_progress_safe(run_for_display.run_id)
+    if progress_state:
+        stage_labels = {
+            "queued": "Ожидание запуска",
+            "matcher_init": "Инициализация matcher",
+            "reading_excel": "Чтение Excel",
+            "processing": "Подготовка к обработке",
+            "matching": "Сопоставление позиций",
+            "saving_results": "Сохранение результатов",
+            "completed": "Завершено",
+            "interrupted": "Остановлено",
+            "failed": "Ошибка",
         }
-        </script>
-        """
-    components.html(script, height=0, width=0)
+        progress_stage = str(progress_state.get("stage") or "").strip()
+        progress_message = str(progress_state.get("message") or "").strip()
+        current = progress_state.get("current")
+        total = progress_state.get("total")
+        percent = progress_state.get("percent")
+        try:
+            normalized_progress = float(percent) if percent is not None else 0.0
+        except (TypeError, ValueError):
+            normalized_progress = 0.0
+        normalized_progress = max(0.0, min(1.0, normalized_progress))
+        st.write(f"**Этап:** {stage_labels.get(progress_stage, progress_stage or 'Неизвестно')}")
+        st.progress(normalized_progress)
+        if current is not None and total is not None and int(total) > 0:
+            st.caption(f"Прогресс: {int(current)} / {int(total)}")
+        if progress_message:
+            st.caption(progress_message)
+        if auto_refresh_allowed:
+            if st.session_state.get("active_run_auto_refresh_enabled"):
+                st.caption("Автообновление включено: блок статуса обновляется каждые 5 секунд без перезагрузки страницы.")
+            else:
+                st.caption("Автообновление выключено. Включите его ниже или обновляйте статус вручную.")
+    if run_for_display.status == "completed":
+        st.caption(
+            "Статистика: "
+            f"всего={run_for_display.rows_total or 0}, "
+            f"найдено={run_for_display.found_count or 0}, "
+            f"не найдено={run_for_display.missing_count or 0}, "
+            f"требуют проверки={run_for_display.requires_review_count or 0}"
+        )
+    elif run_for_display.error_text:
+        st.warning(run_for_display.error_text)
+
+    status_col1, status_col2, status_col3, status_col4 = st.columns(4)
+    with status_col1:
+        if st.button("🔄 Обновить статус", key="refresh_active_run_status"):
+            st.rerun()
+    with status_col2:
+        if auto_refresh_allowed:
+            st.checkbox(
+                "Автообновление 5с",
+                value=bool(st.session_state.get("active_run_auto_refresh_enabled")),
+                key="active_run_auto_refresh_enabled",
+                help="Обновляет только блок статуса во время выполнения прогона, без перезагрузки всей страницы.",
+            )
+        elif st.button("📌 Открыть этот прогон в результатах", key="open_active_run_results"):
+            st.session_state.active_run_id = run_for_display.run_id
+            st.session_state.active_run_status = run_for_display.status
+            st.info("Перейдите на вкладку «Результаты», чтобы открыть этот прогон.")
+    with status_col3:
+        if auto_refresh_allowed:
+            cancel_already_requested = is_processing_run_cancel_requested(run_for_display.run_id)
+            if cancel_already_requested:
+                st.caption("Остановка уже запрошена")
+            if st.button(
+                "⏹ Остановить прогон",
+                key="cancel_active_run",
+                disabled=cancel_already_requested,
+            ):
+                current_progress = _load_run_progress_safe(run_for_display.run_id) or {}
+                request_processing_run_cancel(run_for_display.run_id)
+                write_processing_run_progress(
+                    run_for_display.run_id,
+                    stage=str(current_progress.get("stage") or "processing"),
+                    current=current_progress.get("current"),
+                    total=current_progress.get("total"),
+                    percent=current_progress.get("percent"),
+                    message="Запрошена остановка прогона. Ожидаем безопасного завершения текущих задач.",
+                )
+                st.warning("Остановка запрошена. Прогон завершится на ближайшей безопасной точке.")
+    with status_col4:
+        if st.button("🧹 Сбросить выбор", key="clear_active_run_selection"):
+            st.session_state.active_run_id = None
+            st.session_state.active_run_status = None
+            st.session_state.active_run_auto_refresh_enabled = False
+            _clear_loaded_run_cache()
+            st.success("Выбор активного прогона очищен")
+
+
+@st.fragment(run_every=ACTIVE_RUN_FRAGMENT_REFRESH_INTERVAL)
+def _render_active_run_panel_live() -> None:
+    run_for_display = _refresh_active_run_for_display()
+    if run_for_display is None:
+        st.rerun()
+        return
+    _render_active_run_panel_contents(run_for_display)
+    auto_refresh_still_needed = (
+        run_for_display.status in ("queued", "running")
+        and bool(st.session_state.get("active_run_auto_refresh_enabled"))
+    )
+    if not auto_refresh_still_needed:
+        st.rerun()
+
+
+def _render_active_run_panel_static() -> None:
+    run_for_display = _refresh_active_run_for_display()
+    if run_for_display is None:
+        return
+    _render_active_run_panel_contents(run_for_display)
 
 
 def _load_run_results_into_session(run) -> tuple[pd.DataFrame, dict[str, Any]]:
@@ -1981,124 +2126,14 @@ def main():
 
         run_for_display = _get_active_or_preferred_run()
         if run_for_display is not None:
-            status_labels = {
-                "queued": "В очереди",
-                "running": "Выполняется",
-                "completed": "Завершен",
-                "failed": "Ошибка",
-                "interrupted": "Прерван",
-            }
             auto_refresh_allowed = run_for_display.status in ("queued", "running")
-            if not auto_refresh_allowed:
-                st.session_state.active_run_auto_refresh_enabled = False
             if auto_refresh_allowed and st.session_state.get("active_run_auto_refresh_enabled"):
-                _schedule_active_run_autorefresh(run_for_display.run_id)
+                _render_active_run_panel_live()
             else:
-                _schedule_active_run_autorefresh(None)
-            st.subheader("Текущий прогон")
-            st.write(f"**ID:** `{run_for_display.run_id}`")
-            st.write(f"**Файл:** {run_for_display.input_filename}")
-            st.write(f"**Статус:** {status_labels.get(run_for_display.status, run_for_display.status)}")
-            st.write(f"**Источник каталога:** {run_for_display.catalog_source_kind}")
-            st.write(f"**Создан:** {run_for_display.created_at}")
-            if run_for_display.started_at:
-                st.write(f"**Старт:** {run_for_display.started_at}")
-            st.write(f"**Обновлен:** {run_for_display.updated_at}")
-            progress_state = _load_run_progress_safe(run_for_display.run_id)
-            if progress_state:
-                stage_labels = {
-                    "queued": "Ожидание запуска",
-                    "matcher_init": "Инициализация matcher",
-                    "reading_excel": "Чтение Excel",
-                    "processing": "Подготовка к обработке",
-                    "matching": "Сопоставление позиций",
-                    "saving_results": "Сохранение результатов",
-                    "completed": "Завершено",
-                    "interrupted": "Остановлено",
-                    "failed": "Ошибка",
-                }
-                progress_stage = str(progress_state.get("stage") or "").strip()
-                progress_message = str(progress_state.get("message") or "").strip()
-                current = progress_state.get("current")
-                total = progress_state.get("total")
-                percent = progress_state.get("percent")
-                try:
-                    normalized_progress = float(percent) if percent is not None else 0.0
-                except (TypeError, ValueError):
-                    normalized_progress = 0.0
-                normalized_progress = max(0.0, min(1.0, normalized_progress))
-                st.write(
-                    f"**Этап:** {stage_labels.get(progress_stage, progress_stage or 'Неизвестно')}"
-                )
-                st.progress(normalized_progress)
-                if current is not None and total is not None and int(total) > 0:
-                    st.caption(f"Прогресс: {int(current)} / {int(total)}")
-                if progress_message:
-                    st.caption(progress_message)
-                if auto_refresh_allowed:
-                    if st.session_state.get("active_run_auto_refresh_enabled"):
-                        st.caption("Автообновление включено: страница обновляется каждые 5 секунд.")
-                    else:
-                        st.caption("Автообновление выключено. Включите его ниже или обновляйте статус вручную.")
-            if run_for_display.status == "completed":
-                st.caption(
-                    "Статистика: "
-                    f"всего={run_for_display.rows_total or 0}, "
-                    f"найдено={run_for_display.found_count or 0}, "
-                    f"не найдено={run_for_display.missing_count or 0}, "
-                    f"требуют проверки={run_for_display.requires_review_count or 0}"
-                )
-            elif run_for_display.error_text:
-                st.warning(run_for_display.error_text)
-
-            status_col1, status_col2, status_col3, status_col4 = st.columns(4)
-            with status_col1:
-                if st.button("🔄 Обновить статус", key="refresh_active_run_status"):
-                    st.rerun()
-            with status_col2:
-                if auto_refresh_allowed:
-                    st.checkbox(
-                        "Автообновление 5с",
-                        value=bool(st.session_state.get("active_run_auto_refresh_enabled")),
-                        key="active_run_auto_refresh_enabled",
-                        help="Включает автоматическое обновление страницы во время выполнения прогона.",
-                    )
-                elif st.button("📌 Открыть этот прогон в результатах", key="open_active_run_results"):
-                    st.session_state.active_run_id = run_for_display.run_id
-                    st.session_state.active_run_status = run_for_display.status
-                    st.info("Перейдите на вкладку «Результаты», чтобы открыть этот прогон.")
-            with status_col3:
-                if auto_refresh_allowed:
-                    cancel_already_requested = is_processing_run_cancel_requested(run_for_display.run_id)
-                    if cancel_already_requested:
-                        st.caption("Остановка уже запрошена")
-                    if st.button(
-                        "⏹ Остановить прогон",
-                        key="cancel_active_run",
-                        disabled=cancel_already_requested,
-                    ):
-                        current_progress = _load_run_progress_safe(run_for_display.run_id) or {}
-                        request_processing_run_cancel(run_for_display.run_id)
-                        write_processing_run_progress(
-                            run_for_display.run_id,
-                            stage=str(current_progress.get("stage") or "processing"),
-                            current=current_progress.get("current"),
-                            total=current_progress.get("total"),
-                            percent=current_progress.get("percent"),
-                            message="Запрошена остановка прогона. Ожидаем безопасного завершения текущих задач.",
-                        )
-                        st.warning("Остановка запрошена. Прогон завершится на ближайшей безопасной точке.")
-            with status_col4:
-                if st.button("🧹 Сбросить выбор", key="clear_active_run_selection"):
-                    st.session_state.active_run_id = None
-                    st.session_state.active_run_status = None
-                    st.session_state.active_run_auto_refresh_enabled = False
-                    _clear_loaded_run_cache()
-                    st.success("Выбор активного прогона очищен")
+                _render_active_run_panel_static()
         else:
             st.session_state.active_run_auto_refresh_enabled = False
-            _schedule_active_run_autorefresh(None)
-        
+
         uploaded_file = st.file_uploader(
             "Выберите Excel файл коммерческого предложения",
             type=['xlsx', 'xls'],

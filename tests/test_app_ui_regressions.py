@@ -57,6 +57,12 @@ class AppUiRegressionTests(unittest.TestCase):
         app_source = Path("app.py").read_text(encoding="utf-8")
         self.assertIn("Остановить прогон", app_source)
 
+    def test_active_run_status_uses_fragment_refresh_instead_of_page_reload(self):
+        app_source = Path("app.py").read_text(encoding="utf-8")
+        self.assertIn("@st.fragment(run_every=ACTIVE_RUN_FRAGMENT_REFRESH_INTERVAL)", app_source)
+        self.assertNotIn("location.reload()", app_source)
+        self.assertNotIn("streamlit.components.v1", app_source)
+
 
 if __name__ == "__main__":
     unittest.main()
