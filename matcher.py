@@ -1412,7 +1412,6 @@ class ReMoMatcher:
         signature = self._extract_cable_designation_signature(designation_source)
         if not signature:
             return None
-
         lookup_query = f"кабель {designation_source}".strip()
         lookup_features = self._extract_query_features(lookup_query)
         lookup_features["original_text"] = lookup_query
@@ -1438,13 +1437,61 @@ class ReMoMatcher:
             candidate_pool, _ = self._duckdb_heuristic_candidates(lookup_query, lookup_features, limit=160)
         if not candidate_pool:
             candidate_pool = self._select_candidates(lookup_query, limit=160)
+        if not candidate_pool:
+            return None
+
+        direct_candidates: List[Dict[str, Any]] = []
+        query_dimension = self._clean_text_value(signature.get("dimension")).lower()
+        query_dimension_variants = {
+            query_dimension,
+            query_dimension.replace("x", "х"),
+        }
+        query_base_tokens = [token for token in self._cable_designation_base_tokens(signature) if token]
+        seen_row_idx: set[int] = set()
+        for item in candidate_pool:
+            row_idx = int(item.get("row_idx", -1))
+            if row_idx in seen_row_idx:
+                continue
+            item_name = self._clean_text_value(item.get("name"))
+            item_normalized_name = self._clean_text_value(item.get("normalized_name"))
+            item_haystack = f"{item_name} {item_normalized_name}".lower().replace("ё", "е")
+            if query_dimension and not any(variant and variant in item_haystack for variant in query_dimension_variants):
+                continue
+            item_tokens = {
+                self._clean_text_value(token).lower()
+                for token in (item.get("tokens") or [])
+                if self._clean_text_value(token)
+            }
+            if query_base_tokens and not all(token in item_tokens or token in item_haystack for token in query_base_tokens):
+                continue
+            if self._compatibility_label(lookup_features, item) != "compatible":
+                continue
+            seen_row_idx.add(row_idx)
+            direct_candidates.append(item)
+
+        if direct_candidates:
+            scored_entries = self._score_candidates_locally(lookup_features, direct_candidates)
+            if scored_entries:
+                best_entry = scored_entries[0]
+                if len(scored_entries) == 1:
+                    return best_entry["item"]
+                second_score = float(scored_entries[1]["score"])
+                best_score = float(best_entry["score"])
+                if len(direct_candidates) <= 2 and best_score >= 0.5 and best_score - second_score < 0.04:
+                    return best_entry["item"]
 
         signature_candidates: List[Dict[str, Any]] = []
         seen_row_idx: set[int] = set()
         for item in candidate_pool:
-            item_signature = self._extract_cable_designation_signature(
-                self._clean_text_value(item.get("name")) or self._clean_text_value(item.get("normalized_name"))
-            )
+            item_name = self._clean_text_value(item.get("name"))
+            item_normalized_name = self._clean_text_value(item.get("normalized_name"))
+            item_signature = self._extract_cable_designation_signature(item_name or item_normalized_name)
+            if item_normalized_name and item_normalized_name != item_name:
+                normalized_signature = self._extract_cable_designation_signature(item_normalized_name)
+                if normalized_signature and (
+                    not item_signature or self._cable_designation_signatures_match(signature, normalized_signature)
+                ):
+                    item_signature = normalized_signature
             if not self._cable_designation_signatures_match(signature, item_signature):
                 continue
             row_idx = int(item.get("row_idx", -1))
@@ -1455,16 +1502,126 @@ class ReMoMatcher:
                 continue
             signature_candidates.append(item)
 
+        designation_fallback_used = False
+        if not signature_candidates:
+            weak_signature_base = not any(
+                len(token) >= 3 and token not in {"ls", "hf", "ng"}
+                for token in self._cable_designation_base_tokens(signature)
+            )
+            fallback_source = re.sub(
+                r"\b(?:кабель|провод|артикул|арт\.?|sku|part\s*number|partnumber|vendor\s*code)\b",
+                " ",
+                designation_source.lower().replace("ё", "е"),
+                flags=re.IGNORECASE,
+            )
+            fallback_base = fallback_source.split(str(signature.get("dimension") or ""), 1)[0]
+            fallback_tokens = [
+                token
+                for token in re.findall(r"[a-zа-я0-9]+", fallback_base, flags=re.IGNORECASE)
+                if len(token) >= 3
+                and token not in CABLE_DESIGNATION_BASE_STOPWORDS
+                and token not in {"кабель", "провод", "артикул", "sku"}
+            ]
+            if weak_signature_base:
+                fallback_tokens = []
+            if not fallback_tokens:
+                fallback_tokens = [
+                    token
+                    for token in (lookup_features.get("tokens", []) or [])
+                    if len(token) >= 3
+                    and token not in GROUP_TOKEN_STOPWORDS
+                    and token not in CABLE_DESIGNATION_BASE_STOPWORDS
+                    and token not in {"кабель", "провод", "артикул", "sku", "ls", "hf"}
+                ]
+            query_dimensions = self._extract_dimension_signatures(designation_source)
+            if fallback_tokens or any(query_dimensions.values()):
+                seen_row_idx.clear()
+                for item in candidate_pool:
+                    item_name = self._clean_text_value(item.get("name"))
+                    item_normalized_name = self._clean_text_value(item.get("normalized_name"))
+                    item_text = f"{item_name} {item_normalized_name}".strip()
+                    item_haystack = re.sub(r"[^a-zа-я0-9]+", " ", item_text.lower().replace("ё", "е"), flags=re.IGNORECASE)
+                    raw_dimension_hint = self._clean_text_value(signature.get("dimension"))
+                    has_raw_dimension_hint = bool(
+                        raw_dimension_hint
+                        and (
+                            raw_dimension_hint in item_text.lower().replace("ё", "е")
+                            or raw_dimension_hint.replace("x", "х") in item_text.lower().replace("ё", "е")
+                        )
+                    )
+                    if fallback_tokens and not all(token in item_haystack for token in fallback_tokens):
+                        continue
+                    item_dimensions = self._extract_dimension_signatures(item_text)
+                    if query_dimensions["triples"] and item_dimensions["triples"]:
+                        if not (query_dimensions["triples"] & item_dimensions["triples"]):
+                            continue
+                    if query_dimensions["pairs"] and item_dimensions["pairs"]:
+                        if not (query_dimensions["pairs"] & item_dimensions["pairs"]) and not has_raw_dimension_hint:
+                            continue
+                    if query_dimensions["lengths"] and item_dimensions["lengths"]:
+                        if not (query_dimensions["lengths"] & item_dimensions["lengths"]):
+                            continue
+                    row_idx = int(item.get("row_idx", -1))
+                    if row_idx in seen_row_idx:
+                        continue
+                    seen_row_idx.add(row_idx)
+                    if self._compatibility_label(lookup_features, item) != "compatible":
+                        continue
+                    signature_candidates.append(item)
+                    designation_fallback_used = True
+
+        if not signature_candidates and candidate_pool and len(candidate_pool) <= 12:
+            query_dimensions = self._extract_dimension_signatures(designation_source)
+            seen_row_idx.clear()
+            for item in candidate_pool:
+                item_name = self._clean_text_value(item.get("name"))
+                item_normalized_name = self._clean_text_value(item.get("normalized_name"))
+                item_text = f"{item_name} {item_normalized_name}".strip()
+                item_dimensions = self._extract_dimension_signatures(item_text)
+                raw_dimension_hint = self._clean_text_value(signature.get("dimension"))
+                has_raw_dimension_hint = bool(
+                    raw_dimension_hint
+                    and (
+                        raw_dimension_hint in item_text.lower().replace("ё", "е")
+                        or raw_dimension_hint.replace("x", "х") in item_text.lower().replace("ё", "е")
+                    )
+                )
+                if query_dimensions["triples"] and item_dimensions["triples"]:
+                    if not (query_dimensions["triples"] & item_dimensions["triples"]):
+                        continue
+                if query_dimensions["pairs"] and item_dimensions["pairs"]:
+                    if not (query_dimensions["pairs"] & item_dimensions["pairs"]) and not has_raw_dimension_hint:
+                        continue
+                if query_dimensions["lengths"] and item_dimensions["lengths"]:
+                    if not (query_dimensions["lengths"] & item_dimensions["lengths"]):
+                        continue
+                row_idx = int(item.get("row_idx", -1))
+                if row_idx in seen_row_idx:
+                    continue
+                seen_row_idx.add(row_idx)
+                if self._compatibility_label(lookup_features, item) != "compatible":
+                    continue
+                signature_candidates.append(item)
+                designation_fallback_used = True
+
         if not signature_candidates:
             return None
+
         scored_entries = self._score_candidates_locally(lookup_features, signature_candidates)
         if not scored_entries:
             return None
+
         best_entry = scored_entries[0]
-        second_score = float(scored_entries[1]["score"]) if len(scored_entries) > 1 else 0.0
+        if len(scored_entries) == 1:
+            return best_entry["item"]
+
+        second_score = float(scored_entries[1]["score"])
         best_score = float(best_entry["score"])
-        if len(scored_entries) > 1 and best_score - second_score < 0.04:
-            if best_score < 0.58:
+        if best_score - second_score < 0.04:
+            if len(signature_candidates) <= 2 and best_score >= 0.5:
+                return best_entry["item"]
+            threshold = 0.52 if designation_fallback_used else 0.58
+            if best_score < threshold:
                 return None
         return best_entry["item"]
 
@@ -1840,7 +1997,16 @@ class ReMoMatcher:
             self._clean_text_value(item.get("entity_type")) or self._classify_item_type(candidate_name)
         )
         query_markers = query_features.get("markers", {}) or {}
-        item_markers = item.get("item_markers", {}) or {}
+        item_markers = dict(item.get("item_markers", {}) or {})
+        if candidate_name:
+            derived_item_markers = shared_extract_item_markers(
+                candidate_name,
+                attribute_patterns=getattr(self, "taxonomy_rules", {}).get("attribute_patterns", {}),
+                synonyms=getattr(self, "taxonomy_rules", {}).get("synonyms", {}),
+            )
+            for marker_key, marker_value in derived_item_markers.items():
+                if not self._clean_text_value(item_markers.get(marker_key)):
+                    item_markers[marker_key] = marker_value
 
         strong_family_mismatch = {
             "pdu",
@@ -1944,6 +2110,12 @@ class ReMoMatcher:
             if item_cable_environment != "outdoor":
                 return "cable_environment_mismatch"
 
+        query_designation = self._clean_text_value(query_markers.get("designation_family"))
+        item_designation = self._clean_text_value(item_markers.get("designation_family"))
+        if query_type in {"bulk_twisted_pair", "cable", "wire"} and query_designation and item_designation:
+            if query_designation != item_designation:
+                return "designation_family_mismatch"
+
         if query_type == "ats_sts":
             if not any(
                 marker in candidate_normalized
@@ -1980,6 +2152,23 @@ class ReMoMatcher:
                 return "rack_accessory_type_mismatch"
             if query_mount and not item_mount:
                 return "rack_accessory_type_mismatch"
+            query_accessory = self._clean_text_value(query_markers.get("accessory_kind"))
+            item_accessory = self._clean_text_value(item_markers.get("accessory_kind"))
+            if query_accessory and item_accessory and query_accessory != item_accessory:
+                return "rack_accessory_type_mismatch"
+            if query_accessory and not item_accessory:
+                return "rack_accessory_type_mismatch"
+            query_orientation = self._clean_text_value(query_markers.get("orientation_kind"))
+            item_orientation = self._clean_text_value(item_markers.get("orientation_kind"))
+            if query_orientation and item_orientation and query_orientation != item_orientation:
+                return "rack_accessory_orientation_mismatch"
+            query_position = self._clean_text_value(query_markers.get("position_kind"))
+            item_position = self._clean_text_value(item_markers.get("position_kind"))
+            if query_position and item_position and query_position != item_position:
+                return "rack_accessory_position_mismatch"
+            dimension_mismatch = self._article_dimension_mismatch_reason(query_text, candidate_name or candidate_normalized)
+            if dimension_mismatch:
+                return dimension_mismatch
 
         if query_type == "keystone" and candidate_type not in {"keystone", "rj45_outlet"}:
             return "rj45_family_mismatch"
@@ -2225,12 +2414,16 @@ class ReMoMatcher:
             ("connector_pair", 0.28),
             ("sensor_kind", 0.28),
             ("mount_kind", 0.22),
+            ("accessory_kind", 0.26),
+            ("orientation_kind", 0.18),
+            ("position_kind", 0.18),
             ("installation_kind", 0.22),
             ("shielding", 0.24),
             ("cable_environment", 0.24),
             ("fiber_mode", 0.22),
             ("duplex", 0.12),
             ("category", 0.18),
+            ("designation_family", 0.3),
         )
         for key, weight in key_pairs:
             query_value = self._clean_text_value(query_markers.get(key))

@@ -103,6 +103,12 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
                 "when_query_contains_any": ["lszh"],
                 "tokens": ["lszh"],
             },
+            {
+                "name": "bulk_designation_family_required",
+                "type": "require_marker_equal",
+                "marker": "designation_family",
+                "candidate_marker": "designation_family",
+            },
         ],
     },
     "cable": {
@@ -229,6 +235,7 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
             "priority": 85,
             "positive_patterns": ["патч корд", "patch cord", "коммутационный шнур"],
             "negative_patterns": ["оптическ"],
+            "required_any_tokens": [["rj45", "rj 45", "8p8c", "ethernet", "lan", "utp", "ftp", "sftp", "cat", "категор"]],
         },
     },
     "patch_panel": {
@@ -283,7 +290,72 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
         "strictness": "strict",
         "audited": True,
         "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 65,
+            "positive_patterns": [
+                "крышк",
+                "пластин",
+                "угол",
+                "ответвител",
+                "консол",
+                "профил",
+                "держател",
+                "анкер",
+                "крепеж",
+                "хомут",
+            ],
+            "negative_patterns": ["полк", "щеточ", "заглуш", "rail", "рельс"],
+            "required_markers": {
+                "accessory_kind": [
+                    "cover",
+                    "connector_plate",
+                    "grounding_plate",
+                    "plate",
+                    "corner",
+                    "tee",
+                    "console",
+                    "profile",
+                    "holder",
+                    "fastener",
+                ]
+            },
+            "returns": "rack_accessory_strict",
+        },
         "secondary_filter_rules": [
+            {
+                "name": "rack_accessory_kind_required",
+                "type": "require_marker_equal",
+                "marker": "accessory_kind",
+                "candidate_marker": "accessory_kind",
+                "fallback_patterns": {
+                    "cover": ["крышк", "cover"],
+                    "connector_plate": ["соединител", "пластин"],
+                    "grounding_plate": ["заземл", "пластин"],
+                    "plate": ["пластин"],
+                    "corner": ["угол", "corner"],
+                    "tee": ["ответвител", "tee"],
+                    "console": ["консол", "console"],
+                    "profile": ["профил", "profile"],
+                    "holder": ["держател", "хомут", "holder"],
+                    "fastener": ["анкер", "крепеж", "fastener"],
+                },
+            },
+            {
+                "name": "rack_accessory_orientation_preferred",
+                "type": "prefer_marker_equal",
+                "marker": "orientation_kind",
+                "candidate_marker": "orientation_kind",
+            },
+            {
+                "name": "rack_accessory_position_preferred",
+                "type": "prefer_marker_equal",
+                "marker": "position_kind",
+                "candidate_marker": "position_kind",
+            },
+            {
+                "name": "rack_accessory_dimensions_preferred",
+                "type": "prefer_dimension_overlap",
+            },
             {
                 "name": "rack_mount_kind_required",
                 "type": "require_marker_equal",

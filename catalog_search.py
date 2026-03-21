@@ -428,6 +428,96 @@ def _detect_port_count_precise(normalized: str) -> str:
     return ""
 
 
+_GENERIC_CABLE_DESIGNATION_TOKENS = {
+    "a",
+    "cat",
+    "category",
+    "cord",
+    "cable",
+    "indoor",
+    "indooroutdoor",
+    "lan",
+    "outdoor",
+    "patch",
+    "wire",
+    "\u0430\u0440\u0442",
+    "\u0430\u0440\u0442\u0438\u043a\u0443\u043b",
+    "\u0432\u0438\u0442\u0430\u044f",
+    "\u043a\u0430\u0431\u0435\u043b\u044c",
+    "\u043a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u044f",
+    "\u043a\u043e\u043d\u0442\u0440\u043e\u043b\u044c\u043d\u044b\u0439",
+    "\u043a\u043e\u0440\u0434",
+    "\u043c\u0435\u0434\u043d\u044b\u0439",
+    "\u043f\u0430\u0440\u0430",
+    "\u043f\u0430\u0442\u0447",
+    "\u043f\u0440\u043e\u0432\u043e\u0434",
+    "\u0441\u0438\u0433\u043d\u0430\u043b\u044c\u043d\u044b\u0439",
+    "\u0441\u0438\u043b\u043e\u0432\u043e\u0439",
+    "\u044d\u043a\u0440\u0430\u043d\u0438\u0440\u043e\u0432\u0430\u043d\u043d\u044b\u0439",
+    "\u043d\u0435\u044d\u043a\u0440\u0430\u043d\u0438\u0440\u043e\u0432\u0430\u043d\u043d\u044b\u0439",
+}
+
+
+def _extract_cable_designation_family(normalized: str) -> str:
+    if not normalized:
+        return ""
+
+    dimension_match = re.search(
+        r"(\d+(?:[.,]\d+)?)\s*[x\u0445\u00d7*/]\s*(\d+(?:[.,]\d+)?)(?:\s*[x\u0445\u00d7*/]\s*(\d+(?:[.,]\d+)?))?",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    if not dimension_match:
+        return ""
+
+    base_part = normalized[: dimension_match.start()]
+    base_part = re.sub(
+        r"\b(?:sku|part\s*number|partnumber|vendor\s*code|\u0430\u0440\u0442\u0438\u043a\u0443\u043b|\u0430\u0440\u0442\.?)\b",
+        " ",
+        base_part,
+        flags=re.IGNORECASE,
+    )
+    base_part = re.sub(r"[\(\)\[\],;:]+", " ", base_part)
+    tokens = [
+        token
+        for token in re.findall(r"[a-z0-9\u0430-\u044f]+", base_part.lower(), flags=re.IGNORECASE)
+        if token and token not in _GENERIC_CABLE_DESIGNATION_TOKENS
+    ]
+    if not tokens or len(tokens) > 4:
+        return ""
+    if not any(len(token) >= 3 for token in tokens):
+        return ""
+    return " ".join(tokens)
+
+
+def _detect_accessory_kind(normalized: str) -> str:
+    if not normalized:
+        return ""
+    if "\u043e\u0442\u0432\u0435\u0442\u0432\u0438\u0442\u0435\u043b" in normalized:
+        return "tee"
+    if "\u0443\u0433\u043e\u043b" in normalized:
+        return "corner"
+    if "\u043a\u043e\u043d\u0441\u043e\u043b" in normalized:
+        return "console"
+    if "\u0434\u0435\u0440\u0436\u0430\u0442\u0435\u043b" in normalized or (
+        "\u0445\u043e\u043c\u0443\u0442" in normalized and "\u0441\u0442\u0430\u043b" in normalized
+    ):
+        return "holder"
+    if "\u043f\u0440\u043e\u0444\u0438\u043b" in normalized:
+        return "profile"
+    if "\u0437\u0430\u0437\u0435\u043c\u043b" in normalized and "\u043f\u043b\u0430\u0441\u0442\u0438\u043d" in normalized:
+        return "grounding_plate"
+    if "\u0441\u043e\u0435\u0434\u0438\u043d\u0438\u0442\u0435\u043b" in normalized and "\u043f\u043b\u0430\u0441\u0442\u0438\u043d" in normalized:
+        return "connector_plate"
+    if "\u043f\u043b\u0430\u0441\u0442\u0438\u043d" in normalized:
+        return "plate"
+    if "\u043a\u0440\u044b\u0448\u043a" in normalized:
+        return "cover"
+    if "\u0430\u043d\u043a\u0435\u0440" in normalized or "\u043a\u0440\u0435\u043f\u0435\u0436" in normalized:
+        return "fastener"
+    return ""
+
+
 def _looks_like_ats_sts_device(normalized: str) -> bool:
     if "ÑÑ‚Ð°Ñ‚Ð¸Ñ‡ÐµÑÐº" in normalized and "Ð¿ÐµÑ€ÐµÐºÐ»ÑŽÑ‡Ð°Ñ‚ÐµÐ»" in normalized:
         return True
@@ -549,9 +639,15 @@ def classify_item_type(
     synonyms: Mapping[str, str] | None = None,
     taxonomy_rules: Mapping[str, Any] | None = None,
 ) -> str:
+    rules = taxonomy_rules if taxonomy_rules is not None else load_registry_taxonomy_rules()
     normalized = normalize_query_terms(text, synonyms=synonyms)
     phrase_normalized = normalized.replace("-", " ")
-    registry_match = classify_entity_type_from_registry(text, rules=taxonomy_rules, markers=None)
+    extracted_markers = extract_item_markers(
+        text,
+        attribute_patterns=rules.get("attribute_patterns", {}),
+        synonyms=synonyms,
+    )
+    registry_match = classify_entity_type_from_registry(text, rules=rules, markers=extracted_markers)
     registry_entity_type = clean_text_value((registry_match or {}).get("entity_type"))
     has_iec_connector_markers = _has_iec_power_cable_context(normalized)
     ats_sts_device = _looks_like_ats_sts_device_precise(normalized)
@@ -853,6 +949,20 @@ def extract_item_markers(
     elif "заглуш" in normalized:
         markers["mount_kind"] = "blank_panel"
 
+    accessory_kind = _detect_accessory_kind(normalized)
+    if accessory_kind:
+        markers["accessory_kind"] = accessory_kind
+
+    if "вертик" in normalized:
+        markers["orientation_kind"] = "vertical"
+    elif "горизонт" in normalized:
+        markers["orientation_kind"] = "horizontal"
+
+    if "внеш" in normalized:
+        markers["position_kind"] = "outer"
+    elif "внутр" in normalized:
+        markers["position_kind"] = "inner"
+
     if _has_airflow_blanking_signal(normalized):
         markers["airflow"] = "yes"
 
@@ -920,6 +1030,10 @@ def extract_item_markers(
     detected_port_count_precise = _detect_port_count_precise(normalized)
     if detected_port_count_precise:
         markers["port_count"] = detected_port_count_precise
+
+    designation_family = _extract_cable_designation_family(normalized)
+    if designation_family:
+        markers["designation_family"] = designation_family
 
     return markers
 

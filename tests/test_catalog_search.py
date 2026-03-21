@@ -323,6 +323,25 @@ class CatalogSearchTests(unittest.TestCase):
         self.assertEqual(single_outlet_markers.get("port_count"), "1")
         self.assertEqual(cover_markers.get("component_kind"), "adapter")
 
+    def test_extract_item_markers_marks_tray_accessories_and_designation_family(self):
+        accessory_markers = extract_item_markers(
+            "Угол CD 90 вертикальный внеш. 100x50, артикул 36782K"
+        )
+        designation_markers = extract_item_markers(
+            "Кабель, артикул КИПЭнг-HF 2х2х0,6"
+        )
+
+        self.assertEqual(accessory_markers.get("accessory_kind"), "corner")
+        self.assertEqual(accessory_markers.get("orientation_kind"), "vertical")
+        self.assertEqual(accessory_markers.get("position_kind"), "outer")
+        self.assertEqual(designation_markers.get("designation_family"), "кипэнг hf")
+
+    def test_classify_item_type_detects_tray_accessory_queries(self):
+        self.assertEqual(
+            classify_item_type("Консоль универсальная осн. 200 мм, артикул BBN5020"),
+            "rack_accessory_strict",
+        )
+
     def test_build_search_catalog_can_write_csv_explicitly(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
