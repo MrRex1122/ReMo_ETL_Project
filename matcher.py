@@ -1145,6 +1145,12 @@ class ReMoMatcher:
             return ""
         return re.sub(r"\s+", " ", cleaned).strip().lower()
 
+    def _compact_article_series_key(self, value: object) -> str:
+        normalized = self._normalize_article_lookup_value(value)
+        if not normalized:
+            return ""
+        return re.sub(r"[^0-9a-zа-я]+", "", normalized, flags=re.IGNORECASE)
+
     def _extract_query_article_from_text(self, query: str) -> str:
         cleaned_query = self._clean_text_value(query)
         if not cleaned_query:
@@ -1161,6 +1167,137 @@ class ReMoMatcher:
             if article:
                 return article
         return ""
+
+    def _extract_cable_designation_signature(self, text: str) -> Dict[str, str]:
+        cleaned_text = self._clean_text_value(text)
+        if not cleaned_text:
+            return {}
+        normalized = cleaned_text.lower().replace("ё", "е")
+        normalized = re.sub(
+            r"\b(?:кабель|провод|артикул|арт\.?|sku|part\s*number|partnumber|vendor\s*code)\b",
+            " ",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        normalized = re.sub(r"\s+", " ", normalized).strip(" \t\r\n,;:/-")
+        if not normalized:
+            return {}
+        dimension_match = re.search(
+            r"(\d+(?:[.,]\d+)?)\s*[xх×*/]\s*(\d+(?:[.,]\d+)?)(?:\s*[xх×*/]\s*(\d+(?:[.,]\d+)?))?",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if not dimension_match:
+            return {}
+        values = tuple(group for group in dimension_match.groups() if group)
+        dimension_signature = ""
+        if len(values) == 2:
+            dimension_signature = self._canonical_dimension_signature(values)
+        elif len(values) == 3:
+            dimension_signature = self._canonical_dimension_signature(values)
+        if not dimension_signature:
+            return {}
+        base_part = normalized[: dimension_match.start()]
+        base_part = re.sub(r"[\(\)\[\],;:]+", " ", base_part)
+        base_normalized = self._normalize_text(base_part)
+        base_tokens = [
+            token
+            for token in self._tokenize(base_normalized)
+            if token not in {"кабель", "провод", "артикул", "арт", "sku"}
+        ]
+        if not base_tokens:
+            return {}
+        base_signature = " ".join(base_tokens)
+        return {
+            "base": base_signature,
+            "dimension": dimension_signature,
+            "signature": f"{base_signature}|{dimension_signature}",
+        }
+
+    def _is_likely_cable_designation(self, value: object) -> bool:
+        signature = self._extract_cable_designation_signature(self._clean_text_value(value))
+        return bool(signature)
+
+    def _lookup_catalog_item_by_cable_designation(self, query_text: str, query_article: str = "") -> Dict[str, Any] | None:
+        designation_source = self._clean_text_value(query_article) or self._clean_text_value(query_text)
+        signature = self._extract_cable_designation_signature(designation_source)
+        if not signature:
+            return None
+
+        lookup_query = f"кабель {designation_source}".strip()
+        lookup_features = self._extract_query_features(lookup_query)
+        lookup_features["original_text"] = lookup_query
+        lookup_features["normalized_text"] = self._normalize_text(lookup_query)
+        lookup_features["ranked_branches"] = self._rank_branches(lookup_features)
+
+        branch_paths = [entry["path"] for entry in lookup_features.get("ranked_branches", []) if entry.get("path")]
+        candidate_pool = self._typed_candidate_pool(lookup_query, lookup_features, limit=160)
+        if not candidate_pool:
+            candidate_pool = self._collect_branch_candidates(branch_paths, limit=160, query_features=lookup_features)
+        if not candidate_pool and self._uses_duckdb_query_backend():
+            candidate_pool, _ = self._duckdb_heuristic_candidates(lookup_query, lookup_features, limit=160)
+        if not candidate_pool:
+            candidate_pool = self._select_candidates(lookup_query, limit=160)
+
+        signature_candidates: List[Dict[str, Any]] = []
+        seen_row_idx: set[int] = set()
+        for item in candidate_pool:
+            item_signature = self._extract_cable_designation_signature(
+                self._clean_text_value(item.get("name")) or self._clean_text_value(item.get("normalized_name"))
+            )
+            if not item_signature or item_signature.get("signature") != signature.get("signature"):
+                continue
+            row_idx = int(item.get("row_idx", -1))
+            if row_idx in seen_row_idx:
+                continue
+            seen_row_idx.add(row_idx)
+            if self._compatibility_label(lookup_features, item) != "compatible":
+                continue
+            signature_candidates.append(item)
+
+        if not signature_candidates:
+            return None
+        scored_entries = self._score_candidates_locally(lookup_features, signature_candidates)
+        if not scored_entries:
+            return None
+        best_entry = scored_entries[0]
+        second_score = float(scored_entries[1]["score"]) if len(scored_entries) > 1 else 0.0
+        best_score = float(best_entry["score"])
+        if len(scored_entries) > 1 and best_score - second_score < 0.04:
+            return None
+        return best_entry["item"]
+
+    def _lookup_catalog_items_by_article_series(self, article: str, query_features: Dict[str, Any]) -> List[Dict[str, Any]]:
+        article_compact = self._compact_article_series_key(article)
+        if len(article_compact) < 5 or self._is_likely_cable_designation(article):
+            return []
+
+        candidates: List[Dict[str, Any]] = []
+        if self._uses_duckdb_query_backend():
+            column = self._quote_sql_identifier(CANONICAL_ARTICLE_COLUMN)
+            compact_expr = f"regexp_replace(lower(trim({column})), '[^0-9a-zа-я]+', '', 'g')"
+            candidates = self._duckdb_fetch_items(
+                where_sql=f"{compact_expr} LIKE ? AND length({compact_expr}) > ?",
+                params=[f"{article_compact}%", len(article_compact)],
+                limit=40,
+            )
+        else:
+            for item in getattr(self, "catalog_items", []) or []:
+                item_compact = self._compact_article_series_key(item.get("article"))
+                if item_compact.startswith(article_compact) and len(item_compact) > len(article_compact):
+                    candidates.append(item)
+
+        filtered: List[Dict[str, Any]] = []
+        seen_row_idx: set[int] = set()
+        for item in candidates:
+            row_idx = int(item.get("row_idx", -1))
+            if row_idx in seen_row_idx:
+                continue
+            seen_row_idx.add(row_idx)
+            if self._article_match_sanity_reason(query_features, item):
+                continue
+            filtered.append(item)
+        return filtered
 
     @staticmethod
     def _is_placeholder_input_column_name(column_name: object) -> bool:
@@ -3826,6 +3963,7 @@ class ReMoMatcher:
         python_scoring_ms = 0.0
         compatibility_filter_ms = 0.0
         gemini_total_ms = 0.0
+        article_series_candidates: List[Dict[str, Any]] = []
 
         def _build_pipeline_counts() -> Dict[str, Any]:
             return {
@@ -3998,6 +4136,38 @@ class ReMoMatcher:
                 )
                 return _finalize(result, stage_of_failure="resolved", reason_code="resolved")
 
+            cable_designation_match = self._lookup_catalog_item_by_cable_designation(query_text, query_article)
+            if cable_designation_match is not None:
+                trace_steps.append(
+                    {
+                        "stage": "designation_lookup",
+                        "status": "hit",
+                        "designation_source": article_source if query_article else "query",
+                    }
+                )
+                result = self._build_result_from_item(
+                    cable_designation_match,
+                    0.995,
+                    "article_designation_exact" if query_article else "designation_exact",
+                    False,
+                    "",
+                    "Техническое обозначение кабеля из строки точно сопоставлено с номенклатурой каталога.",
+                )
+                return _finalize(result, stage_of_failure="resolved", reason_code="resolved")
+
+            if query_article:
+                article_series_candidates = self._lookup_catalog_items_by_article_series(query_article, query_features)
+                if article_series_candidates:
+                    trace_steps.append(
+                        {
+                            "stage": "article_lookup",
+                            "status": "series_candidates",
+                            "article_source": article_source,
+                            "query_article": query_article,
+                            "series_candidate_count": len(article_series_candidates),
+                        }
+                    )
+
             exact_match = self._lookup_catalog_item_by_name(query_text)
             if exact_match:
                 preferred_result = self._build_result_from_item(exact_match, 1.0, "name_exact", False, "", "")
@@ -4066,6 +4236,16 @@ class ReMoMatcher:
                         limit=local_recall_limit,
                         query_features=query_features,
                     )
+            if article_series_candidates:
+                merged_candidates: List[Dict[str, Any]] = []
+                seen_row_idx: set[int] = set()
+                for item in article_series_candidates + branch_candidates:
+                    row_idx = int(item.get("row_idx", -1))
+                    if row_idx in seen_row_idx:
+                        continue
+                    seen_row_idx.add(row_idx)
+                    merged_candidates.append(item)
+                branch_candidates = merged_candidates
             if not branch_candidates:
                 branch_candidates = self._select_candidates(query_text, limit=local_recall_limit)
             duckdb_query_ms = round((time.perf_counter() - retrieval_started_at) * 1000, 2)

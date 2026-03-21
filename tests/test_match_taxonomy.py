@@ -683,6 +683,89 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.assertIn("электрика > кабели", captured["params"])
         self.assertIn("электрика > кабели > %", captured["params"])
 
+    def test_cable_designation_signature_normalizes_core_section_variants(self):
+        query_signature = self.matcher._extract_cable_designation_signature("Ð’Ð’Ð“Ð½Ð³(A)-LS 4x1")
+        candidate_signature = self.matcher._extract_cable_designation_signature("Ð’Ð’Ð“Ð½Ð³(Ð)-LS 4x1.0 Ð¾Ðº(N)-0,66")
+
+        self.assertTrue(query_signature)
+        self.assertEqual(query_signature["signature"], candidate_signature["signature"])
+
+    def test_lookup_catalog_item_by_cable_designation_matches_exact_signature(self):
+        self.matcher._uses_duckdb_query_backend = lambda: False
+        self.matcher._typed_candidate_pool = lambda _query_text, _query_features, limit: []
+        self.matcher._select_candidates = lambda _query_text, limit: []
+        self.matcher._collect_branch_candidates = lambda _branches, limit=None, query_features=None: [
+            {
+                "name": "ÐšÐ°Ð±ÐµÐ»ÑŒ Ð’Ð’Ð“Ð½Ð³(Ð)-LS 4x4 Ð¾Ðº(N)-1",
+                "normalized_name": "ÐºÐ°Ð±ÐµÐ»ÑŒ Ð²Ð²Ð³Ð½Ð³ Ð° ls 4x4 Ð¾Ðº n 1",
+                "branch_path": "ÑÐ»ÐµÐºÑ‚Ñ€Ð¸ÐºÐ° > ÐºÐ°Ð±ÐµÐ»Ð¸",
+                "entity_type": "cable",
+                "item_markers": {},
+                "row_idx": 1,
+                "article": "4582",
+                "price": 100.0,
+                "tokens": ["ÐºÐ°Ð±ÐµÐ»ÑŒ", "Ð²Ð²Ð³Ð½Ð³", "ls", "4x4"],
+            },
+            {
+                "name": "ÐšÐ°Ð±ÐµÐ»ÑŒ Ð’Ð’Ð“Ð½Ð³(Ð)-LS 4x6 Ð¾Ðº(N)-1",
+                "normalized_name": "ÐºÐ°Ð±ÐµÐ»ÑŒ Ð²Ð²Ð³Ð½Ð³ Ð° ls 4x6 Ð¾Ðº n 1",
+                "branch_path": "ÑÐ»ÐµÐºÑ‚Ñ€Ð¸ÐºÐ° > ÐºÐ°Ð±ÐµÐ»Ð¸",
+                "entity_type": "cable",
+                "item_markers": {},
+                "row_idx": 2,
+                "article": "4583",
+                "price": 110.0,
+                "tokens": ["ÐºÐ°Ð±ÐµÐ»ÑŒ", "Ð²Ð²Ð³Ð½Ð³", "ls", "4x6"],
+            },
+        ]
+
+        item = self.matcher._lookup_catalog_item_by_cable_designation(
+            "ÐšÐ°Ð±ÐµÐ»ÑŒ, Ð°Ñ€Ñ‚Ð¸ÐºÑƒÐ» Ð’Ð’Ð“Ð½Ð³(A)-LS 4x4",
+            "Ð’Ð’Ð“Ð½Ð³(A)-LS 4x4",
+        )
+
+        self.assertIsNotNone(item)
+        self.assertEqual(item["article"], "4582")
+
+    def test_lookup_catalog_items_by_article_series_returns_matching_prefix_candidates(self):
+        self.matcher._uses_duckdb_query_backend = lambda: False
+        self.matcher.catalog_items = [
+            {
+                "name": "Ð›Ð¾Ñ‚Ð¾Ðº Ð¿ÐµÑ€Ñ„Ð¾Ñ€Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð½Ñ‹Ð¹ 100Ñ…50 L=3000Ð¼Ð¼ Ñ‚Ð¾Ð»Ñ‰Ð¸Ð½Ð° 1.0Ð¼Ð¼ Ð³Ð¾Ñ€ÑÑ‡ÐµÐ¾Ñ†Ð¸Ð½ÐºÐ¾Ð²Ð°Ð½Ð½Ñ‹Ð¹",
+                "normalized_name": "Ð»Ð¾Ñ‚Ð¾Ðº Ð¿ÐµÑ€Ñ„Ð¾Ñ€Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð½Ñ‹Ð¹ 100x50 l 3000Ð¼Ð¼ Ñ‚Ð¾Ð»Ñ‰Ð¸Ð½Ð° 1 0Ð¼Ð¼ Ð³Ð¾Ñ€ÑÑ‡ÐµÐ¾Ñ†Ð¸Ð½ÐºÐ¾Ð²Ð°Ð½Ð½Ñ‹Ð¹",
+                "branch_path": "Ð»Ð¸ÑÑ‚Ð¾Ð²Ñ‹Ðµ Ð»Ð¾Ñ‚ÐºÐ¸ Ð³Ð¾Ñ€ÑÑ‡ÐµÐ¾Ñ†Ð¸Ð½ÐºÐ¾Ð²Ð°Ð½Ð½Ñ‹Ðµ",
+                "entity_type": "other",
+                "item_markers": {},
+                "row_idx": 11,
+                "article": "3526210HDZ",
+            },
+            {
+                "name": "Ð›Ð¾Ñ‚Ð¾Ðº Ð¿ÐµÑ€Ñ„Ð¾Ñ€Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð½Ñ‹Ð¹ 100Ñ…50 L=3000Ð¼Ð¼ Ñ‚Ð¾Ð»Ñ‰Ð¸Ð½Ð° 1.2Ð¼Ð¼ Ð³Ð¾Ñ€ÑÑ‡ÐµÐ¾Ñ†Ð¸Ð½ÐºÐ¾Ð²Ð°Ð½Ð½Ñ‹Ð¹",
+                "normalized_name": "Ð»Ð¾Ñ‚Ð¾Ðº Ð¿ÐµÑ€Ñ„Ð¾Ñ€Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð½Ñ‹Ð¹ 100x50 l 3000Ð¼Ð¼ Ñ‚Ð¾Ð»Ñ‰Ð¸Ð½Ð° 1 2Ð¼Ð¼ Ð³Ð¾Ñ€ÑÑ‡ÐµÐ¾Ñ†Ð¸Ð½ÐºÐ¾Ð²Ð°Ð½Ð½Ñ‹Ð¹",
+                "branch_path": "Ð»Ð¸ÑÑ‚Ð¾Ð²Ñ‹Ðµ Ð»Ð¾Ñ‚ÐºÐ¸ Ð³Ð¾Ñ€ÑÑ‡ÐµÐ¾Ñ†Ð¸Ð½ÐºÐ¾Ð²Ð°Ð½Ð½Ñ‹Ðµ",
+                "entity_type": "other",
+                "item_markers": {},
+                "row_idx": 12,
+                "article": "3526212HDZ",
+            },
+            {
+                "name": "Ð¡Ð²ÐµÑ‚Ð¸Ð»ÑŒÐ½Ð¸Ðº ÑÐ²ÐµÑ‚Ð¾Ð´Ð¸Ð¾Ð´Ð½Ñ‹Ð¹ Ð”Ð¡Ðž-Ð¢03-13-30-3K-IP20",
+                "normalized_name": "ÑÐ²ÐµÑ‚Ð¸Ð»ÑŒÐ½Ð¸Ðº ÑÐ²ÐµÑ‚Ð¾Ð´Ð¸Ð¾Ð´Ð½Ñ‹Ð¹ Ð´ÑÐ¾ Ñ‚03 13 30 3k ip20",
+                "branch_path": "ÑÐ²ÐµÑ‚ > ÑÐ²ÐµÑ‚Ð¸Ð»ÑŒÐ½Ð¸ÐºÐ¸",
+                "entity_type": "other",
+                "item_markers": {},
+                "row_idx": 13,
+                "article": "35262",
+            },
+        ]
+        features = self.matcher._extract_query_features(
+            "Ð›Ð¾Ñ‚Ð¾Ðº Ð¿ÐµÑ€Ñ„Ð¾Ñ€Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð½Ñ‹Ð¹ 100Ñ…50 L=3000Ð¼Ð¼, Ð°Ñ€Ñ‚Ð¸ÐºÑƒÐ» 35262"
+        )
+
+        items = self.matcher._lookup_catalog_items_by_article_series("35262", features)
+
+        self.assertEqual([item["article"] for item in items], ["3526210HDZ", "3526212HDZ"])
+
 
 if __name__ == "__main__":
     unittest.main()
