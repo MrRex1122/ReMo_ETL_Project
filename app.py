@@ -1114,15 +1114,35 @@ def _render_match_diagnostics(run, df: pd.DataFrame) -> None:
 
     summary = diagnostics_payload.get("summary", {}) if isinstance(diagnostics_payload, dict) else {}
     root_cause_class_counts = summary.get("root_cause_class_counts", {}) if isinstance(summary, dict) else {}
-    col1, col2, col3, col4 = st.columns(4)
+    catalog_gap_count = int(root_cause_class_counts.get("catalog_gap", 0))
+    retrieval_ranking_count = int(root_cause_class_counts.get("matcher_retrieval_or_ranking", 0))
+    gemini_policy_count = int(root_cause_class_counts.get("gemini_or_decision_policy", 0))
+    input_query_shape_count = int(root_cause_class_counts.get("input_or_query_shape", 0))
+    not_audited_family_count = int(root_cause_class_counts.get("not_audited_family", 0))
+
+    col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
-        st.metric("catalog gap", int(root_cause_class_counts.get("catalog_gap", 0)))
+        st.metric("catalog gap", catalog_gap_count)
     with col2:
-        st.metric("retrieval/ranking", int(root_cause_class_counts.get("matcher_retrieval_or_ranking", 0)))
+        st.metric("retrieval/ranking", retrieval_ranking_count)
     with col3:
-        st.metric("Gemini/policy", int(root_cause_class_counts.get("gemini_or_decision_policy", 0)))
+        st.metric("Gemini/policy", gemini_policy_count)
     with col4:
-        st.metric("input/query shape", int(root_cause_class_counts.get("input_or_query_shape", 0)))
+        st.metric("input/query shape", input_query_shape_count)
+    with col5:
+        st.metric("not audited family", not_audited_family_count)
+
+    if not_audited_family_count > 0:
+        if catalog_gap_count == 0 and retrieval_ranking_count == 0 and gemini_policy_count == 0 and input_query_shape_count == 0:
+            st.warning(
+                "Диагностика построена, но все проблемные строки для этого прогона сейчас вне текущего audit scope. "
+                "Они помечены как `not_audited_family`, поэтому rich telecom-root-cause детализация тут не появится."
+            )
+        else:
+            st.info(
+                f"Часть строк вне текущего audit scope: `not_audited_family = {not_audited_family_count}`. "
+                "Это нормально для cable/electrical файлов: диагностика сохранена, но детализация по ним пока ограничена."
+            )
 
     stage_table = prepare_match_diagnostics_stage_table(diagnostics_payload)
     root_cause_table = prepare_match_diagnostics_root_cause_table(diagnostics_payload)
@@ -1245,20 +1265,38 @@ def _render_catalog_coverage_audit(run, df: pd.DataFrame) -> None:
     if audit_payload is None:
         st.info(
             "Нажмите «Проверить покрытие каталога», чтобы получить диагноз по проблемным телеком-строкам "
-            "и понять, это пробел БД или точка роста для matcher."
+            "и понять, это пробел БД или точка роста для matcher. Для cable/electrical файлов current scope пока ограничен."
         )
         return
 
     summary = audit_payload.get("summary", {}) if isinstance(audit_payload, dict) else {}
-    metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
+    audit_rows = audit_payload.get("rows", []) if isinstance(audit_payload, dict) else []
+    rows_total = len(audit_rows) if isinstance(audit_rows, list) else 0
+    rows_analyzed = int(summary.get("rows_analyzed", 0))
+    rows_outside_scope = max(0, rows_total - rows_analyzed)
+
+    metric_col1, metric_col2, metric_col3, metric_col4, metric_col5 = st.columns(5)
     with metric_col1:
-        st.metric("Строк в аудите", int(summary.get("rows_analyzed", 0)))
+        st.metric("Строк в аудите", rows_analyzed)
     with metric_col2:
         st.metric("Пробел каталога", int(summary.get("catalog_missing_family", 0)))
     with metric_col3:
         st.metric("Есть family, нет specs", int(summary.get("catalog_has_family_but_no_compatible_specs", 0)))
     with metric_col4:
         st.metric("Есть совместимые кандидаты", int(summary.get("catalog_has_compatible_candidates", 0)))
+    with metric_col5:
+        st.metric("Вне audit scope", rows_outside_scope)
+
+    if rows_analyzed == 0 and rows_outside_scope > 0:
+        st.warning(
+            "Аудит построен, но в текущий telecom-focused scope не попало ни одной строки. "
+            f"Вне scope осталось `{rows_outside_scope}` строк, поэтому таблицы ниже пустые."
+        )
+    elif rows_outside_scope > 0:
+        st.info(
+            f"Аудит построен частично: вне текущего scope осталось `{rows_outside_scope}` строк. "
+            "Для них подробная family/specs-диагностика пока не строится."
+        )
 
     st.caption(
         "Есть совместимые кандидаты = сначала тюним matcher. "

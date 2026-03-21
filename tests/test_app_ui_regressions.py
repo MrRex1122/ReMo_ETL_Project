@@ -27,6 +27,7 @@ class AppUiRegressionTests(unittest.TestCase):
         self.assertIn("Проверить покрытие каталога", app_source)
         self.assertIn("Скачать весь аудит", app_source)
         self.assertIn("Сводка по gap reason", app_source)
+        self.assertIn("Вне audit scope", app_source)
 
     def test_match_diagnostics_ui_is_present(self):
         app_source = Path("app.py").read_text(encoding="utf-8")
@@ -36,6 +37,7 @@ class AppUiRegressionTests(unittest.TestCase):
         self.assertIn("Пересчитать диагностику", app_source)
         self.assertIn("Скачать всю диагностику", app_source)
         self.assertIn("Сводка по root cause", app_source)
+        self.assertIn("not audited family", app_source)
 
 
     def test_search_catalog_export_ui_is_present(self):
