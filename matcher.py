@@ -123,6 +123,19 @@ TERM_NORMALIZATION_ALIASES = {
     "19''": "19 inch",
 }
 
+CABLE_DESIGNATION_BASE_STOPWORDS = {
+    "силовой",
+    "контрольный",
+    "монтажный",
+    "однопроволочный",
+    "многопроволочный",
+    "ок",
+    "n",
+    "pe",
+    "тртс",
+    "барабан",
+}
+
 WHOLE_CATEGORY_RETRIEVAL_FAMILIES = {
     "airflow_blanking_panel",
     "ats_sts",
@@ -1218,6 +1231,64 @@ class ReMoMatcher:
         signature = self._extract_cable_designation_signature(self._clean_text_value(value))
         return bool(signature)
 
+    def _cable_designation_base_tokens(self, signature: Dict[str, Any]) -> Tuple[str, ...]:
+        if not signature:
+            return ()
+        raw_tokens = signature.get("base_tokens")
+        if isinstance(raw_tokens, (list, tuple, set)):
+            tokens = [self._clean_text_value(token).lower() for token in raw_tokens if self._clean_text_value(token)]
+        else:
+            tokens = [
+                token
+                for token in self._tokenize(self._clean_text_value(signature.get("base")))
+                if token and token not in CABLE_DESIGNATION_BASE_STOPWORDS
+            ]
+        return tuple(tokens)
+
+    def _cable_designation_signatures_match(
+        self,
+        query_signature: Dict[str, Any],
+        item_signature: Dict[str, Any],
+    ) -> bool:
+        if not query_signature or not item_signature:
+            return False
+        if query_signature.get("dimension") != item_signature.get("dimension"):
+            return False
+        query_tokens = self._cable_designation_base_tokens(query_signature)
+        item_tokens = self._cable_designation_base_tokens(item_signature)
+        if query_tokens and item_tokens:
+            return set(query_tokens).issubset(set(item_tokens))
+        return query_signature.get("signature") == item_signature.get("signature")
+
+    def _duckdb_cable_designation_candidates(self, signature: Dict[str, Any], *, limit: int = 160) -> List[Dict[str, Any]]:
+        if not signature or not self._uses_duckdb_query_backend():
+            return []
+        normalized_column = self._quote_sql_identifier("search_normalized_name")
+        entity_column = self._quote_sql_identifier("search_entity_type")
+        branch_column = self._quote_sql_identifier("search_branch_path")
+        where_parts = [
+            f"({entity_column} IN (?, ?) OR {branch_column} = ? OR {branch_column} LIKE ? OR {branch_column} = ? OR {branch_column} LIKE ?)"
+        ]
+        params: List[Any] = [
+            "cable",
+            "wire",
+            "электрика > кабели",
+            f"электрика > кабели{BRANCH_PATH_SEPARATOR}%",
+            "электрика > провода",
+            f"электрика > провода{BRANCH_PATH_SEPARATOR}%",
+        ]
+        for token in self._cable_designation_base_tokens(signature):
+            where_parts.append(f"lower({normalized_column}) LIKE ?")
+            params.append(f"%{token}%")
+        for part in sorted({part.strip() for part in str(signature.get('dimension') or '').split('x') if part.strip()}):
+            where_parts.append(f"lower({normalized_column}) LIKE ?")
+            params.append(f"%{part.lower()}%")
+        return self._duckdb_fetch_items(
+            where_sql=" AND ".join(where_parts),
+            params=params,
+            limit=max(40, min(int(limit), 240)),
+        )
+
     def _lookup_catalog_item_by_cable_designation(self, query_text: str, query_article: str = "") -> Dict[str, Any] | None:
         designation_source = self._clean_text_value(query_article) or self._clean_text_value(query_text)
         signature = self._extract_cable_designation_signature(designation_source)
@@ -1231,7 +1302,18 @@ class ReMoMatcher:
         lookup_features["ranked_branches"] = self._rank_branches(lookup_features)
 
         branch_paths = [entry["path"] for entry in lookup_features.get("ranked_branches", []) if entry.get("path")]
-        candidate_pool = self._typed_candidate_pool(lookup_query, lookup_features, limit=160)
+        candidate_pool = self._duckdb_cable_designation_candidates(signature, limit=160)
+        supplemental_pool = self._typed_candidate_pool(lookup_query, lookup_features, limit=160)
+        if supplemental_pool:
+            merged_pool: List[Dict[str, Any]] = []
+            seen_row_idx: set[int] = set()
+            for item in candidate_pool + supplemental_pool:
+                row_idx = int(item.get("row_idx", -1))
+                if row_idx in seen_row_idx:
+                    continue
+                seen_row_idx.add(row_idx)
+                merged_pool.append(item)
+            candidate_pool = merged_pool
         if not candidate_pool:
             candidate_pool = self._collect_branch_candidates(branch_paths, limit=160, query_features=lookup_features)
         if not candidate_pool and self._uses_duckdb_query_backend():
@@ -1245,7 +1327,7 @@ class ReMoMatcher:
             item_signature = self._extract_cable_designation_signature(
                 self._clean_text_value(item.get("name")) or self._clean_text_value(item.get("normalized_name"))
             )
-            if not item_signature or item_signature.get("signature") != signature.get("signature"):
+            if not self._cable_designation_signatures_match(signature, item_signature):
                 continue
             row_idx = int(item.get("row_idx", -1))
             if row_idx in seen_row_idx:
@@ -1298,6 +1380,42 @@ class ReMoMatcher:
                 continue
             filtered.append(item)
         return filtered
+
+    def _best_article_series_match(
+        self,
+        query_features: Dict[str, Any],
+        candidates: List[Dict[str, Any]],
+    ) -> Dict[str, Any] | None:
+        if not candidates:
+            return None
+        scored_entries = self._score_candidates_locally(query_features, candidates)
+        if not scored_entries:
+            return None
+        best_entry = self._best_compatible_local_entry(query_features, scored_entries, allow_weak=False)
+        if best_entry is None:
+            return None
+        compatible_scores = [
+            float(entry["score"])
+            for entry in scored_entries
+            if self._compatibility_label(query_features, entry["item"]) == "compatible"
+        ]
+        best_score = float(best_entry["score"])
+        second_score = compatible_scores[1] if len(compatible_scores) > 1 else 0.0
+        if best_score < 0.58:
+            return None
+        if len(compatible_scores) > 1 and best_score - second_score < 0.03 and best_score < 0.82:
+            return None
+        return best_entry["item"]
+
+    def _lookup_catalog_item_by_article_series_match(
+        self,
+        article: str,
+        query_features: Dict[str, Any],
+    ) -> Dict[str, Any] | None:
+        return self._best_article_series_match(
+            query_features,
+            self._lookup_catalog_items_by_article_series(article, query_features),
+        )
 
     @staticmethod
     def _is_placeholder_input_column_name(column_name: object) -> bool:
@@ -4167,6 +4285,17 @@ class ReMoMatcher:
                             "series_candidate_count": len(article_series_candidates),
                         }
                     )
+                    article_series_match = self._best_article_series_match(query_features, article_series_candidates)
+                    if article_series_match is not None:
+                        result = self._build_result_from_item(
+                            article_series_match,
+                            0.985,
+                            "article_series_local",
+                            True,
+                            "",
+                            "Сопоставлено по расширенной серии артикула с проверкой на смысловую и размерную совместимость.",
+                        )
+                        return _finalize(result, stage_of_failure="resolved", reason_code="resolved")
 
             exact_match = self._lookup_catalog_item_by_name(query_text)
             if exact_match:

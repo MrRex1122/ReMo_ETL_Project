@@ -40,6 +40,22 @@ class MatchTaxonomyTests(unittest.TestCase):
             self.matcher,
             ReMoMatcher,
         )
+        self.matcher._cable_designation_base_tokens = ReMoMatcher._cable_designation_base_tokens.__get__(
+            self.matcher,
+            ReMoMatcher,
+        )
+        self.matcher._cable_designation_signatures_match = ReMoMatcher._cable_designation_signatures_match.__get__(
+            self.matcher,
+            ReMoMatcher,
+        )
+        self.matcher._best_article_series_match = ReMoMatcher._best_article_series_match.__get__(
+            self.matcher,
+            ReMoMatcher,
+        )
+        self.matcher._lookup_catalog_item_by_article_series_match = ReMoMatcher._lookup_catalog_item_by_article_series_match.__get__(
+            self.matcher,
+            ReMoMatcher,
+        )
         self.matcher._should_reject_weak_resolution_in_exact_mode = ReMoMatcher._should_reject_weak_resolution_in_exact_mode.__get__(
             self.matcher,
             ReMoMatcher,
@@ -727,6 +743,14 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.assertIsNotNone(item)
         self.assertEqual(item["article"], "4582")
 
+    def test_cable_designation_signature_match_tolerates_generic_candidate_tokens(self):
+        query_signature = self.matcher._extract_cable_designation_signature("ВВГнг(A)-LS 4x4")
+        candidate_signature = self.matcher._extract_cable_designation_signature(
+            "Кабель силовой ВВГнг(А)-LS 4x4 ок(N)-1"
+        )
+
+        self.assertTrue(self.matcher._cable_designation_signatures_match(query_signature, candidate_signature))
+
     def test_lookup_catalog_items_by_article_series_returns_matching_prefix_candidates(self):
         self.matcher._uses_duckdb_query_backend = lambda: False
         self.matcher.catalog_items = [
@@ -765,6 +789,71 @@ class MatchTaxonomyTests(unittest.TestCase):
         items = self.matcher._lookup_catalog_items_by_article_series("35262", features)
 
         self.assertEqual([item["article"] for item in items], ["3526210HDZ", "3526212HDZ"])
+
+    def test_lookup_catalog_item_by_article_series_match_returns_best_compatible_candidate(self):
+        self.matcher._uses_duckdb_query_backend = lambda: False
+        self.matcher.catalog_items = [
+            {
+                "name": "Пластина для заземления PTCE",
+                "normalized_name": "пластина для заземления ptce",
+                "branch_path": "аксессуары вспомогательные",
+                "entity_type": "other",
+                "item_markers": {},
+                "row_idx": 21,
+                "article": "37501R",
+                "tokens": ["пластина", "заземления", "ptce"],
+            },
+            {
+                "name": "Светильник светодиодный",
+                "normalized_name": "светильник светодиодный",
+                "branch_path": "свет > светильники",
+                "entity_type": "other",
+                "item_markers": {},
+                "row_idx": 22,
+                "article": "37501",
+                "tokens": ["светильник"],
+            },
+        ]
+        features = self.matcher._extract_query_features("Пластина для заземления PTCE, артикул 37501")
+        features["ranked_branches"] = []
+
+        item = self.matcher._lookup_catalog_item_by_article_series_match("37501", features)
+
+        self.assertIsNotNone(item)
+        self.assertEqual(item["article"], "37501R")
+
+    def test_lookup_catalog_item_by_article_series_match_rejects_dimension_conflict(self):
+        self.matcher._uses_duckdb_query_backend = lambda: False
+        self.matcher.catalog_items = [
+            {
+                "name": "Ответвитель DL 300x50 в комплекте с крепежными элементами",
+                "normalized_name": "ответвитель dl 300x50 в комплекте с крепежными элементами",
+                "branch_path": "кабеленесущие системы",
+                "entity_type": "cable",
+                "item_markers": {},
+                "row_idx": 31,
+                "article": "36238K",
+                "tokens": ["ответвитель", "dl", "300x50"],
+            },
+            {
+                "name": "Ответвитель DL 300x50 в комплекте с крепежными элементами HDZ",
+                "normalized_name": "ответвитель dl 300x50 в комплекте с крепежными элементами hdz",
+                "branch_path": "кабеленесущие системы",
+                "entity_type": "cable",
+                "item_markers": {},
+                "row_idx": 32,
+                "article": "36238KHDZ",
+                "tokens": ["ответвитель", "dl", "300x50"],
+            },
+        ]
+        features = self.matcher._extract_query_features(
+            "Ответвитель DL 200x50 в комплекте с крепежными элементами, артикул 36238K"
+        )
+        features["ranked_branches"] = []
+
+        item = self.matcher._lookup_catalog_item_by_article_series_match("36238K", features)
+
+        self.assertIsNone(item)
 
 
 if __name__ == "__main__":

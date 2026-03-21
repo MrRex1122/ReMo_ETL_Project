@@ -148,6 +148,63 @@ class NormalizedMatchTests(unittest.TestCase):
         self.assertEqual(result["resolution_source"], "article_designation_exact")
         self.assertEqual(result["compatibility_status"], "compatible")
 
+    def test_match_uses_article_series_local_after_article_conflict(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.catalog_dict = {}
+        matcher.catalog_normalized_dict = {}
+        matcher.catalog_article_dict = {
+            "37501": {
+                "name": "Светильник светодиодный",
+                "article": "37501",
+                "price": 100.0,
+                "row_idx": 1,
+                "branch_path": "свет > светильники",
+                "entity_type": "other",
+                "item_markers": {},
+            }
+        }
+        matcher.catalog_items = []
+        matcher.parallel_requests = 1
+        matcher.retrieval_backend = "memory"
+        matcher.retrieval_mode = "legacy_limited"
+        matcher.taxonomy_rules = ReMoMatcher._load_taxonomy_rules(matcher)
+        matcher.match_mode = "exact"
+        matcher.branch_index = {}
+        matcher.branch_prefix_index = {}
+        matcher.branch_token_index = {}
+        matcher.branch_priority_scores = {}
+        matcher.token_idf = {}
+        matcher._match_context_local = threading.local()
+        matcher._match_context_local.payload = {
+            "input_article": "",
+            "extracted_article": "37501",
+            "query_article": "37501",
+        }
+
+        matcher._get_from_cache = lambda _query: None
+        matcher._save_to_cache = lambda *_args, **_kwargs: None
+        matcher._uses_duckdb_query_backend = lambda: False
+        series_item = {
+            "name": "Пластина для заземления PTCE",
+            "article": "37501R",
+            "price": 250.0,
+            "row_idx": 2,
+            "branch_path": "аксессуары вспомогательные",
+            "entity_type": "other",
+            "item_markers": {},
+            "normalized_name": "пластина для заземления ptce",
+            "tokens": ["пластина", "заземления", "ptce"],
+        }
+        matcher._lookup_catalog_items_by_article_series = lambda _article, _features: [series_item]
+        matcher._best_article_series_match = lambda _features, _candidates: series_item
+
+        result = ReMoMatcher.match(matcher, "Пластина для заземления PTCE, артикул 37501", use_cache=False)
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["article"], "37501R")
+        self.assertEqual(result["resolution_source"], "article_series_local")
+        self.assertEqual(result["compatibility_status"], "compatible")
+
 
 if __name__ == "__main__":
     unittest.main()
