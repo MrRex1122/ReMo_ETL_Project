@@ -1371,6 +1371,7 @@ def _render_catalog_coverage_audit(run, df: pd.DataFrame) -> None:
 
     audit_payload = None
     audit_error = None
+    diagnostics_payload = None
     try:
         stored_payload = load_processing_run_coverage_audit(run.run_id)
         if is_catalog_coverage_audit_fresh(
@@ -1382,6 +1383,13 @@ def _render_catalog_coverage_audit(run, df: pd.DataFrame) -> None:
             audit_payload = stored_payload
     except Exception as exc:
         audit_error = exc
+
+    try:
+        stored_diagnostics_payload = load_processing_run_match_diagnostics(run.run_id)
+        if is_match_diagnostics_fresh(stored_diagnostics_payload, run_id=run.run_id):
+            diagnostics_payload = stored_diagnostics_payload
+    except Exception as exc:
+        logger.warning("Не удалось загрузить runtime-диагностику для аудита прогона %s: %s", run.run_id, exc)
 
     button_col, status_col = st.columns([1, 2])
     with button_col:
@@ -1404,6 +1412,7 @@ def _render_catalog_coverage_audit(run, df: pd.DataFrame) -> None:
                     run_id=run.run_id,
                     catalog_source_path=run.catalog_source_path,
                     catalog_source_kind=run.catalog_source_kind,
+                    diagnostics_payload=diagnostics_payload,
                 )
                 write_processing_run_coverage_audit(run.run_id, audit_payload)
             st.success("✓ Аудит покрытия каталога сохранен.")

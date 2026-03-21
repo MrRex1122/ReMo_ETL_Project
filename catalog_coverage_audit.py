@@ -28,7 +28,7 @@ from taxonomy_registry import (
 
 logger = logging.getLogger(__name__)
 
-CATALOG_COVERAGE_AUDIT_VERSION = 4
+CATALOG_COVERAGE_AUDIT_VERSION = 5
 
 _AUDIT_REGISTRY_RULES = load_registry_taxonomy_rules()
 TARGET_FAMILY_GROUPS = registry_audit_family_groups(_AUDIT_REGISTRY_RULES)
@@ -83,6 +83,25 @@ class _QueryAuditContext:
     related_examples: list[tuple[float, dict[str, str]]] = field(default_factory=list)
     gap_reason_counts: Counter[str] = field(default_factory=Counter)
     gap_reason_examples: dict[str, tuple[float, dict[str, str]]] = field(default_factory=dict)
+
+
+def _diagnostic_rows_by_number(diagnostics_payload: dict[str, Any] | None) -> dict[int, dict[str, Any]]:
+    if not isinstance(diagnostics_payload, dict):
+        return {}
+    rows = diagnostics_payload.get("rows")
+    if not isinstance(rows, list):
+        return {}
+    prepared: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        try:
+            run_row_number = int(row.get("run_row_number") or 0)
+        except (TypeError, ValueError):
+            run_row_number = 0
+        if run_row_number > 0:
+            prepared[run_row_number] = row
+    return prepared
 
 
 def _safe_catalog_mtime(path: Path) -> float | None:
@@ -352,18 +371,37 @@ def _build_focus_contexts(
     df_result: pd.DataFrame,
     *,
     adapter: _AuditMatcherAdapter,
+    diagnostics_payload: dict[str, Any] | None = None,
 ) -> list[_QueryAuditContext]:
     query_column = _find_query_column(df_result)
+    diagnostics_rows = _diagnostic_rows_by_number(diagnostics_payload)
     contexts: list[_QueryAuditContext] = []
     for row_index, row in df_result.iterrows():
         query_text = clean_text_value(row.get(query_column))
         if _should_skip_query_text(query_text):
             continue
+        run_row_number = int(row_index) + 2
         current_resolution_source = clean_text_value(row.get("Источник решения"))
         current_compatibility_status = clean_text_value(row.get("Совместимость решения"))
         query_features = adapter.extract_query_features(query_text)
-        query_family = adapter.entity_family(query_features.get("entity_type", ""))
-        family_group = _family_group_for(query_family) if clean_text_value(query_features.get("row_type")) == "item" else None
+        diagnostics_row = diagnostics_rows.get(run_row_number, {})
+        runtime_row_type = clean_text_value(diagnostics_row.get("row_type"))
+        runtime_entity_type = clean_text_value(diagnostics_row.get("entity_type"))
+        runtime_query_family = clean_text_value(diagnostics_row.get("query_family"))
+
+        if runtime_row_type:
+            query_features["row_type"] = runtime_row_type
+        elif runtime_query_family and not clean_text_value(query_features.get("row_type")):
+            query_features["row_type"] = "item"
+
+        if runtime_entity_type:
+            query_features["entity_type"] = runtime_entity_type
+        elif runtime_query_family and not clean_text_value(query_features.get("entity_type")):
+            query_features["entity_type"] = runtime_query_family
+
+        query_family = runtime_query_family or adapter.entity_family(query_features.get("entity_type", ""))
+        row_type = clean_text_value(query_features.get("row_type"))
+        family_group = _family_group_for(query_family) if row_type == "item" else None
         if not _should_include_row(
             query_family_group=family_group,
             current_resolution_source=current_resolution_source,
@@ -372,7 +410,7 @@ def _build_focus_contexts(
             continue
         contexts.append(
             _QueryAuditContext(
-                run_row_number=int(row_index) + 2,
+                run_row_number=run_row_number,
                 query_text=query_text,
                 query_features=query_features,
                 query_family=query_family,
@@ -465,11 +503,12 @@ def build_catalog_coverage_audit(
     run_id: str,
     catalog_source_path: Path,
     catalog_source_kind: str,
+    diagnostics_payload: dict[str, Any] | None = None,
     example_limit: int = 3,
     chunksize: int = 10_000,
 ) -> dict[str, Any]:
     adapter = _AuditMatcherAdapter()
-    contexts = _build_focus_contexts(df_result, adapter=adapter)
+    contexts = _build_focus_contexts(df_result, adapter=adapter, diagnostics_payload=diagnostics_payload)
     relevant_contexts = [context for context in contexts if context.query_family_group is not None]
 
     if relevant_contexts:

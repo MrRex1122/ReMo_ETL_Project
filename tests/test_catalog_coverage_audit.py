@@ -153,6 +153,47 @@ class CatalogCoverageAuditTests(unittest.TestCase):
             detail_table = prepare_catalog_coverage_audit_table(payload)
             self.assertTrue(detail_table.empty)
 
+    def test_runtime_diagnostics_family_is_used_for_audit_scope(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            catalog_path = Path(tmp_dir) / "catalog.csv"
+            _write_catalog_csv(
+                catalog_path,
+                [
+                    {
+                        CANONICAL_NAME_COLUMN: "Консоль универсальная осн. 200 мм",
+                        CANONICAL_ARTICLE_COLUMN: "BBN5020",
+                        "Название класса": "Шкафные аксессуары",
+                        "Тип изделия": "Консоль",
+                        "Тип исполнения кабельного изделия": "",
+                    }
+                ],
+            )
+
+            diagnostics_payload = {
+                "rows": [
+                    {
+                        "run_row_number": 2,
+                        "row_type": "item",
+                        "entity_type": "rack_accessory_strict",
+                        "query_family": "rack_accessory_strict",
+                    }
+                ]
+            }
+
+            payload = build_catalog_coverage_audit(
+                _build_result_df("Консоль универсальная осн. 200 мм, артикул BBN5020"),
+                run_id="run-rack-runtime-family",
+                catalog_source_path=catalog_path,
+                catalog_source_kind="merged",
+                diagnostics_payload=diagnostics_payload,
+            )
+
+            row = self._first_row(payload)
+            self.assertEqual(row["query_family"], "rack_accessory_strict")
+            self.assertEqual(row["query_family_group"], "rack_accessories")
+            self.assertNotEqual(row["diagnosis"], "non_target_family")
+            self.assertEqual(payload["summary"]["rows_analyzed"], 1)
+
     def test_iec_power_cable_is_included_as_target_family(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             catalog_path = Path(tmp_dir) / "catalog.csv"
