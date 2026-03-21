@@ -77,6 +77,8 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.matcher._should_use_whole_category_retrieval = ReMoMatcher._should_use_whole_category_retrieval.__get__(self.matcher, ReMoMatcher)
         self.matcher._whole_category_secondary_filter_groups = ReMoMatcher._whole_category_secondary_filter_groups.__get__(self.matcher, ReMoMatcher)
         self.matcher._apply_whole_category_secondary_filter = ReMoMatcher._apply_whole_category_secondary_filter.__get__(self.matcher, ReMoMatcher)
+        self.matcher._gemini_route_changes_query_features = ReMoMatcher._gemini_route_changes_query_features.__get__(self.matcher, ReMoMatcher)
+        self.matcher._typed_candidate_pool = ReMoMatcher._typed_candidate_pool.__get__(self.matcher, ReMoMatcher)
         self.matcher._should_query_gemini_without_candidates = ReMoMatcher._should_query_gemini_without_candidates.__get__(self.matcher, ReMoMatcher)
         self.matcher._should_accept_weak_gemini_result = ReMoMatcher._should_accept_weak_gemini_result.__get__(self.matcher, ReMoMatcher)
         self.matcher._is_assembly_mode_enabled = ReMoMatcher._is_assembly_mode_enabled.__get__(self.matcher, ReMoMatcher)
@@ -268,6 +270,49 @@ class MatchTaxonomyTests(unittest.TestCase):
 
         self.assertTrue(self.matcher._is_hard_incompatible_match(features, item))
         self.assertEqual(self.matcher._hard_incompatibility_reason(features, item), "designation_family_mismatch")
+
+    def test_gemini_route_is_not_marked_when_router_confirms_same_family(self):
+        features = self.matcher._extract_query_features("Кабель, артикул ВВГнг(A)-LS 4x4")
+        routed = {
+            "family": features.get("entity_type"),
+            "branch_hint": features.get("branch_hint", ""),
+            "markers": dict(features.get("markers", {}) or {}),
+        }
+
+        self.assertFalse(self.matcher._gemini_route_changes_query_features(features, routed))
+
+    def test_typed_candidate_pool_filters_rack_accessory_incompatible_items_early(self):
+        self.matcher._match_strictness_for_query = lambda _features: "strict"
+        self.matcher._should_use_whole_category_retrieval = lambda _features: True
+        self.matcher._duckdb_category_candidates = lambda _features: (
+            "rack > accessories",
+            [
+                {
+                    "name": "Консоль универсальная осн. 200 мм",
+                    "normalized_name": "консоль универсальная осн 200 мм",
+                    "branch_path": "rack > accessories",
+                    "entity_type": "rack_accessory_strict",
+                    "item_markers": {"accessory_kind": "console"},
+                    "row_idx": 1,
+                },
+                {
+                    "name": "Угол CPO 90 горизонтальный 200x50",
+                    "normalized_name": "угол cpo 90 горизонтальный 200x50",
+                    "branch_path": "rack > accessories",
+                    "entity_type": "rack_accessory_strict",
+                    "item_markers": {"accessory_kind": "corner", "orientation_kind": "horizontal"},
+                    "row_idx": 2,
+                },
+            ],
+            0.0,
+        )
+
+        features = self.matcher._extract_query_features("Консоль универсальная осн. 200 мм, артикул BBN5020")
+        features["ranked_branches"] = [{"path": "rack > accessories", "score": 1.0}]
+        pool = self.matcher._typed_candidate_pool(features["original_text"], features, 50)
+
+        self.assertEqual(len(pool), 1)
+        self.assertEqual(pool[0]["item_markers"].get("accessory_kind"), "console")
 
     def test_hard_incompatibility_blocks_rj45_connector_to_power_cable(self):
         features = self.matcher._extract_query_features("Коннектор RJ-45 cat6")

@@ -2576,6 +2576,10 @@ class ReMoMatcher:
                 if query_environment == "outdoor" and item_environment and item_environment != "outdoor":
                     return False
                 return True
+            if entity_family == "rack_accessory_strict":
+                if item_family != "rack_accessory_strict":
+                    return False
+                return not self._is_hard_incompatible_match(query_features, item)
             if entity_family and item_family and item_family != entity_family:
                 return False
             return True
@@ -3973,6 +3977,33 @@ class ReMoMatcher:
             logger.info("Gemini family router skipped after failures: query=%s error=%s", query[:120], last_error)
         return None
 
+    def _gemini_route_changes_query_features(
+        self,
+        query_features: Dict[str, Any],
+        routed: Dict[str, Any] | None,
+    ) -> bool:
+        if not isinstance(routed, dict):
+            return False
+        original_entity_type = self._clean_text_value(query_features.get("entity_type"))
+        original_branch_hint = self._clean_text_value(query_features.get("branch_hint"))
+        original_markers = dict(query_features.get("markers", {}) or {})
+
+        routed_family = self._clean_text_value(routed.get("family"))
+        if routed_family and routed_family != original_entity_type:
+            return True
+
+        routed_branch = self._clean_text_value(routed.get("branch_hint"))
+        if routed_branch and routed_branch != original_branch_hint:
+            return True
+
+        routed_markers = routed.get("markers") if isinstance(routed.get("markers"), dict) else {}
+        for key, value in routed_markers.items():
+            cleaned_key = self._clean_text_value(key)
+            cleaned_value = self._clean_text_value(value)
+            if cleaned_key and cleaned_value and cleaned_value != self._clean_text_value(original_markers.get(cleaned_key)):
+                return True
+        return False
+
     def _should_use_article_validator_gemini(self, query_features: Dict[str, Any], reason_code: str) -> bool:
         if not hasattr(self, "backend"):
             return False
@@ -4744,6 +4775,7 @@ class ReMoMatcher:
             if self._should_use_family_router_gemini(query_features):
                 routed = self._route_query_family_with_gemini(query_text, query_features)
                 if routed is not None:
+                    route_changed = self._gemini_route_changes_query_features(query_features, routed)
                     query_features["entity_type"] = self._clean_text_value(routed.get("family")) or query_features.get("entity_type")
                     routed_branch = self._clean_text_value(routed.get("branch_hint"))
                     if routed_branch:
@@ -4760,16 +4792,17 @@ class ReMoMatcher:
                         float(query_features.get("family_confidence") or 0.0),
                         float(routed.get("confidence") or 0.0),
                     )
-                    query_features["gemini_route_used"] = True
-                    trace_steps.append(
-                        {
-                            "stage": "query_classification",
-                            "status": "routed",
-                            "reason_code": "family_router_gemini",
-                            "query_family": self._entity_family(query_features.get("entity_type", "")),
-                            "family_confidence": float(query_features.get("family_confidence") or 0.0),
-                        }
-                    )
+                    if route_changed:
+                        query_features["gemini_route_used"] = True
+                        trace_steps.append(
+                            {
+                                "stage": "query_classification",
+                                "status": "routed",
+                                "reason_code": "family_router_gemini",
+                                "query_family": self._entity_family(query_features.get("entity_type", "")),
+                                "family_confidence": float(query_features.get("family_confidence") or 0.0),
+                            }
+                        )
             query_family = self._entity_family(query_features.get("entity_type", ""))
             trace_steps.append(
                 {

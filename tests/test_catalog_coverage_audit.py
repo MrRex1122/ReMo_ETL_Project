@@ -548,6 +548,37 @@ class CatalogCoverageAuditTests(unittest.TestCase):
             self.assertIn(row["diagnosis"], {"catalog_missing_family", "catalog_has_family_but_no_compatible_specs"})
             self.assertEqual(row["compatible_candidates_count"], 0)
 
+    def test_search_catalog_keeps_precomputed_family_when_recomputed_family_is_broad(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            catalog_path = Path(tmp_dir) / "search_catalog.csv"
+            _write_catalog_csv(
+                catalog_path,
+                [
+                    {
+                        CANONICAL_NAME_COLUMN: "Консоль универсальная осн. 200 мм",
+                        CANONICAL_ARTICLE_COLUMN: "BBN5020",
+                        "Название класса": "Кабельные аксессуары",
+                        "Тип изделия": "Консоль",
+                        "Тип исполнения кабельного изделия": "",
+                        "search_branch_path": "электрика > аксессуары > консоли",
+                        "search_normalized_name": "консоль универсальная осн 200 мм",
+                        "search_entity_type": "other",
+                        "search_item_markers_json": json.dumps({}, ensure_ascii=False),
+                    }
+                ],
+            )
+
+            payload = build_catalog_coverage_audit(
+                _build_result_df("Консоль универсальная осн. 200 мм, артикул BBN5020"),
+                run_id="run-search-precomputed-broad",
+                catalog_source_path=catalog_path,
+                catalog_source_kind="search",
+            )
+
+            row = self._first_row(payload)
+            self.assertEqual(row["diagnosis"], "catalog_missing_family")
+            self.assertEqual(row["same_family_candidates_count"], 0)
+
     def test_keystone_audit_does_not_count_adapters_as_compatible_modules(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             catalog_path = Path(tmp_dir) / "catalog.csv"

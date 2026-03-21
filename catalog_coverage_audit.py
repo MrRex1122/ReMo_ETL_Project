@@ -184,11 +184,30 @@ class _AuditMatcherAdapter:
                 precomputed_item_markers = json.loads(clean_text_value(row.get("search_item_markers_json")) or "{}")
             except json.JSONDecodeError:
                 precomputed_item_markers = {}
+            projected_family = self.entity_family(entity_type)
+            precomputed_family = self.entity_family(precomputed_entity_type)
+            use_projected_family = bool(
+                entity_type
+                and projected_family
+                and projected_family != precomputed_family
+                and projected_family != "rack_accessory_strict"
+            )
 
-            entity_type = entity_type or precomputed_entity_type
-            branch_path = branch_path or precomputed_branch_path
-            normalized_name = normalized_name or precomputed_normalized_name or self.matcher._normalize_text(name)
-            if not item_markers and isinstance(precomputed_item_markers, dict):
+            if precomputed_entity_type and not use_projected_family:
+                entity_type = precomputed_entity_type
+            branch_path = (
+                precomputed_branch_path
+                if precomputed_branch_path and not use_projected_family
+                else branch_path or precomputed_branch_path
+            )
+            normalized_name = (
+                precomputed_normalized_name
+                if precomputed_normalized_name and not use_projected_family
+                else normalized_name or precomputed_normalized_name or self.matcher._normalize_text(name)
+            )
+            if isinstance(precomputed_item_markers, dict) and precomputed_item_markers and not use_projected_family:
+                item_markers = precomputed_item_markers
+            elif not item_markers and isinstance(precomputed_item_markers, dict):
                 item_markers = precomputed_item_markers
 
         return {
