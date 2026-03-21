@@ -68,6 +68,25 @@ from config import (
     get_matcher_skip_weak_shortlist,
 )
 from match_diagnostics import build_match_diagnostics_payload, infer_reason_class
+from taxonomy_registry import (
+    allowed_cross_family_pairs as registry_allowed_cross_family_pairs,
+    audit_family_groups as registry_audit_family_groups,
+    audited_families as registry_audited_families,
+    classify_entity_type_from_registry,
+    clean_registry_text,
+    domain_conflict_reason as registry_domain_conflict_reason,
+    entity_family_for_type,
+    family_default_branches as registry_family_default_branches,
+    family_entity_types as registry_family_entity_types,
+    family_retrieval_mode as registry_family_retrieval_mode,
+    family_secondary_filter_rules as registry_family_secondary_filter_rules,
+    family_strictness as registry_family_strictness,
+    family_weak_match_policy as registry_family_weak_match_policy,
+    gemini_policy_value as registry_gemini_policy_value,
+    infer_domain_match as registry_infer_domain_match,
+    is_whole_category_family as registry_is_whole_category_family,
+    load_registry_taxonomy_rules,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -657,31 +676,16 @@ class ReMoMatcher:
         return items[0] if items else None
 
     def _entity_types_for_family(self, entity_family: str) -> set[str]:
-        family = self._entity_family(entity_family)
-        family_map = {
-            "airflow_blanking_panel": {"airflow_blanking_panel"},
-            "ats_sts": {"ats_sts"},
-            "bulk_twisted_pair": {"bulk_twisted_pair"},
-            "floor_box": {"floor_box"},
-            "ground_bar": {"ground_bar"},
-            "iec_power_cable": {"iec_power_cable"},
-            "keystone": {"keystone_module", "keystone_adapter", "rj45_outlet"},
-            "optical_cross": {"optical_cross"},
-            "optical_patch_cord": {"optical_patch_cord"},
-            "patch_cord": {"patch_cord"},
-            "patch_panel": {"patch_panel"},
-            "pdu": {"pdu_basic", "pdu_metered"},
-            "rack": {"rack"},
-            "rack_accessory_strict": {"rack_blank_panel", "rack_brush_panel", "rack_shelf", "rack_rail"},
-            "rack_rail": {"rack_rail", "rack_shelf"},
-            "rack_shelf": {"rack_shelf", "rack_rail"},
-            "rj45_connector": {"rj45_connector"},
-            "rj45_outlet": {"rj45_outlet", "keystone_module", "keystone_adapter"},
-            "sensor": {"sensor", "temperature_sensor", "temperature_humidity_sensor", "reed_sensor"},
-        }
-        return set(family_map.get(family, {family} if family else set()))
+        return registry_family_entity_types(entity_family, getattr(self, "taxonomy_rules", {}))
 
     def _default_branch_paths_for_family(self, query_features: Dict[str, Any]) -> List[str]:
+        registry_defaults = registry_family_default_branches(
+            query_features.get("entity_type", ""),
+            getattr(self, "taxonomy_rules", {}),
+            branch_hint=self._clean_text_value(query_features.get("branch_hint")),
+        )
+        if registry_defaults:
+            return registry_defaults
         family = self._entity_family(query_features.get("entity_type", ""))
         branch_hint = self._clean_text_value(query_features.get("branch_hint"))
         defaults: List[str] = []
@@ -725,7 +729,7 @@ class ReMoMatcher:
         if self._clean_text_value(query_features.get("row_type")) != "item":
             return False
         family = self._entity_family(query_features.get("entity_type", ""))
-        if family not in WHOLE_CATEGORY_RETRIEVAL_FAMILIES:
+        if not registry_is_whole_category_family(family, getattr(self, "taxonomy_rules", {})):
             return False
         return any(self._clean_text_value(path) and self._clean_text_value(path) != "прочее" for path in self._default_branch_paths_for_family(query_features))
 
@@ -776,6 +780,117 @@ class ReMoMatcher:
             return candidates
         filtered = [item for item in candidates if predicate(item)]
         return filtered if filtered else candidates
+
+    def _secondary_filter_rule_matches(self, rule: Dict[str, Any], query_features: Dict[str, Any]) -> bool:
+        query_markers = query_features.get("markers", {}) or {}
+        normalized_query = self._normalize_text(self._clean_text_value(query_features.get("original_text")))
+        when_marker_equals = rule.get("when_marker_equals", {}) or {}
+        for marker_name, expected_value in when_marker_equals.items():
+            if self._clean_text_value(query_markers.get(marker_name)) != self._clean_text_value(expected_value):
+                return False
+        query_tokens = [self._clean_text_value(token) for token in (rule.get("when_query_contains_any", []) or []) if self._clean_text_value(token)]
+        if query_tokens and not any(token in normalized_query for token in query_tokens):
+            return False
+        return True
+
+    def _query_dimension_tokens(self, query_text: str) -> List[str]:
+        normalized = self._normalize_text(query_text)
+        tokens: List[str] = []
+        tokens.extend(re.findall(r"\b\d{1,4}\s*[xх]\s*\d{1,4}(?:\s*[xх]\s*\d{1,4})?\b", normalized, flags=re.IGNORECASE))
+        tokens.extend(re.findall(r"\bl\s*=?\s*\d{1,5}\b", normalized, flags=re.IGNORECASE))
+        tokens.extend(re.findall(r"\bd\s*=?\s*\d{1,4}(?:\s*-\s*\d{1,4})?\b", normalized, flags=re.IGNORECASE))
+        return [self._normalize_text(token) for token in tokens if self._normalize_text(token)]
+
+    def _candidate_matches_marker_rule(self, item: Dict[str, Any], *, expected_value: str, candidate_marker: str, fallback_patterns: Dict[str, Any] | None = None) -> bool:
+        item_marker_value = self._clean_text_value((item.get("item_markers") or {}).get(candidate_marker))
+        if item_marker_value:
+            return item_marker_value == expected_value
+        patterns = fallback_patterns or {}
+        haystack = self._candidate_secondary_filter_haystack(item)
+        for token in patterns.get(expected_value, []) or []:
+            if self._clean_text_value(token) and self._clean_text_value(token) in haystack:
+                return True
+        return False
+
+    def _apply_secondary_filter_rule(
+        self,
+        rule: Dict[str, Any],
+        query_features: Dict[str, Any],
+        candidates: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        if not candidates or not self._secondary_filter_rule_matches(rule, query_features):
+            return candidates
+        rule_type = self._clean_text_value(rule.get("type"))
+        query_markers = query_features.get("markers", {}) or {}
+        query_text = self._clean_text_value(query_features.get("original_text"))
+
+        if rule_type in {"require_marker_equal", "prefer_marker_equal"}:
+            marker_name = self._clean_text_value(rule.get("marker"))
+            candidate_marker = self._clean_text_value(rule.get("candidate_marker")) or marker_name
+            expected_value = self._clean_text_value(query_markers.get(marker_name))
+            if not expected_value:
+                return candidates
+            predicate = lambda item: self._candidate_matches_marker_rule(
+                item,
+                expected_value=expected_value,
+                candidate_marker=candidate_marker,
+                fallback_patterns=rule.get("fallback_patterns", {}),
+            )
+            if rule_type == "require_marker_equal":
+                filtered = [item for item in candidates if predicate(item)]
+                return filtered if filtered else candidates
+            return self._apply_optional_secondary_filter(candidates, predicate)
+
+        if rule_type in {"require_any_token_group", "prefer_any_token_group"}:
+            groups = rule.get("groups", []) or []
+            if not groups:
+                return candidates
+            predicate = lambda item: all(
+                any(self._clean_text_value(token) and self._clean_text_value(token) in self._candidate_secondary_filter_haystack(item) for token in group)
+                for group in groups
+            )
+            if rule_type == "require_any_token_group":
+                filtered = [item for item in candidates if predicate(item)]
+                return filtered if filtered else candidates
+            return self._apply_optional_secondary_filter(candidates, predicate)
+
+        if rule_type == "prefer_any_tokens":
+            required_tokens = [self._clean_text_value(token) for token in (rule.get("tokens", []) or []) if self._clean_text_value(token)]
+            if not required_tokens:
+                return candidates
+            return self._apply_optional_secondary_filter(
+                candidates,
+                lambda item: any(token in self._candidate_secondary_filter_haystack(item) for token in required_tokens),
+            )
+
+        if rule_type == "prefer_dimension_overlap":
+            dimension_tokens = self._query_dimension_tokens(query_text)
+            if not dimension_tokens:
+                return candidates
+            return self._apply_optional_secondary_filter(
+                candidates,
+                lambda item: any(token in self._candidate_secondary_filter_haystack(item) for token in dimension_tokens),
+            )
+
+        if rule_type == "prefer_connector_pair":
+            connector_pair = self._clean_text_value(query_markers.get("connector_pair"))
+            if not connector_pair:
+                return candidates
+            return self._apply_optional_secondary_filter(
+                candidates,
+                lambda item: self._clean_text_value((item.get("item_markers") or {}).get("connector_pair")) == connector_pair,
+            )
+
+        if rule_type == "prefer_component_kind":
+            component_kind = self._clean_text_value(query_markers.get("component_kind"))
+            if not component_kind:
+                return candidates
+            return self._apply_optional_secondary_filter(
+                candidates,
+                lambda item: self._clean_text_value((item.get("item_markers") or {}).get("component_kind")) == component_kind,
+            )
+
+        return candidates
 
     def _bulk_twisted_pair_secondary_filter(
         self,
@@ -948,6 +1063,30 @@ class ReMoMatcher:
         candidates: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
         original_count = len(candidates)
+        family = self._entity_family(query_features.get("entity_type", ""))
+        registry_rules = registry_family_secondary_filter_rules(family, getattr(self, "taxonomy_rules", {}))
+        if registry_rules and candidates:
+            filtered = candidates
+            applied_rule_names: List[str] = []
+            for rule in registry_rules:
+                next_filtered = self._apply_secondary_filter_rule(rule, query_features, filtered)
+                if next_filtered is not filtered:
+                    applied_rule_names.append(self._clean_text_value(rule.get("name")) or self._clean_text_value(rule.get("type")))
+                filtered = next_filtered
+            if applied_rule_names:
+                query_features["secondary_filter_rule_set"] = applied_rule_names
+                query_features["secondary_filter_before_count"] = original_count
+                query_features["secondary_filter_after_count"] = len(filtered)
+                if len(filtered) != original_count:
+                    logger.info(
+                        "🧠 Whole-category secondary filter: query=%s family=%s rules=%s before=%s after=%s",
+                        self._clean_text_value(query_features.get("original_text"))[:120],
+                        family or "other",
+                        ",".join(applied_rule_names),
+                        original_count,
+                        len(filtered),
+                    )
+                return filtered
         filtered = candidates
         groups = self._whole_category_secondary_filter_groups(query_features)
         if groups and filtered:
@@ -959,7 +1098,6 @@ class ReMoMatcher:
             if group_filtered:
                 filtered = group_filtered
 
-        family = self._entity_family(query_features.get("entity_type", ""))
         if family == "bulk_twisted_pair" and filtered:
             filtered = self._bulk_twisted_pair_secondary_filter(query_features, filtered)
         elif family == "rack_accessory_strict" and filtered:
@@ -1005,7 +1143,7 @@ class ReMoMatcher:
         if self._clean_text_value(query_features.get("article_lookup_rejected_reason")):
             return True
         query_family = self._entity_family(query_features.get("entity_type", ""))
-        return query_family in {"cable", "wire", "coax", "bulk_twisted_pair"}
+        return registry_family_weak_match_policy(query_family, getattr(self, "taxonomy_rules", {})) == "reject_in_exact"
 
     def _duckdb_category_candidates(self, query_features: Dict[str, Any]) -> Tuple[str, List[Dict[str, Any]], float]:
         branch_paths = [path for path in self._default_branch_paths_for_family(query_features) if path and path != "прочее"]
@@ -1126,16 +1264,11 @@ class ReMoMatcher:
     def _load_taxonomy_rules(self) -> Dict[str, Any]:
         path_raw = os.getenv("REMO_TAXONOMY_RULES_PATH")
         path = Path(path_raw) if path_raw else DEFAULT_TAXONOMY_RULES_PATH
-        rules = DEFAULT_TAXONOMY_RULES
-        if not path.exists():
-            return rules
         try:
-            loaded = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(loaded, dict):
-                return _merge_dicts(DEFAULT_TAXONOMY_RULES, loaded)
+            return load_registry_taxonomy_rules(base_rules=DEFAULT_TAXONOMY_RULES, path=path)
         except Exception as exc:
             logger.warning("Failed to load taxonomy rules from %s: %s", path, exc)
-        return rules
+            return load_registry_taxonomy_rules(base_rules=DEFAULT_TAXONOMY_RULES)
 
     def _load_prompt_template(self) -> str:
         path_raw = os.getenv("REMO_MATCH_PROMPT_TEMPLATE_PATH")
@@ -1699,15 +1832,16 @@ class ReMoMatcher:
         )
 
     def _classify_item_type(self, text: str) -> str:
-        return shared_classify_item_type(text, synonyms=getattr(self, "taxonomy_rules", {}).get("synonyms", {}))
+        return shared_classify_item_type(
+            text,
+            synonyms=getattr(self, "taxonomy_rules", {}).get("synonyms", {}),
+            taxonomy_rules=getattr(self, "taxonomy_rules", {}),
+        )
 
     def _is_disallowed_category_substitution(self, query: str, candidate_name: str) -> bool:
         query_type = self._entity_family(self._classify_item_type(query))
         candidate_type = self._entity_family(self._classify_item_type(candidate_name))
-        allowed_cross_family = {
-            ("keystone", "rj45_outlet"),
-            ("rj45_outlet", "keystone"),
-        }
+        allowed_cross_family = registry_allowed_cross_family_pairs(getattr(self, "taxonomy_rules", {}))
         if query_type == "patch_cord" and candidate_type == "bulk_twisted_pair":
             return True
         if getattr(self, "match_mode", MATCH_MODE_EXACT) == MATCH_MODE_EXACT:
@@ -1720,35 +1854,17 @@ class ReMoMatcher:
                 return True
         return False
 
-    @staticmethod
-    def _entity_family(entity_type: str) -> str:
-        normalized = str(entity_type or "").strip().lower()
-        family_map = {
-            "pdu_basic": "pdu",
-            "pdu_metered": "pdu",
-            "temperature_sensor": "sensor",
-            "temperature_humidity_sensor": "sensor",
-            "reed_sensor": "sensor",
-            "soft_starter": "soft_starter",
-            "optical_patch_cord": "optical_patch_cord",
-            "optical_cross": "optical_cross",
-            "iec_power_cable": "iec_power_cable",
-            "keystone_adapter": "keystone",
-            "keystone_module": "keystone",
-            "rj45_connector": "rj45_connector",
-            "rj45_outlet": "rj45_outlet",
-            "airflow_blanking_panel": "airflow_blanking_panel",
-            "rack_blank_panel": "rack_accessory_strict",
-            "rack_brush_panel": "rack_accessory_strict",
-            "rack_shelf": "rack_shelf",
-            "rack_rail": "rack_rail",
-            "floor_box": "floor_box",
-            "ground_bar": "ground_bar",
-            "ats_sts": "ats_sts",
-        }
-        return family_map.get(normalized, normalized)
+    def _entity_family(self, entity_type: str) -> str:
+        return entity_family_for_type(entity_type, getattr(self, "taxonomy_rules", {}))
 
     def _match_strictness_for_query(self, query_features: Dict[str, Any]) -> str:
+        registry_value = registry_family_strictness(
+            query_features.get("entity_type", ""),
+            getattr(self, "taxonomy_rules", {}),
+            markers=query_features.get("markers", {}) or {},
+        )
+        if registry_value:
+            return registry_value
         entity_family = self._entity_family(query_features.get("entity_type", ""))
         query_markers = query_features.get("markers", {}) or {}
         if entity_family == "bulk_twisted_pair" and any(
@@ -2021,6 +2137,16 @@ class ReMoMatcher:
         if not query_text or not candidate_text:
             return ""
 
+        registry_reason = registry_domain_conflict_reason(
+            query_raw_text,
+            candidate_raw_text,
+            query_family=self._entity_family(query_features.get("entity_type", "")),
+            candidate_family=self._entity_family(item.get("entity_type", "")),
+            rules=getattr(self, "taxonomy_rules", {}),
+        )
+        if registry_reason:
+            return registry_reason
+
         lexical_mismatch_rules = (
             (
                 "article_query_candidate_domain_mismatch",
@@ -2237,10 +2363,7 @@ class ReMoMatcher:
 
         query_family = self._entity_family(query_features.get("entity_type", ""))
         candidate_family = self._entity_family(item.get("entity_type", ""))
-        allowed_pairs = {
-            ("keystone", "rj45_outlet"),
-            ("rj45_outlet", "keystone"),
-        }
+        allowed_pairs = registry_allowed_cross_family_pairs(getattr(self, "taxonomy_rules", {}))
         if query_family in {"patch_panel", "optical_cross", "ats_sts", "airflow_blanking_panel"}:
             return candidate_family == query_family
         if candidate_family == query_family:
@@ -2250,10 +2373,7 @@ class ReMoMatcher:
     def _is_gemini_result_family_valid(self, query_features: Dict[str, Any], item: Dict[str, Any]) -> bool:
         query_family = self._entity_family(query_features.get("entity_type", ""))
         candidate_family = self._entity_family(item.get("entity_type", ""))
-        allowed_pairs = {
-            ("keystone", "rj45_outlet"),
-            ("rj45_outlet", "keystone"),
-        }
+        allowed_pairs = registry_allowed_cross_family_pairs(getattr(self, "taxonomy_rules", {}))
         if query_family in {"patch_panel", "optical_cross", "ats_sts", "airflow_blanking_panel"}:
             return candidate_family == query_family
         if (query_family, candidate_family) in allowed_pairs:
@@ -2572,6 +2692,7 @@ class ReMoMatcher:
             *texts,
             keyword_routes=getattr(self, "taxonomy_rules", {}).get("keyword_routes", []),
             synonyms=getattr(self, "taxonomy_rules", {}).get("synonyms", {}),
+            taxonomy_rules=getattr(self, "taxonomy_rules", {}),
         )
 
     def _normalize_catalog_branch(self, row: pd.Series | Dict[str, Any]) -> str:
@@ -3108,12 +3229,36 @@ class ReMoMatcher:
             attribute_patterns=getattr(self, "taxonomy_rules", {}).get("attribute_patterns", {}),
             synonyms=getattr(self, "taxonomy_rules", {}).get("synonyms", {}),
         )
+        registry_match = classify_entity_type_from_registry(
+            original,
+            rules=getattr(self, "taxonomy_rules", {}),
+            markers=markers,
+        )
+        entity_type = self._classify_item_type(original)
+        entity_family = self._entity_family(entity_type)
+        family_confidence = 0.35 if entity_family in {"", "other", "cable", "wire", "coax", "rack", "sensor"} else 0.72
+        if registry_match is not None:
+            registry_entity_type = self._clean_text_value(registry_match.get("entity_type")) or entity_type
+            registry_family = self._entity_family(registry_entity_type)
+            registry_confidence = float(registry_match.get("confidence") or family_confidence)
+            should_apply_registry = (
+                registry_family == entity_family
+                or entity_family in {"", "other"}
+                and registry_confidence >= 0.72
+                or entity_family in {"cable", "wire", "coax", "rack", "sensor"}
+                and registry_confidence >= 0.62
+            )
+            if should_apply_registry:
+                entity_type = registry_entity_type
+                entity_family = registry_family
+                family_confidence = registry_confidence
         features: Dict[str, Any] = {
             "original_text": original,
             "normalized_text": normalized,
             "tokens": tokens,
             "row_type": self._detect_query_row_type(original),
-            "entity_type": self._classify_item_type(original),
+            "entity_type": entity_type,
+            "family_confidence": family_confidence,
             "attributes": dict(markers),
             "markers": dict(markers),
         }
@@ -3598,17 +3743,24 @@ class ReMoMatcher:
             "article_source": self._clean_text_value(article_source) or "none",
             "article_lookup_hit": bool(article_lookup_hit),
             "article_lookup_conflict": bool(article_lookup_conflict),
+            "article_validation_status": self._clean_text_value((query_features or {}).get("article_validation_status")),
             "row_type": row_type,
             "entity_type": entity_type,
             "query_family": query_family,
+            "family_confidence": float((query_features or {}).get("family_confidence") or 0.0),
             "retrieval_mode": str((pipeline_counts or {}).get("retrieval_mode") or getattr(self, "retrieval_mode", "")),
             "retrieval_backend": str((pipeline_counts or {}).get("retrieval_backend") or getattr(self, "retrieval_backend", "")),
             "resolution_source": str(result.get("resolution_source") or ""),
+            "resolver_name": str(result.get("resolution_source") or ""),
+            "resolver_confidence": float(result.get("similarity_score") or 0.0),
             "compatibility_status": str(result.get("compatibility_status") or ""),
             "incompatibility_reason": str(result.get("incompatibility_reason") or ""),
             "stage_of_failure": stage_of_failure,
             "reason_code": reason_code_value,
             "reason_class": infer_reason_class(stage_of_failure, reason_code_value),
+            "gemini_route_used": bool((query_features or {}).get("gemini_route_used")),
+            "gemini_validation_used": bool(result.get("gemini_validation_used") or (query_features or {}).get("gemini_validation_used")),
+            "secondary_filter_rule_set": list((query_features or {}).get("secondary_filter_rule_set") or []),
             "pipeline_counts": pipeline_counts,
             "candidate_snapshots": candidate_snapshots,
             "gemini": gemini_payload,
@@ -3631,6 +3783,156 @@ class ReMoMatcher:
             seen.add(model_name)
             result.append(model_name)
         return result
+
+    def _extract_json_object(self, raw_text: str) -> Dict[str, Any]:
+        start_idx = raw_text.find("{")
+        end_idx = raw_text.rfind("}") + 1
+        if start_idx == -1 or end_idx <= start_idx:
+            raise ValueError("JSON not found in model response")
+        payload = json.loads(raw_text[start_idx:end_idx])
+        if not isinstance(payload, dict):
+            raise ValueError("Gemini payload is not a JSON object")
+        return payload
+
+    def _should_use_family_router_gemini(self, query_features: Dict[str, Any]) -> bool:
+        if not hasattr(self, "backend"):
+            return False
+        if not bool(registry_gemini_policy_value(getattr(self, "taxonomy_rules", {}), "family_router", "enabled", False)):
+            return False
+        if self._clean_text_value(query_features.get("row_type")) != "item":
+            return False
+        family = self._entity_family(query_features.get("entity_type", ""))
+        allowed_families = {
+            self._clean_text_value(item)
+            for item in registry_gemini_policy_value(getattr(self, "taxonomy_rules", {}), "family_router", "families", [])
+            if self._clean_text_value(item)
+        }
+        min_confidence = float(
+            registry_gemini_policy_value(getattr(self, "taxonomy_rules", {}), "family_router", "min_family_confidence", 0.6)
+        )
+        return family in allowed_families and float(query_features.get("family_confidence") or 0.0) < min_confidence
+
+    def _route_query_family_with_gemini(self, query: str, query_features: Dict[str, Any]) -> Dict[str, Any] | None:
+        family_options = sorted(registry_audited_families(getattr(self, "taxonomy_rules", {})) | {"other"})
+        prompt = (
+            "Ты помогаешь только с маршрутизацией технической номенклатуры.\n"
+            f"Запрос: {query}\n"
+            f"Текущая локальная family: {self._entity_family(query_features.get('entity_type', '')) or 'other'}\n"
+            "Выбери наиболее подходящее семейство и ветку каталога. Не выбирай товар.\n"
+            f"Разрешенные family: {', '.join(family_options)}\n"
+            "Верни только JSON: "
+            '{"family":"family_name","branch_hint":"catalog > branch or empty","confidence":0.0,'
+            '"markers":{"category":"","shielding":"","connector_pair":"","component_kind":"","mount_kind":""},'
+            '"reasoning":"short"}'
+        )
+        last_error: Exception | None = None
+        for model_name in self._candidate_models():
+            try:
+                raw_text = self._generate_gemini_text_limited(prompt, model_name)
+                payload = self._extract_json_object(raw_text)
+                family_name = self._entity_family(payload.get("family", ""))
+                if not family_name:
+                    continue
+                branch_hint = self._clean_text_value(payload.get("branch_hint"))
+                confidence = float(payload.get("confidence") or 0.0)
+                markers = payload.get("markers") if isinstance(payload.get("markers"), dict) else {}
+                return {
+                    "family": family_name,
+                    "branch_hint": branch_hint,
+                    "confidence": confidence,
+                    "markers": {self._clean_text_value(key): self._clean_text_value(value) for key, value in markers.items()},
+                    "gemini_model": model_name,
+                    "reasoning": self._clean_text_value(payload.get("reasoning")),
+                }
+            except Exception as exc:
+                last_error = exc
+                logger.warning("Family router model %s failed: %s", model_name, exc)
+        if last_error is not None:
+            logger.info("Gemini family router skipped after failures: query=%s error=%s", query[:120], last_error)
+        return None
+
+    def _should_use_article_validator_gemini(self, query_features: Dict[str, Any], reason_code: str) -> bool:
+        if not hasattr(self, "backend"):
+            return False
+        if not bool(registry_gemini_policy_value(getattr(self, "taxonomy_rules", {}), "article_validator", "enabled", False)):
+            return False
+        allowed_reasons = {
+            self._clean_text_value(item)
+            for item in registry_gemini_policy_value(getattr(self, "taxonomy_rules", {}), "article_validator", "conflict_reasons", [])
+            if self._clean_text_value(item)
+        }
+        if self._clean_text_value(reason_code) not in allowed_reasons:
+            return False
+        min_confidence = float(
+            registry_gemini_policy_value(getattr(self, "taxonomy_rules", {}), "article_validator", "min_domain_confidence", 0.5)
+        )
+        candidate_text = self._clean_text_value(query_features.get("article_candidate_text"))
+        query_domain = registry_infer_domain_match(
+            self._clean_text_value(query_features.get("original_text")),
+            entity_family=self._entity_family(query_features.get("entity_type", "")),
+            rules=getattr(self, "taxonomy_rules", {}),
+        )
+        candidate_domain = registry_infer_domain_match(
+            candidate_text,
+            entity_family=self._clean_text_value(query_features.get("article_candidate_family")),
+            rules=getattr(self, "taxonomy_rules", {}),
+        )
+        return float(query_domain.get("confidence") or 0.0) >= min_confidence and float(candidate_domain.get("confidence") or 0.0) >= min_confidence
+
+    def _validate_article_match_with_gemini(
+        self,
+        query: str,
+        query_features: Dict[str, Any],
+        article_match: Dict[str, Any],
+        query_article: str,
+    ) -> Dict[str, Any] | None:
+        max_alternatives = int(
+            registry_gemini_policy_value(getattr(self, "taxonomy_rules", {}), "article_validator", "max_alternatives", 2)
+        )
+        shortlist: List[Dict[str, Any]] = [article_match]
+        for item in self._lookup_catalog_items_by_article_series(query_article, query_features)[:max_alternatives]:
+            row_idx = int(item.get("row_idx", -1))
+            if row_idx == int(article_match.get("row_idx", -2)):
+                continue
+            shortlist.append(item)
+        result = self._match_with_gemini(
+            query,
+            query_features=query_features,
+            branches=[self._clean_text_value(article_match.get("branch_path"))],
+            candidates=shortlist,
+        )
+        found_name = self._clean_text_value(result.get("found_name"))
+        if not found_name or found_name == MISSING_POSITION_TEXT:
+            return None
+        result["resolution_source"] = "article_validator_gemini"
+        result["gemini_validation_used"] = True
+        result["article_validation_status"] = "validated"
+        return result
+
+    def _should_use_candidate_tiebreaker_gemini(
+        self,
+        query_features: Dict[str, Any],
+        scored_entries: List[Dict[str, Any]],
+        margin: float,
+        top_branch_gap: float,
+    ) -> bool:
+        if not hasattr(self, "backend"):
+            return False
+        if not bool(registry_gemini_policy_value(getattr(self, "taxonomy_rules", {}), "candidate_tiebreaker", "enabled", True)):
+            return False
+        if len(scored_entries) < int(registry_gemini_policy_value(getattr(self, "taxonomy_rules", {}), "candidate_tiebreaker", "min_candidates", 2)):
+            return False
+        if len(scored_entries) > int(registry_gemini_policy_value(getattr(self, "taxonomy_rules", {}), "candidate_tiebreaker", "max_candidates", 8)):
+            return False
+        margin_threshold = float(
+            registry_gemini_policy_value(getattr(self, "taxonomy_rules", {}), "candidate_tiebreaker", "margin_threshold", 0.05)
+        )
+        branch_gap_threshold = float(
+            registry_gemini_policy_value(getattr(self, "taxonomy_rules", {}), "candidate_tiebreaker", "branch_gap_threshold", 0.15)
+        )
+        if self._clean_text_value(query_features.get("article_lookup_rejected_reason")):
+            return False
+        return margin <= margin_threshold or top_branch_gap <= branch_gap_threshold
 
     def _get_gemini_request_limit(self) -> int:
         configured = int(getattr(self, "_gemini_request_limit", 0) or 0)
@@ -4060,6 +4362,8 @@ class ReMoMatcher:
         query_features: Dict[str, Any],
         branches: List[str],
         scored_entries: List[Dict[str, Any]],
+        *,
+        source_label: str = "candidate_tiebreaker_gemini",
     ) -> Optional[Dict[str, Any]]:
         strictness = self._match_strictness_for_query(query_features)
         shortlist = [
@@ -4163,7 +4467,7 @@ class ReMoMatcher:
             "confidence_level",
             self._confidence_level_from_score(result.get("similarity_score", 0), result.get("requires_review") == "да"),
         )
-        result.setdefault("resolution_source", "local_tree+gemini")
+        result["resolution_source"] = source_label
         result.setdefault("gemini_result_status", "selected_candidate")
         return result
 
@@ -4217,6 +4521,9 @@ class ReMoMatcher:
                 "python_scoring_ms": round(float(python_scoring_ms), 2),
                 "compatibility_filter_ms": round(float(compatibility_filter_ms), 2),
                 "gemini_ms": round(float(gemini_total_ms), 2),
+                "secondary_filter_rule_set": list(query_features.get("secondary_filter_rule_set") or []),
+                "secondary_filter_before_count": int(query_features.get("secondary_filter_before_count") or 0),
+                "secondary_filter_after_count": int(query_features.get("secondary_filter_after_count") or 0),
             }
 
         def _build_candidate_snapshots() -> Dict[str, Any]:
@@ -4312,6 +4619,35 @@ class ReMoMatcher:
 
             normalized_query = self._normalize_text(query_text)
             query_features = self._extract_query_features(query_text)
+            if self._should_use_family_router_gemini(query_features):
+                routed = self._route_query_family_with_gemini(query_text, query_features)
+                if routed is not None:
+                    query_features["entity_type"] = self._clean_text_value(routed.get("family")) or query_features.get("entity_type")
+                    routed_branch = self._clean_text_value(routed.get("branch_hint"))
+                    if routed_branch:
+                        query_features["branch_hint"] = routed_branch
+                    routed_markers = routed.get("markers") if isinstance(routed.get("markers"), dict) else {}
+                    if routed_markers:
+                        merged_markers = dict(query_features.get("markers", {}) or {})
+                        for key, value in routed_markers.items():
+                            if self._clean_text_value(value):
+                                merged_markers[key] = value
+                        query_features["markers"] = merged_markers
+                        query_features["attributes"] = dict(merged_markers)
+                    query_features["family_confidence"] = max(
+                        float(query_features.get("family_confidence") or 0.0),
+                        float(routed.get("confidence") or 0.0),
+                    )
+                    query_features["gemini_route_used"] = True
+                    trace_steps.append(
+                        {
+                            "stage": "query_classification",
+                            "status": "routed",
+                            "reason_code": "family_router_gemini",
+                            "query_family": self._entity_family(query_features.get("entity_type", "")),
+                            "family_confidence": float(query_features.get("family_confidence") or 0.0),
+                        }
+                    )
             query_family = self._entity_family(query_features.get("entity_type", ""))
             trace_steps.append(
                 {
@@ -4320,6 +4656,7 @@ class ReMoMatcher:
                     "row_type": str(query_features.get("row_type") or ""),
                     "entity_type": str(query_features.get("entity_type") or ""),
                     "query_family": query_family,
+                    "family_confidence": float(query_features.get("family_confidence") or 0.0),
                 }
             )
             if query_features.get("row_type") == "section":
@@ -4341,10 +4678,42 @@ class ReMoMatcher:
                 article_sanity_reason = ""
                 article_lookup_status = "miss"
                 if article_match is not None:
+                    query_features["article_candidate_text"] = " ".join(
+                        filter(
+                            None,
+                            [
+                                self._clean_text_value(article_match.get("name")),
+                                self._clean_text_value(article_match.get("normalized_name")),
+                                self._clean_text_value(article_match.get("branch_path")),
+                            ],
+                        )
+                    )
+                    query_features["article_candidate_family"] = self._entity_family(article_match.get("entity_type", ""))
                     article_sanity_reason = self._article_match_sanity_reason(query_features, article_match)
                     article_lookup_status = "rejected" if article_sanity_reason else "hit"
+                    if article_sanity_reason and self._should_use_article_validator_gemini(query_features, article_sanity_reason):
+                        validated_result = self._validate_article_match_with_gemini(query_text, query_features, article_match, query_article)
+                        if validated_result is not None:
+                            article_lookup_status = "validated"
+                            query_features["gemini_validation_used"] = True
+                            query_features["article_validation_status"] = "validated_by_gemini"
+                            trace_steps.append(
+                                {
+                                    "stage": "article_lookup",
+                                    "status": "validated",
+                                    "article_source": article_source,
+                                    "query_article": query_article,
+                                    "article_lookup_conflict": article_lookup_conflict,
+                                    "reason_code": article_sanity_reason,
+                                    "gemini_validation_used": True,
+                                }
+                            )
+                            return _finalize(validated_result, stage_of_failure="resolved", reason_code="resolved")
+                        query_features["gemini_validation_used"] = True
+                        query_features["article_validation_status"] = "rejected_by_gemini"
                     if article_sanity_reason:
                         query_features["article_lookup_rejected_reason"] = article_sanity_reason
+                        query_features.setdefault("article_validation_status", "rejected")
                 trace_steps.append(
                     {
                         "stage": "article_lookup",
@@ -4641,6 +5010,18 @@ class ReMoMatcher:
             second_score = float(scored_entries[1]["score"]) if len(scored_entries) > 1 else 0.0
             margin = best_score - second_score
             top_branch_gap = self._top_branch_gap(ranked_branches)
+            strong_local = (
+                best_score >= getattr(self, "local_confidence_threshold", 0.92)
+                and margin >= getattr(self, "local_margin_threshold", 0.08)
+                and top_branch_gap >= 0.15
+                and query_features.get("row_type") == "item"
+                and self._compatibility_label(query_features, best_entry["item"]) == "compatible"
+            )
+            ambiguous = (
+                query_features.get("row_type") == "section"
+                or margin < max(0.05, getattr(self, "local_margin_threshold", 0.08))
+                or top_branch_gap < 0.15
+            )
 
             shortlist_count = min(len(scored_entries), int(getattr(self, "gemini_shortlist_limit", 96)))
             logger.info(
@@ -4653,7 +5034,21 @@ class ReMoMatcher:
 
             weak_shortlist = self._is_weak_shortlist(scored_entries, ranked_branches)
             gemini_result: Optional[Dict[str, Any]] = None
-            if weak_shortlist and bool(getattr(self, "skip_weak_shortlist", False)):
+            use_candidate_tiebreaker = ambiguous and self._should_use_candidate_tiebreaker_gemini(
+                query_features,
+                scored_entries,
+                margin,
+                top_branch_gap,
+            )
+            if not use_candidate_tiebreaker:
+                trace_steps.append(
+                    {
+                        "stage": "gemini_selection",
+                        "status": "skipped",
+                        "reason_code": "candidate_tiebreaker_not_needed",
+                    }
+                )
+            elif weak_shortlist and bool(getattr(self, "skip_weak_shortlist", False)):
                 logger.info(
                     "Gemini skipped for weak shortlist: query=%s reason=weak_shortlist",
                     query_text[:120],
@@ -4667,6 +5062,7 @@ class ReMoMatcher:
                     query_features,
                     branch_paths,
                     scored_entries,
+                    source_label="candidate_tiebreaker_gemini",
                 )
                 gemini_total_ms += round((time.perf_counter() - gemini_started_at) * 1000, 2)
                 if gemini_result is not None:
@@ -4711,13 +5107,6 @@ class ReMoMatcher:
                         reason_code=gemini_result.get("incompatibility_reason") or "gemini_returned_no_valid_candidate",
                     )
 
-            strong_local = (
-                best_score >= getattr(self, "local_confidence_threshold", 0.92)
-                and margin >= getattr(self, "local_margin_threshold", 0.08)
-                and top_branch_gap >= 0.15
-                and query_features.get("row_type") == "item"
-                and self._compatibility_label(query_features, best_entry["item"]) == "compatible"
-            )
             if strong_local:
                 result = self._build_result_from_item(
                     best_entry["item"],
@@ -4729,16 +5118,6 @@ class ReMoMatcher:
                 )
                 self._save_to_cache(query_text, result["found_name"], result["price"], result["article"] or "", result["similarity_score"], "local_tree")
                 return _finalize(result, stage_of_failure="resolved", reason_code="resolved")
-
-            ambiguous = (
-                query_features.get("row_type") == "section"
-                or margin < max(0.05, getattr(self, "local_margin_threshold", 0.08))
-                or top_branch_gap < 0.15
-            )
-            if False and ambiguous:
-                gemini_result = self._resolve_ambiguous_candidates_with_gemini(query_text, query_features, branch_paths, scored_entries)
-                if gemini_result:
-                    return gemini_result
 
             best_compatible = self._best_compatible_local_entry(query_features, scored_entries)
             best_weak = self._best_compatible_local_entry(query_features, scored_entries, allow_weak=True)

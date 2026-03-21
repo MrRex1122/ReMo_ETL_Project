@@ -211,7 +211,7 @@ class CatalogCoverageAuditTests(unittest.TestCase):
             self.assertEqual(row["diagnosis"], "catalog_has_family_but_no_compatible_specs")
             self.assertGreaterEqual(row["same_family_candidates_count"], 1)
             self.assertEqual(row["compatible_candidates_count"], 0)
-            self.assertEqual(row["gap_reason_code"], "other_spec_mismatch")
+            self.assertEqual(row["gap_reason_code"], "category_mismatch")
 
     def test_catalog_gap_reason_uses_multiple_spec_mismatches_when_top_reasons_tie(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

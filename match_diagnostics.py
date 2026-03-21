@@ -6,6 +6,8 @@ from typing import Any
 
 import pandas as pd
 
+from taxonomy_registry import audited_families as registry_audited_families, load_registry_taxonomy_rules
+
 MATCH_DIAGNOSTICS_VERSION = 5
 MISSING_POSITION_TEXT = "Позиция отсутствует"
 
@@ -23,10 +25,15 @@ GEMINI_REASON_CODES = {
     "gemini_rejected_incompatible",
     "gemini_family_gate_rejected",
     "gemini_selected_incompatible_candidate",
+    "candidate_tiebreaker_rejected",
+    "family_router_uncertain",
+    "article_conflict_rejected_by_gemini",
 }
 FALLBACK_REASON_CODES = {
     "strict_fallback_family_mismatch",
     "strict_class_requires_compatible_match",
+    "article_conflict_rejected",
+    "series_match_ambiguous",
 }
 GENERIC_CATALOG_GAP_CODES = {
     "resolved",
@@ -48,20 +55,7 @@ REASON_CLASS_LABELS = {
     "resolved": "resolved",
 }
 
-AUDITED_QUERY_FAMILIES = {
-    "patch_panel",
-    "patch_cord",
-    "keystone",
-    "rj45_connector",
-    "rj45_outlet",
-    "bulk_twisted_pair",
-    "iec_power_cable",
-    "optical_cross",
-    "optical_patch_cord",
-    "ats_sts",
-    "airflow_blanking_panel",
-    "rack_accessory_strict",
-}
+AUDITED_QUERY_FAMILIES = registry_audited_families(load_registry_taxonomy_rules())
 
 
 def _clean_text_value(value: Any) -> str:

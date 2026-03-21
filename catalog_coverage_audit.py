@@ -20,39 +20,19 @@ from catalog_search import (
     iter_search_catalog_chunks,
 )
 from matcher import MATCH_MODE_EXACT, ReMoMatcher
+from taxonomy_registry import (
+    audit_family_group_labels as registry_audit_family_group_labels,
+    audit_family_groups as registry_audit_family_groups,
+    load_registry_taxonomy_rules,
+)
 
 logger = logging.getLogger(__name__)
 
 CATALOG_COVERAGE_AUDIT_VERSION = 4
 
-TARGET_FAMILY_GROUPS = {
-    "patch_panel": "patch_panel",
-    "patch_cord": "patch_cord",
-    "keystone": "keystone_rj45",
-    "keystone_adapter": "keystone_rj45",
-    "rj45_connector": "keystone_rj45",
-    "rj45_outlet": "keystone_rj45",
-    "bulk_twisted_pair": "twisted_pair",
-    "iec_power_cable": "iec_power_cable",
-    "optical_cross": "optical_cross",
-    "optical_patch_cord": "optical_patch_cord",
-    "ats_sts": "ats_sts",
-    "airflow_blanking_panel": "airflow_accessories",
-    "rack_accessory_strict": "rack_accessories",
-}
-
-FAMILY_GROUP_LABELS = {
-    "patch_panel": "patch_panel",
-    "patch_cord": "patch_cord",
-    "keystone_rj45": "keystone/rj45",
-    "twisted_pair": "twisted_pair",
-    "iec_power_cable": "iec_power_cable",
-    "optical_cross": "optical_cross",
-    "optical_patch_cord": "optical_patch_cord",
-    "ats_sts": "ats_sts",
-    "airflow_accessories": "airflow/accessories",
-    "rack_accessories": "rack blank/brush",
-}
+_AUDIT_REGISTRY_RULES = load_registry_taxonomy_rules()
+TARGET_FAMILY_GROUPS = registry_audit_family_groups(_AUDIT_REGISTRY_RULES)
+FAMILY_GROUP_LABELS = registry_audit_family_group_labels(_AUDIT_REGISTRY_RULES)
 
 HEADER_QUERY_VALUES = {
     "наименование",
@@ -383,7 +363,7 @@ def _build_focus_contexts(
         current_compatibility_status = clean_text_value(row.get("Совместимость решения"))
         query_features = adapter.extract_query_features(query_text)
         query_family = adapter.entity_family(query_features.get("entity_type", ""))
-        family_group = _family_group_for(query_family)
+        family_group = _family_group_for(query_family) if clean_text_value(query_features.get("row_type")) == "item" else None
         if not _should_include_row(
             query_family_group=family_group,
             current_resolution_source=current_resolution_source,

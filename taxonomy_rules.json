@@ -67,5 +67,9 @@
     {"when": "rack_1u", "penalize_patterns": ["zero u"], "penalty": 0.18},
     {"when": "category_cat6", "penalize_patterns": ["cat5e"], "penalty": 0.2},
     {"when": "category_cat5e", "penalize_patterns": ["cat6"], "penalty": 0.2}
-  ]
+  ],
+  "family_registry": {},
+  "domain_registry": {},
+  "gemini_policy": {},
+  "audit_scope": {}
 }

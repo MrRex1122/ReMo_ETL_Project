@@ -25,6 +25,12 @@ from catalog_schema import (
     CANONICAL_ARTICLE_COLUMN,
     canonicalize_catalog_columns,
 )
+from taxonomy_registry import (
+    classify_entity_type_from_registry,
+    entity_family_for_type,
+    family_default_branches as registry_family_default_branches,
+    load_registry_taxonomy_rules,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -141,15 +147,11 @@ def is_search_catalog_path(path: str | Path) -> bool:
 def load_search_taxonomy_rules() -> Dict[str, Any]:
     path_raw = os.getenv("REMO_TAXONOMY_RULES_PATH")
     path = Path(path_raw) if path_raw else DEFAULT_TAXONOMY_RULES_PATH
-    if not path.exists():
-        return {}
     try:
-        loaded = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(loaded, dict):
-            return loaded
+        return load_registry_taxonomy_rules(path=path)
     except Exception as exc:
         logger.warning("⚠️ Failed to load search taxonomy rules from %s: %s", path, exc)
-    return {}
+        return load_registry_taxonomy_rules()
 
 
 def clean_text_value(value: object) -> str:
@@ -542,9 +544,15 @@ def _looks_like_rj45_outlet(normalized: str) -> bool:
     return any(marker in normalized for marker in outlet_markers)
 
 
-def classify_item_type(text: str, synonyms: Mapping[str, str] | None = None) -> str:
+def classify_item_type(
+    text: str,
+    synonyms: Mapping[str, str] | None = None,
+    taxonomy_rules: Mapping[str, Any] | None = None,
+) -> str:
     normalized = normalize_query_terms(text, synonyms=synonyms)
     phrase_normalized = normalized.replace("-", " ")
+    registry_match = classify_entity_type_from_registry(text, rules=taxonomy_rules, markers=None)
+    registry_entity_type = clean_text_value((registry_match or {}).get("entity_type"))
     has_iec_connector_markers = _has_iec_power_cable_context(normalized)
     ats_sts_device = _looks_like_ats_sts_device_precise(normalized)
     if ("ats" in normalized or "sts" in normalized) and not ats_sts_device:
@@ -625,13 +633,14 @@ def classify_item_type(text: str, synonyms: Mapping[str, str] | None = None) -> 
         return "socket"
     if "датчик" in normalized:
         return "sensor"
-    return "other"
+    return registry_entity_type or "other"
 
 
 def derive_branch_from_text(
     *texts: str,
     keyword_routes: list[dict[str, Any]] | None = None,
     synonyms: Mapping[str, str] | None = None,
+    taxonomy_rules: Mapping[str, Any] | None = None,
 ) -> str:
     merged = normalize_text(" ".join(filter(None, texts)), synonyms=synonyms)
     if not merged:
@@ -647,7 +656,24 @@ def derive_branch_from_text(
         if any(pattern and pattern in merged for pattern in patterns):
             return normalize_branch_path(rule.get("path", []))
 
-    entity_type = classify_item_type(merged, synonyms=synonyms)
+    entity_type = classify_item_type(merged, synonyms=synonyms, taxonomy_rules=taxonomy_rules)
+    registry_defaults = registry_family_default_branches(entity_type, taxonomy_rules, branch_hint="")
+    if registry_defaults and registry_defaults[0] != "прочее":
+        registry_family = entity_family_for_type(entity_type, taxonomy_rules)
+        if registry_family in {
+            "airflow_blanking_panel",
+            "ats_sts",
+            "patch_panel",
+            "optical_cross",
+            "optical_patch_cord",
+            "patch_cord",
+            "keystone",
+            "floor_box",
+            "ground_bar",
+            "breaker",
+            "socket",
+        }:
+            return registry_defaults[0]
     if entity_type in {"pdu", "pdu_basic", "pdu_metered"}:
         if "zero u" in merged:
             return "телеком > питание > pdu > zero u"
@@ -730,6 +756,7 @@ def normalize_catalog_branch_from_row(
         name,
         keyword_routes=list(rules.get("keyword_routes", DEFAULT_KEYWORD_ROUTES)),
         synonyms=synonyms,
+        taxonomy_rules=rules,
     )
     if derived != "прочее":
         return derived
@@ -909,7 +936,7 @@ def build_search_projection_row(
     combined_text = " ".join(filter(None, [name, item_type, class_name]))
     branch_path = normalize_catalog_branch_from_row(row, taxonomy_rules=rules)
     tokens = sorted(set(tokenize(" ".join(filter(None, [name, item_type, class_name])), synonyms=synonyms)))
-    entity_type = classify_item_type(combined_text, synonyms=synonyms)
+    entity_type = classify_item_type(combined_text, synonyms=synonyms, taxonomy_rules=rules)
     item_markers = extract_item_markers(combined_text, attribute_patterns=rules.get("attribute_patterns"), synonyms=synonyms)
 
     projected = {column: row.get(column, "") for column in SEARCH_BASE_COLUMNS}
