@@ -15,6 +15,8 @@ import logging
 import io
 import json
 import threading
+import time
+import uuid
 from typing import Any
 from cloudflare_r2_export import upload_file_to_r2
 from catalog_search import get_search_catalog_readiness, is_search_catalog_path, refresh_search_catalog
@@ -104,6 +106,7 @@ logger = logging.getLogger(__name__)
 ACTIVE_RUN_AUTOREFRESH_MS = 5000
 ACTIVE_RUN_FRAGMENT_REFRESH_INTERVAL = f"{max(1, ACTIVE_RUN_AUTOREFRESH_MS // 1000)}s"
 CATALOG_AUDIT_FRAGMENT_REFRESH_INTERVAL = "2s"
+CATALOG_AUDIT_PROGRESS_LOG_INTERVAL_SEC = 5.0
 _CATALOG_AUDIT_TASKS: dict[str, dict[str, Any]] = {}
 _CATALOG_AUDIT_TASKS_LOCK = threading.Lock()
 
@@ -1196,6 +1199,37 @@ def _get_catalog_audit_task(run_id: str) -> dict[str, Any] | None:
         return dict(task) if isinstance(task, dict) else None
 
 
+def _new_catalog_audit_task_token() -> str:
+    return uuid.uuid4().hex
+
+
+def _begin_catalog_audit_task(run_id: str) -> dict[str, Any] | None:
+    normalized_run_id = str(run_id)
+    with _CATALOG_AUDIT_TASKS_LOCK:
+        existing = dict(_CATALOG_AUDIT_TASKS.get(normalized_run_id) or {})
+        if str(existing.get("status") or "").strip().lower() in {"queued", "running"}:
+            return None
+        timestamp = _catalog_audit_now_iso()
+        task = {
+            "run_id": normalized_run_id,
+            "task_token": _new_catalog_audit_task_token(),
+            "status": "queued",
+            "stage": "queued",
+            "started_at": timestamp,
+            "updated_at": timestamp,
+            "finished_at": "",
+            "message": "Аудит поставлен в очередь фоновой обработки.",
+            "rows_considered": 0,
+            "rows_in_scope": 0,
+            "catalog_rows_scanned": 0,
+            "total_catalog_rows": 0,
+            "rows_analyzed": 0,
+            "error": "",
+        }
+        _CATALOG_AUDIT_TASKS[normalized_run_id] = task
+        return dict(task)
+
+
 def _set_catalog_audit_task(run_id: str, **updates: Any) -> dict[str, Any]:
     with _CATALOG_AUDIT_TASKS_LOCK:
         task = dict(_CATALOG_AUDIT_TASKS.get(str(run_id)) or {})
@@ -1206,9 +1240,72 @@ def _set_catalog_audit_task(run_id: str, **updates: Any) -> dict[str, Any]:
         return dict(task)
 
 
+def _set_catalog_audit_task_if_current(run_id: str, task_token: str, **updates: Any) -> dict[str, Any] | None:
+    with _CATALOG_AUDIT_TASKS_LOCK:
+        task = dict(_CATALOG_AUDIT_TASKS.get(str(run_id)) or {})
+        if not task or str(task.get("task_token") or "") != str(task_token):
+            return None
+        task.update(updates)
+        task["run_id"] = str(run_id)
+        task["updated_at"] = _catalog_audit_now_iso()
+        _CATALOG_AUDIT_TASKS[str(run_id)] = task
+        return dict(task)
+
+
 def _clear_catalog_audit_task(run_id: str) -> None:
     with _CATALOG_AUDIT_TASKS_LOCK:
         _CATALOG_AUDIT_TASKS.pop(str(run_id), None)
+
+
+def _catalog_audit_stage_label(stage: str, *, status: str = "") -> str:
+    normalized_stage = str(stage or "").strip().lower()
+    normalized_status = str(status or "").strip().lower()
+    labels = {
+        "queued": "В очереди",
+        "preparing": "Подготовка",
+        "scanning_catalog": "Сканирование каталога",
+        "finalizing": "Формирование сводки",
+        "completed": "Готово",
+        "failed": "Ошибка",
+    }
+    if normalized_stage in labels:
+        return labels[normalized_stage]
+    if normalized_status in labels:
+        return labels[normalized_status]
+    return normalized_stage or normalized_status or "Подготовка"
+
+
+def _catalog_audit_elapsed_seconds(task_state: dict[str, Any]) -> int | None:
+    started_at = _parse_run_timestamp(str(task_state.get("started_at") or ""))
+    if started_at is None:
+        return None
+    updated_at = _parse_run_timestamp(str(task_state.get("updated_at") or ""))
+    finished_at = _parse_run_timestamp(str(task_state.get("finished_at") or ""))
+    if finished_at is not None:
+        current = finished_at
+    elif updated_at is not None:
+        current = updated_at
+    elif started_at.tzinfo is None:
+        current = datetime.now()
+    else:
+        current = datetime.now(started_at.tzinfo)
+    return max(0, int((current - started_at).total_seconds()))
+
+
+def _catalog_audit_eta_seconds(task_state: dict[str, Any]) -> int | None:
+    elapsed_seconds = _catalog_audit_elapsed_seconds(task_state)
+    total_catalog_rows = int(task_state.get("total_catalog_rows") or 0)
+    catalog_rows_scanned = int(task_state.get("catalog_rows_scanned") or 0)
+    status = str(task_state.get("status") or "").strip().lower()
+    if status != "running" or elapsed_seconds is None or elapsed_seconds <= 0:
+        return None
+    if total_catalog_rows <= 0 or catalog_rows_scanned <= 0 or catalog_rows_scanned >= total_catalog_rows:
+        return None
+    rate = float(catalog_rows_scanned) / float(elapsed_seconds)
+    if rate <= 0:
+        return None
+    remaining_rows = max(0, total_catalog_rows - catalog_rows_scanned)
+    return int(round(remaining_rows / rate))
 
 
 def _catalog_audit_progress_value(task_state: dict[str, Any]) -> float:
@@ -1223,7 +1320,12 @@ def _catalog_audit_progress_value(task_state: dict[str, Any]) -> float:
     if stage == "preparing":
         return 0.15
     if stage == "scanning_catalog":
-        return 0.65
+        total_catalog_rows = int(task_state.get("total_catalog_rows") or 0)
+        catalog_rows_scanned = int(task_state.get("catalog_rows_scanned") or 0)
+        if total_catalog_rows > 0:
+            scan_ratio = min(1.0, max(0.0, float(catalog_rows_scanned) / float(total_catalog_rows)))
+            return 0.15 + 0.75 * scan_ratio
+        return 0.55
     if stage == "finalizing":
         return 0.9
     return 0.25
@@ -1236,8 +1338,12 @@ def _render_catalog_audit_task_status_contents(task_state: dict[str, Any]) -> No
     rows_in_scope = int(task_state.get("rows_in_scope") or 0)
     rows_considered = int(task_state.get("rows_considered") or 0)
     catalog_rows_scanned = int(task_state.get("catalog_rows_scanned") or 0)
+    total_catalog_rows = int(task_state.get("total_catalog_rows") or 0)
     rows_analyzed = int(task_state.get("rows_analyzed") or 0)
     started_at = str(task_state.get("started_at") or "").strip()
+    stage_label = _catalog_audit_stage_label(stage, status=status)
+    elapsed_seconds = _catalog_audit_elapsed_seconds(task_state)
+    eta_seconds = _catalog_audit_eta_seconds(task_state)
 
     if status in {"queued", "running"}:
         st.info(message or "Аудит строится в фоне.")
@@ -1247,17 +1353,26 @@ def _render_catalog_audit_task_status_contents(task_state: dict[str, Any]) -> No
         st.error(message or "Не удалось построить аудит.")
 
     st.progress(_catalog_audit_progress_value(task_state))
+    primary_parts: list[str] = [f"Этап: {stage_label}"]
+    if elapsed_seconds is not None:
+        primary_parts.append(f"Длительность: {_format_elapsed_duration(elapsed_seconds)}")
+    if eta_seconds is not None:
+        primary_parts.append(f"Осталось примерно: {_format_elapsed_duration(eta_seconds)}")
+    if total_catalog_rows > 0:
+        percent = min(100.0, max(0.0, (float(catalog_rows_scanned) / float(total_catalog_rows)) * 100.0))
+        primary_parts.append(
+            f"Сканирование: {catalog_rows_scanned:,} / {total_catalog_rows:,} ({percent:.1f}%)"
+        )
+    elif catalog_rows_scanned > 0:
+        primary_parts.append(f"Просканировано релевантных строк каталога: {catalog_rows_scanned:,}")
+    st.caption(" | ".join(primary_parts))
     meta_parts: list[str] = []
     if started_at:
         meta_parts.append(f"Старт: {started_at}")
-    if stage:
-        meta_parts.append(f"Этап: {stage}")
     if rows_considered > 0:
         meta_parts.append(f"Строк к проверке: {rows_considered}")
     if rows_in_scope > 0:
         meta_parts.append(f"В scope: {rows_in_scope}")
-    if catalog_rows_scanned > 0:
-        meta_parts.append(f"Просканировано строк каталога: {catalog_rows_scanned:,}")
     if rows_analyzed > 0:
         meta_parts.append(f"Проанализировано: {rows_analyzed}")
     if meta_parts:
@@ -1278,26 +1393,63 @@ def _render_catalog_audit_task_live(run_id: str) -> None:
 def _run_catalog_coverage_audit_background(
     *,
     run_id: str,
+    task_token: str,
     df: pd.DataFrame,
     catalog_source_path: Path,
     catalog_source_kind: str,
     diagnostics_payload: dict[str, Any] | None,
 ) -> None:
-    _set_catalog_audit_task(
+    _set_catalog_audit_task_if_current(
         run_id,
+        task_token,
         status="running",
         stage="preparing",
-        started_at=_catalog_audit_now_iso(),
         message="Подготовка фонового аудита покрытия каталога.",
         rows_considered=0,
         rows_in_scope=0,
         catalog_rows_scanned=0,
+        total_catalog_rows=0,
         rows_analyzed=0,
         error="",
+        finished_at="",
     )
 
+    last_progress_log_at = 0.0
+    last_logged_stage = ""
+
     def _progress_callback(progress: dict[str, Any]) -> None:
-        _set_catalog_audit_task(run_id, status="running", **dict(progress or {}))
+        nonlocal last_progress_log_at, last_logged_stage
+        task_state = _set_catalog_audit_task_if_current(run_id, task_token, status="running", **dict(progress or {}))
+        if task_state is None:
+            return
+        now_mono = time.monotonic()
+        stage_name = str(task_state.get("stage") or "").strip().lower()
+        if stage_name != last_logged_stage or (now_mono - last_progress_log_at) >= CATALOG_AUDIT_PROGRESS_LOG_INTERVAL_SEC:
+            scanned = int(task_state.get("catalog_rows_scanned") or 0)
+            total = int(task_state.get("total_catalog_rows") or 0)
+            rows_in_scope = int(task_state.get("rows_in_scope") or 0)
+            rows_analyzed = int(task_state.get("rows_analyzed") or 0)
+            if total > 0:
+                logger.info(
+                    "📊 Coverage audit progress: run=%s stage=%s scanned=%s/%s scope=%s analyzed=%s",
+                    run_id,
+                    stage_name or "unknown",
+                    scanned,
+                    total,
+                    rows_in_scope,
+                    rows_analyzed,
+                )
+            else:
+                logger.info(
+                    "📊 Coverage audit progress: run=%s stage=%s scanned=%s scope=%s analyzed=%s",
+                    run_id,
+                    stage_name or "unknown",
+                    scanned,
+                    rows_in_scope,
+                    rows_analyzed,
+                )
+            last_logged_stage = stage_name
+            last_progress_log_at = now_mono
 
     try:
         payload = build_catalog_coverage_audit(
@@ -1310,8 +1462,10 @@ def _run_catalog_coverage_audit_background(
         )
         write_processing_run_coverage_audit(run_id, payload)
         summary = payload.get("summary", {}) if isinstance(payload, dict) else {}
-        _set_catalog_audit_task(
+        task_state = _get_catalog_audit_task(run_id)
+        _set_catalog_audit_task_if_current(
             run_id,
+            task_token,
             status="completed",
             stage="completed",
             message=(
@@ -1319,19 +1473,21 @@ def _run_catalog_coverage_audit_background(
                 f"Строк в scope: {int(summary.get('rows_analyzed', 0) or 0)}"
             ),
             rows_analyzed=int(summary.get("rows_analyzed", 0) or 0),
-            catalog_rows_scanned=int(_get_catalog_audit_task(run_id).get("catalog_rows_scanned") or 0)
-            if _get_catalog_audit_task(run_id)
-            else 0,
+            catalog_rows_scanned=int(task_state.get("catalog_rows_scanned") or 0) if task_state else 0,
+            total_catalog_rows=int(task_state.get("total_catalog_rows") or 0) if task_state else 0,
+            finished_at=_catalog_audit_now_iso(),
         )
         logger.info("✅ Background coverage audit completed: %s", run_id)
     except Exception as exc:
         logger.error("❌ Background coverage audit failed for %s: %s", run_id, exc, exc_info=True)
-        _set_catalog_audit_task(
+        _set_catalog_audit_task_if_current(
             run_id,
+            task_token,
             status="failed",
             stage="failed",
             message=f"Не удалось построить аудит покрытия каталога: {exc}",
             error=str(exc),
+            finished_at=_catalog_audit_now_iso(),
         )
 
 
@@ -1343,26 +1499,15 @@ def _start_catalog_coverage_audit_background(
     catalog_source_kind: str,
     diagnostics_payload: dict[str, Any] | None,
 ) -> bool:
-    existing_task = _get_catalog_audit_task(run_id)
-    if existing_task and str(existing_task.get("status") or "").strip().lower() in {"queued", "running"}:
+    started_task = _begin_catalog_audit_task(run_id)
+    if started_task is None:
         return False
 
-    _set_catalog_audit_task(
-        run_id,
-        status="queued",
-        stage="queued",
-        started_at=_catalog_audit_now_iso(),
-        message="Аудит поставлен в очередь фоновой обработки.",
-        rows_considered=0,
-        rows_in_scope=0,
-        catalog_rows_scanned=0,
-        rows_analyzed=0,
-        error="",
-    )
     worker = threading.Thread(
         target=_run_catalog_coverage_audit_background,
         kwargs={
             "run_id": run_id,
+            "task_token": str(started_task.get("task_token") or ""),
             "df": df.copy(),
             "catalog_source_path": Path(catalog_source_path),
             "catalog_source_kind": str(catalog_source_kind),
@@ -1587,14 +1732,11 @@ def _render_catalog_coverage_audit(run, df: pd.DataFrame) -> None:
 
     if task_state and str(task_state.get("status") or "").strip().lower() == "completed":
         st.success(str(task_state.get("message") or "Аудит покрытия каталога сохранен."))
-        _clear_catalog_audit_task(run.run_id)
-        task_state = None
     elif task_state and str(task_state.get("status") or "").strip().lower() == "failed":
         st.error(str(task_state.get("message") or "Не удалось построить аудит покрытия каталога."))
-        _clear_catalog_audit_task(run.run_id)
-        task_state = None
 
     task_active = bool(task_state) and str(task_state.get("status") or "").strip().lower() in {"queued", "running"}
+    task_finished = bool(task_state) and str(task_state.get("status") or "").strip().lower() in {"completed", "failed"}
     button_col, status_col = st.columns([1, 2])
     with button_col:
         run_audit = st.button(
@@ -1625,13 +1767,16 @@ def _render_catalog_coverage_audit(run, df: pd.DataFrame) -> None:
         if started:
             st.success("✓ Аудит запущен в фоне. Статус ниже обновляется автоматически.")
             st.rerun()
-        st.info("Аудит уже строится. Подождите завершения текущей фоновой задачи.")
+        else:
+            st.info("Аудит уже строится. Подождите завершения текущей фоновой задачи.")
 
     if audit_error is not None and audit_payload is None:
         st.warning(f"⚠️ Не удалось загрузить сохраненный аудит покрытия каталога: {audit_error}")
 
     if task_active:
         _render_catalog_audit_task_live(run.run_id)
+    elif task_finished:
+        _render_catalog_audit_task_status_contents(task_state)
 
     if audit_payload is None:
         if task_active:

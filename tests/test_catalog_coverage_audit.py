@@ -225,6 +225,35 @@ class CatalogCoverageAuditTests(unittest.TestCase):
             self.assertEqual(row["query_family_group"], "iec_power_cable")
             self.assertEqual(row["diagnosis"], "catalog_has_compatible_candidates")
 
+    def test_progress_callback_reports_total_catalog_rows_field(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            catalog_path = Path(tmp_dir) / "catalog.csv"
+            _write_catalog_csv(
+                catalog_path,
+                [
+                    {
+                        CANONICAL_NAME_COLUMN: "Патч-панель 1U категории 6 UTP 24 порта",
+                        CANONICAL_ARTICLE_COLUMN: "PP-24-CAT6",
+                        "Название класса": "Патч-панели",
+                        "Тип изделия": "Патч-панель",
+                        "Тип исполнения кабельного изделия": "",
+                    }
+                ],
+            )
+
+            events: list[dict[str, object]] = []
+            build_catalog_coverage_audit(
+                _build_result_df("Панель коммутационная 24 порта категория 6"),
+                run_id="run-progress-fields",
+                catalog_source_path=catalog_path,
+                catalog_source_kind="merged",
+                progress_callback=lambda payload: events.append(dict(payload)),
+            )
+
+            self.assertGreaterEqual(len(events), 2)
+            self.assertIn("total_catalog_rows", events[0])
+            self.assertIn("catalog_rows_scanned", events[-1])
+
     def test_keystone_group_can_report_family_without_compatible_specs(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             catalog_path = Path(tmp_dir) / "catalog.csv"

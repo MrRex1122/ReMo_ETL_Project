@@ -12,10 +12,13 @@ import pandas as pd
 
 from catalog_schema import CANONICAL_ARTICLE_COLUMN, CANONICAL_NAME_COLUMN
 from catalog_search import (
+    DUCKDB_AVAILABLE,
     SEARCH_BASE_COLUMNS,
     SEARCH_DERIVED_COLUMNS,
+    SEARCH_CATALOG_TABLE,
     build_search_projection_row,
     clean_text_value,
+    duckdb as catalog_search_duckdb,
     is_search_catalog_path,
     iter_search_catalog_chunks,
 )
@@ -29,6 +32,7 @@ from taxonomy_registry import (
 logger = logging.getLogger(__name__)
 
 CATALOG_COVERAGE_AUDIT_VERSION = 5
+SEARCH_AUDIT_DEFAULT_CHUNKSIZE = 50_000
 
 _AUDIT_REGISTRY_RULES = load_registry_taxonomy_rules()
 TARGET_FAMILY_GROUPS = registry_audit_family_groups(_AUDIT_REGISTRY_RULES)
@@ -108,6 +112,28 @@ def _safe_catalog_mtime(path: Path) -> float | None:
     try:
         return path.stat().st_mtime
     except OSError:
+        return None
+
+
+def _estimate_catalog_total_rows(catalog_source_path: Path) -> int | None:
+    path = Path(catalog_source_path)
+    if not is_search_catalog_path(path) or path.suffix.lower() != ".duckdb":
+        return None
+    if not DUCKDB_AVAILABLE or catalog_search_duckdb is None:
+        return None
+    try:
+        connection = catalog_search_duckdb.connect(str(path), read_only=True)
+    except Exception:
+        return None
+    try:
+        result = connection.execute(f"SELECT COUNT(*) FROM {SEARCH_CATALOG_TABLE}").fetchone()
+    except Exception:
+        return None
+    finally:
+        connection.close()
+    try:
+        return int(result[0]) if isinstance(result, (list, tuple)) and result else None
+    except (TypeError, ValueError):
         return None
 
 
@@ -363,7 +389,7 @@ def _build_gap_reason_details(context: _QueryAuditContext) -> tuple[str, dict[st
 def _iter_catalog_rows(
     catalog_source_path: Path,
     *,
-    chunksize: int = 10_000,
+    chunksize: int = SEARCH_AUDIT_DEFAULT_CHUNKSIZE,
 ) -> Any:
     required_columns = set(SEARCH_BASE_COLUMNS) | set(SEARCH_DERIVED_COLUMNS)
     if is_search_catalog_path(catalog_source_path):
@@ -530,6 +556,7 @@ def build_catalog_coverage_audit(
     adapter = _AuditMatcherAdapter()
     contexts = _build_focus_contexts(df_result, adapter=adapter, diagnostics_payload=diagnostics_payload)
     relevant_contexts = [context for context in contexts if context.query_family_group is not None]
+    total_catalog_rows = _estimate_catalog_total_rows(Path(catalog_source_path))
     if progress_callback is not None:
         progress_callback(
             {
@@ -538,6 +565,7 @@ def build_catalog_coverage_audit(
                 "rows_considered": len(contexts),
                 "rows_in_scope": len(relevant_contexts),
                 "catalog_rows_scanned": 0,
+                "total_catalog_rows": int(total_catalog_rows or 0),
             }
         )
 
@@ -561,6 +589,7 @@ def build_catalog_coverage_audit(
                         "rows_considered": len(contexts),
                         "rows_in_scope": len(relevant_contexts),
                         "catalog_rows_scanned": catalog_rows_scanned,
+                        "total_catalog_rows": int(total_catalog_rows or 0),
                     }
                 )
             for record in chunk.to_dict("records"):
@@ -616,6 +645,8 @@ def build_catalog_coverage_audit(
                 "message": f"Формирование сводки аудита: {summary.rows_analyzed} строк в scope",
                 "rows_considered": len(contexts),
                 "rows_in_scope": len(relevant_contexts),
+                "catalog_rows_scanned": int(total_catalog_rows or 0),
+                "total_catalog_rows": int(total_catalog_rows or 0),
                 "rows_analyzed": int(summary.rows_analyzed),
             }
         )

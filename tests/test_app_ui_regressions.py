@@ -29,6 +29,9 @@ class AppUiRegressionTests(unittest.TestCase):
         self.assertIn("Сводка по gap reason", app_source)
         self.assertIn("Вне audit scope", app_source)
         self.assertIn("Аудит строится в фоне", app_source)
+        self.assertIn("Осталось примерно", app_source)
+        self.assertIn("_begin_catalog_audit_task", app_source)
+        self.assertIn("Coverage audit progress", app_source)
         self.assertIn("@st.fragment(run_every=CATALOG_AUDIT_FRAGMENT_REFRESH_INTERVAL)", app_source)
         self.assertNotIn('with st.spinner("Проверяю покрытие каталога по использованной БД...")', app_source)
 
