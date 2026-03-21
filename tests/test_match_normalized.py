@@ -196,7 +196,7 @@ class NormalizedMatchTests(unittest.TestCase):
             "tokens": ["пластина", "заземления", "ptce"],
         }
         matcher._lookup_catalog_items_by_article_series = lambda _article, _features: [series_item]
-        matcher._best_article_series_match = lambda _features, _candidates: series_item
+        matcher._best_article_series_match = lambda _features, _candidates, article="": series_item
 
         result = ReMoMatcher.match(matcher, "Пластина для заземления PTCE, артикул 37501", use_cache=False)
 

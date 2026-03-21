@@ -40,6 +40,20 @@ class MatchTaxonomyTests(unittest.TestCase):
             self.matcher,
             ReMoMatcher,
         )
+        self.matcher._extract_article_series_thickness_value = ReMoMatcher._extract_article_series_thickness_value.__get__(
+            self.matcher,
+            ReMoMatcher,
+        )
+        self.matcher._article_series_match_bonus = ReMoMatcher._article_series_match_bonus.__get__(
+            self.matcher,
+            ReMoMatcher,
+        )
+        self.matcher._compatibility_penalty = ReMoMatcher._compatibility_penalty.__get__(self.matcher, ReMoMatcher)
+        self.matcher._compatibility_label = ReMoMatcher._compatibility_label.__get__(self.matcher, ReMoMatcher)
+        self.matcher._best_compatible_local_entry = ReMoMatcher._best_compatible_local_entry.__get__(
+            self.matcher,
+            ReMoMatcher,
+        )
         self.matcher._cable_designation_base_tokens = ReMoMatcher._cable_designation_base_tokens.__get__(
             self.matcher,
             ReMoMatcher,
@@ -743,6 +757,52 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.assertIsNotNone(item)
         self.assertEqual(item["article"], "4582")
 
+    def test_cable_designation_signature_distinguishes_core_count_and_section_order(self):
+        query_signature = self.matcher._extract_cable_designation_signature("КГВВнг(A)-LS 4x1")
+        candidate_signature = self.matcher._extract_cable_designation_signature("КГВВнг(А)-LS 1x4")
+
+        self.assertTrue(query_signature)
+        self.assertTrue(candidate_signature)
+        self.assertNotEqual(query_signature["dimension"], candidate_signature["dimension"])
+        self.assertFalse(self.matcher._cable_designation_signatures_match(query_signature, candidate_signature))
+
+    def test_lookup_catalog_item_by_cable_designation_accepts_close_same_signature_candidates(self):
+        self.matcher._uses_duckdb_query_backend = lambda: False
+        self.matcher._typed_candidate_pool = lambda _query_text, _query_features, limit: []
+        self.matcher._select_candidates = lambda _query_text, limit: []
+        self.matcher._collect_branch_candidates = lambda _branches, limit=None, query_features=None: [
+            {
+                "name": "Кабель силовой КГВВнг(А)-LS 7х1(N) 220/380-2",
+                "normalized_name": "кабель силовой кгввнг а ls 7x1 n 220 380 2",
+                "branch_path": "электрика > кабели",
+                "entity_type": "cable",
+                "item_markers": {},
+                "row_idx": 1,
+                "article": "A-1",
+                "price": 100.0,
+                "tokens": ["кабель", "кгввнг", "ls", "7x1"],
+            },
+            {
+                "name": "Кабель силовой КГВВнг(А)-LS 7х1(N) 380/660-2",
+                "normalized_name": "кабель силовой кгввнг а ls 7x1 n 380 660 2",
+                "branch_path": "электрика > кабели",
+                "entity_type": "cable",
+                "item_markers": {},
+                "row_idx": 2,
+                "article": "A-2",
+                "price": 110.0,
+                "tokens": ["кабель", "кгввнг", "ls", "7x1"],
+            },
+        ]
+
+        item = self.matcher._lookup_catalog_item_by_cable_designation(
+            "Кабель, артикул КГВВнг(A)-LS 7x1",
+            "КГВВнг(A)-LS 7x1",
+        )
+
+        self.assertIsNotNone(item)
+        self.assertEqual(item["article"], "A-1")
+
     def test_cable_designation_signature_match_tolerates_generic_candidate_tokens(self):
         query_signature = self.matcher._extract_cable_designation_signature("ВВГнг(A)-LS 4x4")
         candidate_signature = self.matcher._extract_cable_designation_signature(
@@ -854,6 +914,99 @@ class MatchTaxonomyTests(unittest.TestCase):
         item = self.matcher._lookup_catalog_item_by_article_series_match("36238K", features)
 
         self.assertIsNone(item)
+
+    def test_lookup_catalog_item_by_article_series_match_accepts_single_candidate_with_series_signal(self):
+        self.matcher._uses_duckdb_query_backend = lambda: False
+        self.matcher.catalog_items = [
+            {
+                "name": "Никелированная пластина для заземления PTCE",
+                "normalized_name": "никелированная пластина для заземления ptce",
+                "branch_path": "аксессуары вспомогательные для кабеленесущих систем",
+                "entity_type": "other",
+                "item_markers": {},
+                "row_idx": 41,
+                "article": "37501R",
+                "tokens": ["никелированная", "пластина", "заземления", "ptce"],
+            }
+        ]
+        features = self.matcher._extract_query_features("Пластина для заземления PTCE, артикул 37501")
+        features["ranked_branches"] = []
+
+        item = self.matcher._lookup_catalog_item_by_article_series_match("37501", features)
+
+        self.assertIsNotNone(item)
+        self.assertEqual(item["article"], "37501R")
+
+    def test_lookup_catalog_item_by_article_series_match_prefers_senzimir_candidate(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = ReMoMatcher._load_taxonomy_rules(matcher)
+        matcher._normalize_query_terms = ReMoMatcher._normalize_query_terms.__get__(matcher, ReMoMatcher)
+        matcher._normalize_text = ReMoMatcher._normalize_text.__get__(matcher, ReMoMatcher)
+        matcher._clean_text_value = ReMoMatcher._clean_text_value
+        matcher._tokenize = ReMoMatcher._tokenize.__get__(matcher, ReMoMatcher)
+        matcher._classify_item_type = ReMoMatcher._classify_item_type.__get__(matcher, ReMoMatcher)
+        matcher._detect_query_row_type = ReMoMatcher._detect_query_row_type.__get__(matcher, ReMoMatcher)
+        matcher._extract_query_features = ReMoMatcher._extract_query_features.__get__(matcher, ReMoMatcher)
+        matcher._rank_branches = ReMoMatcher._rank_branches.__get__(matcher, ReMoMatcher)
+        matcher._rank_candidates = ReMoMatcher._rank_candidates.__get__(matcher, ReMoMatcher)
+        matcher._branch_match_bonus = ReMoMatcher._branch_match_bonus.__get__(matcher, ReMoMatcher)
+        matcher._apply_attribute_score = ReMoMatcher._apply_attribute_score.__get__(matcher, ReMoMatcher)
+        matcher._score_candidates_locally = ReMoMatcher._score_candidates_locally.__get__(matcher, ReMoMatcher)
+        matcher._hard_incompatibility_reason = ReMoMatcher._hard_incompatibility_reason.__get__(matcher, ReMoMatcher)
+        matcher._is_hard_incompatible_match = ReMoMatcher._is_hard_incompatible_match.__get__(matcher, ReMoMatcher)
+        matcher._article_match_sanity_reason = ReMoMatcher._article_match_sanity_reason.__get__(matcher, ReMoMatcher)
+        matcher._compatibility_penalty = ReMoMatcher._compatibility_penalty.__get__(matcher, ReMoMatcher)
+        matcher._compatibility_label = ReMoMatcher._compatibility_label.__get__(matcher, ReMoMatcher)
+        matcher._best_compatible_local_entry = ReMoMatcher._best_compatible_local_entry.__get__(matcher, ReMoMatcher)
+        matcher._extract_article_series_thickness_value = ReMoMatcher._extract_article_series_thickness_value.__get__(matcher, ReMoMatcher)
+        matcher._article_series_match_bonus = ReMoMatcher._article_series_match_bonus.__get__(matcher, ReMoMatcher)
+        matcher._best_article_series_match = ReMoMatcher._best_article_series_match.__get__(matcher, ReMoMatcher)
+        matcher._lookup_catalog_item_by_article_series_match = ReMoMatcher._lookup_catalog_item_by_article_series_match.__get__(matcher, ReMoMatcher)
+        matcher._uses_duckdb_query_backend = lambda: False
+        matcher.branch_index = {}
+        matcher.branch_prefix_index = {}
+        matcher.branch_token_index = {}
+        matcher.branch_priority_scores = {}
+        matcher.token_idf = {}
+        matcher.catalog_items = [
+            {
+                "name": "Tray 100x50x3000 finish ZL",
+                "normalized_name": "tray 100x50x3000 finish zl",
+                "branch_path": "tray accessories",
+                "entity_type": "other",
+                "item_markers": {},
+                "row_idx": 51,
+                "article": "35262ZL",
+                "tokens": ["tray", "100x50x3000", "zl"],
+            },
+            {
+                "name": "Tray 100x50x3000 finish HDZ",
+                "normalized_name": "tray 100x50x3000 finish hdz",
+                "branch_path": "tray accessories",
+                "entity_type": "other",
+                "item_markers": {},
+                "row_idx": 52,
+                "article": "35262HDZ",
+                "tokens": ["tray", "100x50x3000", "hdz"],
+            },
+            {
+                "name": "Tray 100x50x3000 base series",
+                "normalized_name": "tray 100x50x3000 base series",
+                "branch_path": "tray accessories",
+                "entity_type": "other",
+                "item_markers": {},
+                "row_idx": 53,
+                "article": "3526210",
+                "tokens": ["tray", "100x50x3000", "base"],
+            },
+        ]
+        features = matcher._extract_query_features("Tray 50x100x3000 article 35262")
+        features["ranked_branches"] = []
+
+        item = matcher._lookup_catalog_item_by_article_series_match("35262", features)
+
+        self.assertIsNotNone(item)
+        self.assertEqual(item["article"], "3526210")
 
 
 if __name__ == "__main__":

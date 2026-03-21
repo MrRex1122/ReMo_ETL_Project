@@ -135,6 +135,21 @@ CABLE_DESIGNATION_BASE_STOPWORDS = {
     "тртс",
     "барабан",
 }
+ARTICLE_SERIES_TOKEN_STOPWORDS = {
+    "ls",
+    "hf",
+    "ip",
+    "mm",
+    "мм",
+    "арт",
+    "sku",
+    "l",
+    "n",
+    "pe",
+    "ok",
+    "trts",
+    "тртс",
+}
 
 WHOLE_CATEGORY_RETRIEVAL_FAMILIES = {
     "airflow_blanking_panel",
@@ -1205,9 +1220,9 @@ class ReMoMatcher:
         values = tuple(group for group in dimension_match.groups() if group)
         dimension_signature = ""
         if len(values) == 2:
-            dimension_signature = self._canonical_dimension_signature(values)
+            dimension_signature = self._canonical_cable_designation_dimension(values)
         elif len(values) == 3:
-            dimension_signature = self._canonical_dimension_signature(values)
+            dimension_signature = self._canonical_cable_designation_dimension(values)
         if not dimension_signature:
             return {}
         base_part = normalized[: dimension_match.start()]
@@ -1225,7 +1240,14 @@ class ReMoMatcher:
             "base": base_signature,
             "dimension": dimension_signature,
             "signature": f"{base_signature}|{dimension_signature}",
+            "base_tokens": base_tokens,
         }
+
+    def _canonical_cable_designation_dimension(self, values: Tuple[str, ...]) -> str:
+        normalized_values = [
+            self._normalize_dimension_value(value) for value in values if self._normalize_dimension_value(value)
+        ]
+        return "x".join(normalized_values)
 
     def _is_likely_cable_designation(self, value: object) -> bool:
         signature = self._extract_cable_designation_signature(self._clean_text_value(value))
@@ -1346,7 +1368,8 @@ class ReMoMatcher:
         second_score = float(scored_entries[1]["score"]) if len(scored_entries) > 1 else 0.0
         best_score = float(best_entry["score"])
         if len(scored_entries) > 1 and best_score - second_score < 0.04:
-            return None
+            if best_score < 0.58:
+                return None
         return best_entry["item"]
 
     def _lookup_catalog_items_by_article_series(self, article: str, query_features: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -1381,29 +1404,119 @@ class ReMoMatcher:
             filtered.append(item)
         return filtered
 
+    def _extract_article_series_thickness_value(self, text: str) -> str:
+        cleaned_text = self._clean_text_value(text).lower().replace("ё", "е")
+        if not cleaned_text or "толщ" not in cleaned_text:
+            return ""
+        match = re.search(r"толщ(?:ина|\.?)?\s*(\d+(?:[.,]\d+)?)", cleaned_text, flags=re.IGNORECASE)
+        if not match:
+            return ""
+        return self._normalize_dimension_value(match.group(1))
+
+    def _article_series_match_bonus(
+        self,
+        query_features: Dict[str, Any],
+        item: Dict[str, Any],
+        article: str = "",
+    ) -> float:
+        query_raw_text = self._clean_text_value(query_features.get("original_text"))
+        candidate_raw_text = " ".join(
+            filter(
+                None,
+                [
+                    self._clean_text_value(item.get("name")),
+                    self._clean_text_value(item.get("branch_path")),
+                ],
+            )
+        )
+        query_text = re.sub(r"\s+", " ", query_raw_text.lower().replace("ё", "е")).strip()
+        candidate_text = re.sub(r"\s+", " ", candidate_raw_text.lower().replace("ё", "е")).strip()
+        if not query_text or not candidate_text:
+            return 0.0
+
+        bonus = 0.0
+        query_dimensions = self._extract_dimension_signatures(query_raw_text)
+        candidate_dimensions = self._extract_dimension_signatures(candidate_raw_text)
+        if query_dimensions["triples"] and candidate_dimensions["triples"]:
+            if query_dimensions["triples"] & candidate_dimensions["triples"]:
+                bonus += 0.14
+        elif query_dimensions["pairs"] and candidate_dimensions["pairs"]:
+            if query_dimensions["pairs"] & candidate_dimensions["pairs"]:
+                bonus += 0.1
+
+        query_thickness = self._extract_article_series_thickness_value(query_raw_text)
+        candidate_thickness = self._extract_article_series_thickness_value(candidate_raw_text)
+        if query_thickness and candidate_thickness:
+            if query_thickness == candidate_thickness:
+                bonus += 0.12
+            else:
+                bonus -= 0.06
+
+        technical_tokens = [
+            token
+            for token in re.findall(r"[a-z]{2,8}", query_text)
+            if token not in ARTICLE_SERIES_TOKEN_STOPWORDS
+        ]
+        for token in technical_tokens[:4]:
+            if token in candidate_text:
+                bonus += 0.08
+
+        query_article_compact = self._compact_article_series_key(article)
+        item_article_compact = self._compact_article_series_key(item.get("article"))
+        if query_article_compact and item_article_compact.startswith(query_article_compact):
+            suffix = item_article_compact[len(query_article_compact) :]
+            if suffix:
+                if suffix.isdigit():
+                    bonus += 0.18
+                elif any(ch.isalpha() for ch in suffix):
+                    bonus -= 0.04
+
+        return max(-0.2, min(0.45, bonus))
+
     def _best_article_series_match(
         self,
         query_features: Dict[str, Any],
         candidates: List[Dict[str, Any]],
+        article: str = "",
     ) -> Dict[str, Any] | None:
         if not candidates:
             return None
         scored_entries = self._score_candidates_locally(query_features, candidates)
         if not scored_entries:
             return None
-        best_entry = self._best_compatible_local_entry(query_features, scored_entries, allow_weak=False)
+        rescored_entries: List[Dict[str, Any]] = []
+        for entry in scored_entries:
+            bonus = self._article_series_match_bonus(query_features, entry["item"], article=article)
+            rescored_entries.append(
+                {
+                    **entry,
+                    "article_series_bonus": float(bonus),
+                    "score": max(0.0, min(0.999, float(entry["score"]) + float(bonus))),
+                }
+            )
+        rescored_entries.sort(
+            key=lambda entry: (entry["score"], entry["lexical_score"], -int(entry["item"].get("row_idx", 0))),
+            reverse=True,
+        )
+
+        best_entry = self._best_compatible_local_entry(query_features, rescored_entries, allow_weak=False)
         if best_entry is None:
             return None
         compatible_scores = [
             float(entry["score"])
-            for entry in scored_entries
+            for entry in rescored_entries
             if self._compatibility_label(query_features, entry["item"]) == "compatible"
         ]
         best_score = float(best_entry["score"])
+        best_bonus = float(best_entry.get("article_series_bonus") or 0.0)
         second_score = compatible_scores[1] if len(compatible_scores) > 1 else 0.0
         if best_score < 0.58:
-            return None
-        if len(compatible_scores) > 1 and best_score - second_score < 0.03 and best_score < 0.82:
+            if len(compatible_scores) == 1:
+                if best_score < 0.42 and best_bonus < 0.08:
+                    return None
+            elif best_score < 0.32 or best_bonus < 0.12:
+                return None
+        if len(compatible_scores) > 1 and best_score - second_score < 0.03 and best_score < 0.82 and best_bonus < 0.12:
             return None
         return best_entry["item"]
 
@@ -1415,6 +1528,7 @@ class ReMoMatcher:
         return self._best_article_series_match(
             query_features,
             self._lookup_catalog_items_by_article_series(article, query_features),
+            article=article,
         )
 
     @staticmethod
@@ -1932,6 +2046,11 @@ class ReMoMatcher:
                 "article_query_candidate_domain_mismatch",
                 ("держател", "хомут", "скоб"),
                 ("колес", "ролик"),
+            ),
+            (
+                "article_query_candidate_domain_mismatch",
+                ("лоток", "крышк", "перегород", "ответвител", "пластин", "угол"),
+                ("выключател", "автоматическ", "автомат", "optidin", "bm63"),
             ),
             (
                 "article_query_candidate_domain_mismatch",
@@ -4285,7 +4404,11 @@ class ReMoMatcher:
                             "series_candidate_count": len(article_series_candidates),
                         }
                     )
-                    article_series_match = self._best_article_series_match(query_features, article_series_candidates)
+                    article_series_match = self._best_article_series_match(
+                        query_features,
+                        article_series_candidates,
+                        article=query_article,
+                    )
                     if article_series_match is not None:
                         result = self._build_result_from_item(
                             article_series_match,
