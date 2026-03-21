@@ -103,6 +103,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 ACTIVE_RUN_AUTOREFRESH_MS = 5000
 ACTIVE_RUN_FRAGMENT_REFRESH_INTERVAL = f"{max(1, ACTIVE_RUN_AUTOREFRESH_MS // 1000)}s"
+CATALOG_AUDIT_FRAGMENT_REFRESH_INTERVAL = "2s"
+_CATALOG_AUDIT_TASKS: dict[str, dict[str, Any]] = {}
+_CATALOG_AUDIT_TASKS_LOCK = threading.Lock()
 
 # ============ КОНФИГУРАЦИЯ ============
 st.set_page_config(
@@ -1183,6 +1186,196 @@ def _load_fresh_catalog_coverage_audit(run) -> dict[str, Any] | None:
     return None
 
 
+def _catalog_audit_now_iso() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def _get_catalog_audit_task(run_id: str) -> dict[str, Any] | None:
+    with _CATALOG_AUDIT_TASKS_LOCK:
+        task = _CATALOG_AUDIT_TASKS.get(str(run_id))
+        return dict(task) if isinstance(task, dict) else None
+
+
+def _set_catalog_audit_task(run_id: str, **updates: Any) -> dict[str, Any]:
+    with _CATALOG_AUDIT_TASKS_LOCK:
+        task = dict(_CATALOG_AUDIT_TASKS.get(str(run_id)) or {})
+        task.update(updates)
+        task["run_id"] = str(run_id)
+        task["updated_at"] = _catalog_audit_now_iso()
+        _CATALOG_AUDIT_TASKS[str(run_id)] = task
+        return dict(task)
+
+
+def _clear_catalog_audit_task(run_id: str) -> None:
+    with _CATALOG_AUDIT_TASKS_LOCK:
+        _CATALOG_AUDIT_TASKS.pop(str(run_id), None)
+
+
+def _catalog_audit_progress_value(task_state: dict[str, Any]) -> float:
+    status = str(task_state.get("status") or "").strip().lower()
+    stage = str(task_state.get("stage") or "").strip().lower()
+    if status == "completed":
+        return 1.0
+    if status == "failed":
+        return 0.0
+    if status == "queued":
+        return 0.05
+    if stage == "preparing":
+        return 0.15
+    if stage == "scanning_catalog":
+        return 0.65
+    if stage == "finalizing":
+        return 0.9
+    return 0.25
+
+
+def _render_catalog_audit_task_status_contents(task_state: dict[str, Any]) -> None:
+    status = str(task_state.get("status") or "").strip().lower()
+    message = str(task_state.get("message") or "").strip()
+    stage = str(task_state.get("stage") or "").strip()
+    rows_in_scope = int(task_state.get("rows_in_scope") or 0)
+    rows_considered = int(task_state.get("rows_considered") or 0)
+    catalog_rows_scanned = int(task_state.get("catalog_rows_scanned") or 0)
+    rows_analyzed = int(task_state.get("rows_analyzed") or 0)
+    started_at = str(task_state.get("started_at") or "").strip()
+
+    if status in {"queued", "running"}:
+        st.info(message or "Аудит строится в фоне.")
+    elif status == "completed":
+        st.success(message or "Аудит построен.")
+    elif status == "failed":
+        st.error(message or "Не удалось построить аудит.")
+
+    st.progress(_catalog_audit_progress_value(task_state))
+    meta_parts: list[str] = []
+    if started_at:
+        meta_parts.append(f"Старт: {started_at}")
+    if stage:
+        meta_parts.append(f"Этап: {stage}")
+    if rows_considered > 0:
+        meta_parts.append(f"Строк к проверке: {rows_considered}")
+    if rows_in_scope > 0:
+        meta_parts.append(f"В scope: {rows_in_scope}")
+    if catalog_rows_scanned > 0:
+        meta_parts.append(f"Просканировано строк каталога: {catalog_rows_scanned:,}")
+    if rows_analyzed > 0:
+        meta_parts.append(f"Проанализировано: {rows_analyzed}")
+    if meta_parts:
+        st.caption(" | ".join(meta_parts))
+
+
+@st.fragment(run_every=CATALOG_AUDIT_FRAGMENT_REFRESH_INTERVAL)
+def _render_catalog_audit_task_live(run_id: str) -> None:
+    task_state = _get_catalog_audit_task(run_id)
+    if task_state is None:
+        st.rerun()
+        return
+    _render_catalog_audit_task_status_contents(task_state)
+    if str(task_state.get("status") or "").strip().lower() not in {"queued", "running"}:
+        st.rerun()
+
+
+def _run_catalog_coverage_audit_background(
+    *,
+    run_id: str,
+    df: pd.DataFrame,
+    catalog_source_path: Path,
+    catalog_source_kind: str,
+    diagnostics_payload: dict[str, Any] | None,
+) -> None:
+    _set_catalog_audit_task(
+        run_id,
+        status="running",
+        stage="preparing",
+        started_at=_catalog_audit_now_iso(),
+        message="Подготовка фонового аудита покрытия каталога.",
+        rows_considered=0,
+        rows_in_scope=0,
+        catalog_rows_scanned=0,
+        rows_analyzed=0,
+        error="",
+    )
+
+    def _progress_callback(progress: dict[str, Any]) -> None:
+        _set_catalog_audit_task(run_id, status="running", **dict(progress or {}))
+
+    try:
+        payload = build_catalog_coverage_audit(
+            df,
+            run_id=run_id,
+            catalog_source_path=catalog_source_path,
+            catalog_source_kind=catalog_source_kind,
+            diagnostics_payload=diagnostics_payload,
+            progress_callback=_progress_callback,
+        )
+        write_processing_run_coverage_audit(run_id, payload)
+        summary = payload.get("summary", {}) if isinstance(payload, dict) else {}
+        _set_catalog_audit_task(
+            run_id,
+            status="completed",
+            stage="completed",
+            message=(
+                "Аудит покрытия каталога сохранен. "
+                f"Строк в scope: {int(summary.get('rows_analyzed', 0) or 0)}"
+            ),
+            rows_analyzed=int(summary.get("rows_analyzed", 0) or 0),
+            catalog_rows_scanned=int(_get_catalog_audit_task(run_id).get("catalog_rows_scanned") or 0)
+            if _get_catalog_audit_task(run_id)
+            else 0,
+        )
+        logger.info("✅ Background coverage audit completed: %s", run_id)
+    except Exception as exc:
+        logger.error("❌ Background coverage audit failed for %s: %s", run_id, exc, exc_info=True)
+        _set_catalog_audit_task(
+            run_id,
+            status="failed",
+            stage="failed",
+            message=f"Не удалось построить аудит покрытия каталога: {exc}",
+            error=str(exc),
+        )
+
+
+def _start_catalog_coverage_audit_background(
+    *,
+    run_id: str,
+    df: pd.DataFrame,
+    catalog_source_path: Path,
+    catalog_source_kind: str,
+    diagnostics_payload: dict[str, Any] | None,
+) -> bool:
+    existing_task = _get_catalog_audit_task(run_id)
+    if existing_task and str(existing_task.get("status") or "").strip().lower() in {"queued", "running"}:
+        return False
+
+    _set_catalog_audit_task(
+        run_id,
+        status="queued",
+        stage="queued",
+        started_at=_catalog_audit_now_iso(),
+        message="Аудит поставлен в очередь фоновой обработки.",
+        rows_considered=0,
+        rows_in_scope=0,
+        catalog_rows_scanned=0,
+        rows_analyzed=0,
+        error="",
+    )
+    worker = threading.Thread(
+        target=_run_catalog_coverage_audit_background,
+        kwargs={
+            "run_id": run_id,
+            "df": df.copy(),
+            "catalog_source_path": Path(catalog_source_path),
+            "catalog_source_kind": str(catalog_source_kind),
+            "diagnostics_payload": dict(diagnostics_payload) if isinstance(diagnostics_payload, dict) else None,
+        },
+        name=f"coverage_audit_{run_id}",
+        daemon=True,
+    )
+    worker.start()
+    logger.info("🧵 Background coverage audit thread started: run_id=%s", run_id)
+    return True
+
+
 def _render_match_diagnostics(run, df: pd.DataFrame) -> None:
     st.subheader("🧭 Диагностика причин ненахода")
     st.caption(
@@ -1372,6 +1565,7 @@ def _render_catalog_coverage_audit(run, df: pd.DataFrame) -> None:
     audit_payload = None
     audit_error = None
     diagnostics_payload = None
+    task_state = _get_catalog_audit_task(run.run_id)
     try:
         stored_payload = load_processing_run_coverage_audit(run.run_id)
         if is_catalog_coverage_audit_fresh(
@@ -1391,11 +1585,27 @@ def _render_catalog_coverage_audit(run, df: pd.DataFrame) -> None:
     except Exception as exc:
         logger.warning("Не удалось загрузить runtime-диагностику для аудита прогона %s: %s", run.run_id, exc)
 
+    if task_state and str(task_state.get("status") or "").strip().lower() == "completed":
+        st.success(str(task_state.get("message") or "Аудит покрытия каталога сохранен."))
+        _clear_catalog_audit_task(run.run_id)
+        task_state = None
+    elif task_state and str(task_state.get("status") or "").strip().lower() == "failed":
+        st.error(str(task_state.get("message") or "Не удалось построить аудит покрытия каталога."))
+        _clear_catalog_audit_task(run.run_id)
+        task_state = None
+
+    task_active = bool(task_state) and str(task_state.get("status") or "").strip().lower() in {"queued", "running"}
     button_col, status_col = st.columns([1, 2])
     with button_col:
-        run_audit = st.button("🔎 Проверить покрытие каталога", key=f"catalog_coverage_audit_{run.run_id}")
+        run_audit = st.button(
+            "🔎 Проверить покрытие каталога",
+            key=f"catalog_coverage_audit_{run.run_id}",
+            disabled=task_active,
+        )
     with status_col:
-        if audit_payload is not None:
+        if task_active:
+            st.caption("Аудит строится в фоне. Статус ниже обновляется автоматически.")
+        elif audit_payload is not None:
             generated_at = str(audit_payload.get("generated_at") or "").strip()
             if generated_at:
                 st.caption(f"Используется сохраненный аудит: {generated_at}")
@@ -1405,30 +1615,32 @@ def _render_catalog_coverage_audit(run, df: pd.DataFrame) -> None:
             st.caption("Аудит еще не рассчитывался для этого прогона.")
 
     if run_audit:
-        try:
-            with st.spinner("Проверяю покрытие каталога по использованной БД..."):
-                audit_payload = build_catalog_coverage_audit(
-                    df,
-                    run_id=run.run_id,
-                    catalog_source_path=run.catalog_source_path,
-                    catalog_source_kind=run.catalog_source_kind,
-                    diagnostics_payload=diagnostics_payload,
-                )
-                write_processing_run_coverage_audit(run.run_id, audit_payload)
-            st.success("✓ Аудит покрытия каталога сохранен.")
-        except Exception as exc:
-            logger.error("❌ Не удалось построить аудит покрытия каталога для %s: %s", run.run_id, exc, exc_info=True)
-            st.error(f"❌ Не удалось построить аудит покрытия каталога: {exc}")
-            audit_payload = None
+        started = _start_catalog_coverage_audit_background(
+            run_id=run.run_id,
+            df=df,
+            catalog_source_path=run.catalog_source_path,
+            catalog_source_kind=run.catalog_source_kind,
+            diagnostics_payload=diagnostics_payload,
+        )
+        if started:
+            st.success("✓ Аудит запущен в фоне. Статус ниже обновляется автоматически.")
+            st.rerun()
+        st.info("Аудит уже строится. Подождите завершения текущей фоновой задачи.")
 
     if audit_error is not None and audit_payload is None:
         st.warning(f"⚠️ Не удалось загрузить сохраненный аудит покрытия каталога: {audit_error}")
 
+    if task_active:
+        _render_catalog_audit_task_live(run.run_id)
+
     if audit_payload is None:
-        st.info(
-            "Нажмите «Проверить покрытие каталога», чтобы получить диагноз по проблемным телеком-строкам "
-            "и понять, это пробел БД или точка роста для matcher. Для cable/electrical файлов current scope пока ограничен."
-        )
+        if task_active:
+            st.info("Аудит сейчас строится в фоне. Дождитесь завершения, таблицы подгрузятся автоматически.")
+        else:
+            st.info(
+                "Нажмите «Проверить покрытие каталога», чтобы получить диагноз по проблемным телеком-строкам "
+                "и понять, это пробел БД или точка роста для matcher. Для cable/electrical файлов current scope пока ограничен."
+            )
         return
 
     summary = audit_payload.get("summary", {}) if isinstance(audit_payload, dict) else {}

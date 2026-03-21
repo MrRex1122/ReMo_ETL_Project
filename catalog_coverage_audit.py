@@ -6,7 +6,7 @@ from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import pandas as pd
 
@@ -506,10 +506,21 @@ def build_catalog_coverage_audit(
     diagnostics_payload: dict[str, Any] | None = None,
     example_limit: int = 3,
     chunksize: int = 10_000,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     adapter = _AuditMatcherAdapter()
     contexts = _build_focus_contexts(df_result, adapter=adapter, diagnostics_payload=diagnostics_payload)
     relevant_contexts = [context for context in contexts if context.query_family_group is not None]
+    if progress_callback is not None:
+        progress_callback(
+            {
+                "stage": "preparing",
+                "message": f"Подготовлено строк для аудита: {len(contexts)} (в scope: {len(relevant_contexts)})",
+                "rows_considered": len(contexts),
+                "rows_in_scope": len(relevant_contexts),
+                "catalog_rows_scanned": 0,
+            }
+        )
 
     if relevant_contexts:
         contexts_by_candidate_family: dict[str, list[_QueryAuditContext]] = defaultdict(list)
@@ -520,7 +531,19 @@ def build_catalog_coverage_audit(
                 relevant_families.add(family)
 
         prefer_precomputed = str(catalog_source_kind).strip().lower() == "search"
+        catalog_rows_scanned = 0
         for chunk in _iter_catalog_rows(Path(catalog_source_path), chunksize=chunksize):
+            catalog_rows_scanned += int(len(chunk.index))
+            if progress_callback is not None:
+                progress_callback(
+                    {
+                        "stage": "scanning_catalog",
+                        "message": f"Сканирование каталога: {catalog_rows_scanned:,} строк",
+                        "rows_considered": len(contexts),
+                        "rows_in_scope": len(relevant_contexts),
+                        "catalog_rows_scanned": catalog_rows_scanned,
+                    }
+                )
             for record in chunk.to_dict("records"):
                 item = adapter.normalize_candidate_item(record, prefer_precomputed=prefer_precomputed)
                 if item is None:
@@ -567,6 +590,16 @@ def build_catalog_coverage_audit(
 
     rows = [_build_audit_row(context, example_limit=example_limit) for context in contexts]
     summary, family_breakdown = _build_summary(rows)
+    if progress_callback is not None:
+        progress_callback(
+            {
+                "stage": "finalizing",
+                "message": f"Формирование сводки аудита: {summary.rows_analyzed} строк в scope",
+                "rows_considered": len(contexts),
+                "rows_in_scope": len(relevant_contexts),
+                "rows_analyzed": int(summary.rows_analyzed),
+            }
+        )
     payload = {
         "audit_version": CATALOG_COVERAGE_AUDIT_VERSION,
         "run_id": run_id,

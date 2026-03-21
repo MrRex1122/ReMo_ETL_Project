@@ -28,6 +28,9 @@ class AppUiRegressionTests(unittest.TestCase):
         self.assertIn("Скачать весь аудит", app_source)
         self.assertIn("Сводка по gap reason", app_source)
         self.assertIn("Вне audit scope", app_source)
+        self.assertIn("Аудит строится в фоне", app_source)
+        self.assertIn("@st.fragment(run_every=CATALOG_AUDIT_FRAGMENT_REFRESH_INTERVAL)", app_source)
+        self.assertNotIn('with st.spinner("Проверяю покрытие каталога по использованной БД...")', app_source)
 
     def test_match_diagnostics_ui_is_present(self):
         app_source = Path("app.py").read_text(encoding="utf-8")
