@@ -64,6 +64,13 @@ class AppUiRegressionTests(unittest.TestCase):
         self.assertNotIn("location.reload()", app_source)
         self.assertNotIn("streamlit.components.v1", app_source)
 
+    def test_result_download_buttons_use_stable_run_based_filenames(self):
+        app_source = Path("app.py").read_text(encoding="utf-8")
+        self.assertIn("download_result_excel_", app_source)
+        self.assertIn("download_result_csv_", app_source)
+        self.assertNotIn("result_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx", app_source)
+        self.assertNotIn("result_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", app_source)
+
 
 if __name__ == "__main__":
     unittest.main()

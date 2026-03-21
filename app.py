@@ -1338,6 +1338,7 @@ def _render_match_diagnostics(run, df: pd.DataFrame) -> None:
         file_name=f"match_diagnostics_{run.run_id}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key=f"download_match_diagnostics_{run.run_id}",
+        on_click="ignore",
     )
 
     if not root_cause_table.empty:
@@ -1492,6 +1493,7 @@ def _render_catalog_coverage_audit(run, df: pd.DataFrame) -> None:
         file_name=f"catalog_coverage_audit_{run.run_id}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key=f"download_catalog_audit_{run.run_id}",
+        on_click="ignore",
     )
 
     if not family_table.empty:
@@ -1554,6 +1556,12 @@ def _build_excel_workbook_bytes(sheets: list[tuple[str, pd.DataFrame]]) -> bytes
             export_df.to_excel(writer, index=False, sheet_name=sheet_name[:31])
     buffer.seek(0)
     return buffer.getvalue()
+
+
+def _result_download_filename(run, extension: str) -> str:
+    suffix = extension if extension.startswith(".") else f".{extension}"
+    run_id = str(getattr(run, "run_id", "") or "session")
+    return f"result_{run_id}{suffix}"
 
 
 def show_corrections_table(df):
@@ -2344,8 +2352,10 @@ def main():
                             st.download_button(
                                 "📥 Скачать Excel",
                                 excel_buffer.getvalue(),
-                                f"result_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                                "application/vnd.ms-excel"
+                                _result_download_filename(run, ".xlsx"),
+                                "application/vnd.ms-excel",
+                                key=f"download_result_excel_{run.run_id}",
+                                on_click="ignore",
                             )
                             logger.info("✓ Excel успешно сгенерирован для скачивания")
                         except Exception as e:
@@ -2353,12 +2363,14 @@ def main():
                             logger.error(f"Ошибка Excel: {e}", exc_info=True)
 
                 with download_col2:
-                    csv_data = df.to_csv(index=False, sep=';', encoding='utf-8')
+                    csv_data = df.to_csv(index=False, sep=';', encoding='utf-8').encode("utf-8")
                     st.download_button(
                         "📥 Скачать CSV",
                         csv_data,
-                        f"result_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                        "text/csv"
+                        _result_download_filename(run, ".csv"),
+                        "text/csv",
+                        key=f"download_result_csv_{run.run_id}",
+                        on_click="ignore",
                     )
     
     with tab3:
