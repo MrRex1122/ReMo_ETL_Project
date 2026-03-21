@@ -974,6 +974,8 @@ class ReMoMatcher:
     def _should_reject_weak_resolution_in_exact_mode(self, query_features: Dict[str, Any]) -> bool:
         if getattr(self, "match_mode", MATCH_MODE_EXACT) != MATCH_MODE_EXACT:
             return False
+        if self._clean_text_value(query_features.get("article_lookup_rejected_reason")):
+            return True
         query_family = self._entity_family(query_features.get("entity_type", ""))
         return query_family in {"cable", "wire", "coax", "bulk_twisted_pair"}
 
@@ -3966,6 +3968,8 @@ class ReMoMatcher:
                 if article_match is not None:
                     article_sanity_reason = self._article_match_sanity_reason(query_features, article_match)
                     article_lookup_status = "rejected" if article_sanity_reason else "hit"
+                    if article_sanity_reason:
+                        query_features["article_lookup_rejected_reason"] = article_sanity_reason
                 trace_steps.append(
                     {
                         "stage": "article_lookup",

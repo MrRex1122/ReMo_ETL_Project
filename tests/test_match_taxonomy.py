@@ -623,6 +623,18 @@ class MatchTaxonomyTests(unittest.TestCase):
 
         self.assertFalse(accepted)
 
+    def test_weak_gemini_result_rejected_after_article_lookup_sanity_rejection(self):
+        self.matcher.match_mode = "exact"
+        features = self.matcher._extract_query_features(
+            "Держатель оцинкованный односторонний D=25-26 (100 шт.), артикул 53344"
+        )
+        features["article_lookup_rejected_reason"] = "article_query_candidate_domain_mismatch"
+        gemini_result = {"compatibility_status": "weakly_compatible"}
+
+        accepted = self.matcher._should_accept_weak_gemini_result(gemini_result, [], features, "heuristic_fallback")
+
+        self.assertFalse(accepted)
+
     def test_duckdb_whole_category_queries_do_not_use_free_gemini_without_candidates(self):
         self.matcher._uses_duckdb_query_backend = lambda: True
         features = self.matcher._extract_query_features("Заглушка для управления потоком воздуха")
