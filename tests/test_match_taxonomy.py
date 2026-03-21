@@ -570,6 +570,38 @@ class MatchTaxonomyTests(unittest.TestCase):
 
         self.assertEqual(reason, "")
 
+    def test_article_match_sanity_rejects_dimension_mismatch_for_tray_query(self):
+        features = self.matcher._extract_query_features(
+            "Ответвитель DL 200x50 в комплекте с крепежными элементами, артикул 36238K"
+        )
+        candidate = {
+            "name": "Ответвитель DL 300/50 в комплекте с крепежными элементами необходимыми для монтажа",
+            "normalized_name": "ответвитель dl 300/50 в комплекте с крепежными элементами необходимыми для монтажа",
+            "branch_path": "кабельные лотки > аксессуары",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        reason = self.matcher._article_match_sanity_reason(features, candidate)
+
+        self.assertEqual(reason, "article_query_candidate_dimension_mismatch")
+
+    def test_article_match_sanity_rejects_holder_query_against_wheel_candidate(self):
+        features = self.matcher._extract_query_features(
+            "Держатель оцинкованный односторонний D=25-26 (100 шт.), артикул 53344"
+        )
+        candidate = {
+            "name": "Колесо поворотное, диаметр 200мм, грузоподъемность 230кг, черная резина, сталь",
+            "normalized_name": "колесо поворотное диаметр 200мм грузоподъемность 230кг черная резина сталь",
+            "branch_path": "складское оборудование > колеса",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        reason = self.matcher._article_match_sanity_reason(features, candidate)
+
+        self.assertEqual(reason, "article_query_candidate_domain_mismatch")
+
     def test_exact_mode_rejects_weak_resolution_for_cable_family(self):
         self.matcher.match_mode = "exact"
         features = self.matcher._extract_query_features("Кабель ВВГнг(A)-LS 4x4")

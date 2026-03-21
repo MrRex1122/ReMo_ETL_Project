@@ -1634,19 +1634,19 @@ class ReMoMatcher:
         if hard_reason:
             return hard_reason
 
-        query_text = self._normalize_text(self._clean_text_value(query_features.get("original_text")))
-        candidate_text = self._normalize_text(
-            " ".join(
-                filter(
-                    None,
-                    [
-                        self._clean_text_value(item.get("name")),
-                        self._clean_text_value(item.get("normalized_name")),
-                        self._clean_text_value(item.get("branch_path")),
-                    ],
-                )
+        query_raw_text = self._clean_text_value(query_features.get("original_text"))
+        candidate_raw_text = " ".join(
+            filter(
+                None,
+                [
+                    self._clean_text_value(item.get("name")),
+                    self._clean_text_value(item.get("normalized_name")),
+                    self._clean_text_value(item.get("branch_path")),
+                ],
             )
         )
+        query_text = self._normalize_text(query_raw_text)
+        candidate_text = self._normalize_text(candidate_raw_text)
         if not query_text or not candidate_text:
             return ""
 
@@ -1671,6 +1671,16 @@ class ReMoMatcher:
                 ("монитор", "display"),
                 ("ключ", "dongle", "камера", "извещател", "кабель", "датчик"),
             ),
+            (
+                "article_query_candidate_domain_mismatch",
+                ("держател", "хомут", "скоб"),
+                ("колес", "ролик"),
+            ),
+            (
+                "article_query_candidate_domain_mismatch",
+                ("колес", "ролик"),
+                ("держател", "хомут", "скоб"),
+            ),
         )
 
         if (query_text.startswith("по ") or " по " in f" {query_text} ") and any(
@@ -1681,6 +1691,94 @@ class ReMoMatcher:
         for reason, query_tokens, candidate_tokens in lexical_mismatch_rules:
             if any(token in query_text for token in query_tokens) and any(token in candidate_text for token in candidate_tokens):
                 return reason
+
+        dimension_reason = self._article_dimension_mismatch_reason(query_raw_text, candidate_raw_text)
+        if dimension_reason:
+            return dimension_reason
+
+        return ""
+
+    def _normalize_dimension_value(self, value: str) -> str:
+        cleaned = self._clean_text_value(value).replace(",", ".")
+        if not cleaned:
+            return ""
+        try:
+            numeric = float(cleaned)
+        except ValueError:
+            return cleaned
+        if numeric.is_integer():
+            return str(int(numeric))
+        return f"{numeric:.3f}".rstrip("0").rstrip(".")
+
+    def _canonical_dimension_signature(self, values: Tuple[str, ...]) -> str:
+        normalized_values = [self._normalize_dimension_value(value) for value in values if self._normalize_dimension_value(value)]
+        if len(normalized_values) == 2:
+            return "x".join(sorted(normalized_values, key=lambda item: float(item)))
+        if len(normalized_values) == 3:
+            numeric_values = [float(item) for item in normalized_values]
+            max_index = max(range(len(numeric_values)), key=numeric_values.__getitem__)
+            length_value = normalized_values[max_index]
+            pair_values = [normalized_values[index] for index in range(3) if index != max_index]
+            return "x".join(sorted(pair_values, key=lambda item: float(item)) + [length_value])
+        return "x".join(normalized_values)
+
+    def _extract_dimension_signatures(self, text: str) -> Dict[str, set[str]]:
+        normalized = self._clean_text_value(text).lower().replace("ё", "е")
+        normalized = re.sub(r"\s+", " ", normalized).strip()
+        signatures: Dict[str, set[str]] = {
+            "pairs": set(),
+            "triples": set(),
+            "lengths": set(),
+            "diameters": set(),
+        }
+        if not normalized:
+            return signatures
+
+        for match in re.finditer(
+            r"(\d+(?:[.,]\d+)?)\s*[xх×*/]\s*(\d+(?:[.,]\d+)?)(?:\s*[xх×*/]\s*(\d+(?:[.,]\d+)?))?",
+            normalized,
+            flags=re.IGNORECASE,
+        ):
+            values = tuple(group for group in match.groups() if group)
+            if len(values) == 2:
+                signatures["pairs"].add(self._canonical_dimension_signature(values))
+            elif len(values) == 3:
+                signatures["triples"].add(self._canonical_dimension_signature(values))
+
+        for match in re.finditer(r"\bl\s*=?\s*(\d+(?:[.,]\d+)?)\b", normalized, flags=re.IGNORECASE):
+            signatures["lengths"].add(self._normalize_dimension_value(match.group(1)))
+        for match in re.finditer(r"\b(\d+(?:[.,]\d+)?)\s*(?:мм|mm)\b", normalized, flags=re.IGNORECASE):
+            signatures["lengths"].add(self._normalize_dimension_value(match.group(1)))
+        for match in re.finditer(
+            r"\b(?:d|dn|ø)\s*=?\s*(\d+(?:[.,]\d+)?(?:\s*[-–]\s*\d+(?:[.,]\d+)?)?)\b",
+            normalized,
+            flags=re.IGNORECASE,
+        ):
+            diameter_value = re.sub(r"\s+", "", match.group(1)).replace(",", ".").replace("–", "-")
+            if diameter_value:
+                signatures["diameters"].add(diameter_value)
+
+        return signatures
+
+    def _article_dimension_mismatch_reason(self, query_text: str, candidate_text: str) -> str:
+        query_signatures = self._extract_dimension_signatures(query_text)
+        candidate_signatures = self._extract_dimension_signatures(candidate_text)
+
+        if query_signatures["triples"] and candidate_signatures["triples"]:
+            if not (query_signatures["triples"] & candidate_signatures["triples"]):
+                return "article_query_candidate_dimension_mismatch"
+
+        if query_signatures["pairs"] and candidate_signatures["pairs"]:
+            if not (query_signatures["pairs"] & candidate_signatures["pairs"]):
+                return "article_query_candidate_dimension_mismatch"
+
+        if query_signatures["lengths"] and candidate_signatures["lengths"]:
+            if not (query_signatures["lengths"] & candidate_signatures["lengths"]):
+                return "article_query_candidate_dimension_mismatch"
+
+        if query_signatures["diameters"] and candidate_signatures["diameters"]:
+            if not (query_signatures["diameters"] & candidate_signatures["diameters"]):
+                return "article_query_candidate_dimension_mismatch"
 
         return ""
 
