@@ -937,6 +937,21 @@ class MatchTaxonomyTests(unittest.TestCase):
 
         self.assertTrue(self.matcher._cable_designation_signatures_match(query_signature, candidate_signature))
 
+    def test_hard_incompatibility_rejects_cable_designation_dimension_mismatch(self):
+        features = self.matcher._extract_query_features("Кабель, артикул ВВГнг(A)-LS 4x1,5")
+        item = {
+            "name": "Кабель силовой ВВГнг(А)-LS 4x10(N) - 1",
+            "normalized_name": "кабель силовой ввгнг а ls 4x10 n 1",
+            "branch_path": "электрика > кабели",
+            "entity_type": "cable",
+            "item_markers": {"designation_family": "ввгнг ls"},
+        }
+
+        self.assertEqual(
+            self.matcher._hard_incompatibility_reason(features, item),
+            "designation_signature_mismatch",
+        )
+
     def test_lookup_catalog_items_by_article_series_returns_matching_prefix_candidates(self):
         self.matcher._uses_duckdb_query_backend = lambda: False
         self.matcher.catalog_items = [

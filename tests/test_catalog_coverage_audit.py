@@ -254,6 +254,38 @@ class CatalogCoverageAuditTests(unittest.TestCase):
             self.assertIn("total_catalog_rows", events[0])
             self.assertIn("catalog_rows_scanned", events[-1])
 
+    def test_search_catalog_audit_progress_counts_only_relevant_entity_types(self):
+        if not DUCKDB_AVAILABLE:
+            self.skipTest("duckdb package is not installed")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Кабель силовой ВВГнг(А)-LS 4х1,5(N)-1;CABLE-1;100;Кабели;CLS-1;Кабель;;ReMo\n"
+                    "Патч-панель 1U категории 6 UTP 24 порта;PATCH-1;200;Патч-панели;CLS-2;Патч-панель;;ReMo\n"
+                    "Угол CD 90 вертикальный внеш. 100x50;ACC-1;300;Шкафные аксессуары;CLS-3;Угол;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_duckdb_path(root))
+
+            events: list[dict[str, object]] = []
+            payload = build_catalog_coverage_audit(
+                _build_result_df("Кабель, артикул ВВГнг(A)-LS 4x1,5"),
+                run_id="run-search-filtered-progress",
+                catalog_source_path=search_path,
+                catalog_source_kind="search",
+                progress_callback=lambda progress: events.append(dict(progress)),
+            )
+
+            self.assertTrue(events)
+            self.assertEqual(int(events[0].get("total_catalog_rows") or 0), 1)
+            self.assertEqual(payload["summary"]["rows_analyzed"], 1)
+
     def test_keystone_group_can_report_family_without_compatible_specs(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             catalog_path = Path(tmp_dir) / "catalog.csv"

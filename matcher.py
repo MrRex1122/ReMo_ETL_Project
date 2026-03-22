@@ -2115,6 +2115,12 @@ class ReMoMatcher:
         if query_type in {"bulk_twisted_pair", "cable", "wire"} and query_designation and item_designation:
             if query_designation != item_designation:
                 return "designation_family_mismatch"
+        if query_type in {"bulk_twisted_pair", "cable", "wire"}:
+            query_signature = self._extract_cable_designation_signature(query_text)
+            if query_signature:
+                candidate_signature = self._extract_cable_designation_signature(candidate_name or candidate_normalized)
+                if candidate_signature and not self._cable_designation_signatures_match(query_signature, candidate_signature):
+                    return "designation_signature_mismatch"
 
         if query_type == "ats_sts":
             if not any(

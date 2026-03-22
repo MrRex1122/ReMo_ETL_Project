@@ -26,6 +26,7 @@ from matcher import MATCH_MODE_EXACT, ReMoMatcher
 from taxonomy_registry import (
     audit_family_group_labels as registry_audit_family_group_labels,
     audit_family_groups as registry_audit_family_groups,
+    family_entity_types as registry_family_entity_types,
     load_registry_taxonomy_rules,
 )
 
@@ -115,7 +116,28 @@ def _safe_catalog_mtime(path: Path) -> float | None:
         return None
 
 
-def _estimate_catalog_total_rows(catalog_source_path: Path) -> int | None:
+def _search_entity_types_for_families(
+    families: set[str],
+    *,
+    rules: dict[str, Any] | None,
+) -> set[str]:
+    resolved: set[str] = set()
+    for family in families:
+        resolved.update(
+            {
+                clean_text_value(entity_type).lower()
+                for entity_type in registry_family_entity_types(family, rules)
+                if clean_text_value(entity_type)
+            }
+        )
+    return {entity_type for entity_type in resolved if entity_type}
+
+
+def _estimate_catalog_total_rows(
+    catalog_source_path: Path,
+    *,
+    search_entity_types: set[str] | None = None,
+) -> int | None:
     path = Path(catalog_source_path)
     if not is_search_catalog_path(path) or path.suffix.lower() != ".duckdb":
         return None
@@ -126,7 +148,19 @@ def _estimate_catalog_total_rows(catalog_source_path: Path) -> int | None:
     except Exception:
         return None
     try:
-        result = connection.execute(f"SELECT COUNT(*) FROM {SEARCH_CATALOG_TABLE}").fetchone()
+        search_entity_types = {
+            clean_text_value(entity_type).lower()
+            for entity_type in (search_entity_types or set())
+            if clean_text_value(entity_type)
+        }
+        if search_entity_types:
+            placeholders = ", ".join(["?"] * len(search_entity_types))
+            result = connection.execute(
+                f"SELECT COUNT(*) FROM {SEARCH_CATALOG_TABLE} WHERE lower(search_entity_type) IN ({placeholders})",
+                list(sorted(search_entity_types)),
+            ).fetchone()
+        else:
+            result = connection.execute(f"SELECT COUNT(*) FROM {SEARCH_CATALOG_TABLE}").fetchone()
     except Exception:
         return None
     finally:
@@ -390,14 +424,55 @@ def _iter_catalog_rows(
     catalog_source_path: Path,
     *,
     chunksize: int = SEARCH_AUDIT_DEFAULT_CHUNKSIZE,
+    search_entity_types: set[str] | None = None,
 ) -> Any:
     required_columns = set(SEARCH_BASE_COLUMNS) | set(SEARCH_DERIVED_COLUMNS)
+    filtered_entity_types = {
+        clean_text_value(entity_type).lower()
+        for entity_type in (search_entity_types or set())
+        if clean_text_value(entity_type)
+    }
+    if (
+        is_search_catalog_path(catalog_source_path)
+        and catalog_source_path.suffix.lower() == ".duckdb"
+        and filtered_entity_types
+        and DUCKDB_AVAILABLE
+        and catalog_search_duckdb is not None
+    ):
+        select_columns = ", ".join(f'"{column_name}"' for column_name in sorted(required_columns))
+        placeholders = ", ".join(["?"] * len(filtered_entity_types))
+        connection = catalog_search_duckdb.connect(str(catalog_source_path), read_only=True)
+        try:
+            offset = 0
+            params = list(sorted(filtered_entity_types))
+            while True:
+                chunk = connection.execute(
+                    (
+                        f"SELECT {select_columns} FROM {SEARCH_CATALOG_TABLE} "
+                        f"WHERE lower(search_entity_type) IN ({placeholders}) "
+                        f"LIMIT {int(chunksize)} OFFSET {int(offset)}"
+                    ),
+                    params,
+                ).fetch_df()
+                if chunk.empty:
+                    break
+                yield chunk
+                offset += len(chunk.index)
+        finally:
+            connection.close()
+        return
     if is_search_catalog_path(catalog_source_path):
         for chunk in iter_search_catalog_chunks(catalog_source_path, chunksize=chunksize):
             chunk = chunk.copy()
             for column in required_columns:
                 if column not in chunk.columns:
                     chunk[column] = ""
+            if filtered_entity_types and "search_entity_type" in chunk.columns:
+                chunk = chunk[
+                    chunk["search_entity_type"].astype(str).str.strip().str.lower().isin(filtered_entity_types)
+                ].copy()
+                if chunk.empty:
+                    continue
             yield chunk[[column for column in chunk.columns if column in required_columns]]
         return
     for chunk in pd.read_csv(
@@ -550,13 +625,23 @@ def build_catalog_coverage_audit(
     catalog_source_kind: str,
     diagnostics_payload: dict[str, Any] | None = None,
     example_limit: int = 3,
-    chunksize: int = 10_000,
+    chunksize: int = SEARCH_AUDIT_DEFAULT_CHUNKSIZE,
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     adapter = _AuditMatcherAdapter()
     contexts = _build_focus_contexts(df_result, adapter=adapter, diagnostics_payload=diagnostics_payload)
     relevant_contexts = [context for context in contexts if context.query_family_group is not None]
-    total_catalog_rows = _estimate_catalog_total_rows(Path(catalog_source_path))
+    relevant_families = {
+        family
+        for context in relevant_contexts
+        for family in _candidate_family_scope(context.query_family)
+        if clean_text_value(family)
+    }
+    relevant_search_entity_types = _search_entity_types_for_families(relevant_families, rules=adapter.taxonomy_rules)
+    total_catalog_rows = _estimate_catalog_total_rows(
+        Path(catalog_source_path),
+        search_entity_types=relevant_search_entity_types,
+    )
     if progress_callback is not None:
         progress_callback(
             {
@@ -571,7 +656,6 @@ def build_catalog_coverage_audit(
 
     if relevant_contexts:
         contexts_by_candidate_family: dict[str, list[_QueryAuditContext]] = defaultdict(list)
-        relevant_families: set[str] = set()
         for context in relevant_contexts:
             for family in _candidate_family_scope(context.query_family):
                 contexts_by_candidate_family[family].append(context)
@@ -579,7 +663,11 @@ def build_catalog_coverage_audit(
 
         prefer_precomputed = str(catalog_source_kind).strip().lower() == "search"
         catalog_rows_scanned = 0
-        for chunk in _iter_catalog_rows(Path(catalog_source_path), chunksize=chunksize):
+        for chunk in _iter_catalog_rows(
+            Path(catalog_source_path),
+            chunksize=chunksize,
+            search_entity_types=relevant_search_entity_types,
+        ):
             catalog_rows_scanned += int(len(chunk.index))
             if progress_callback is not None:
                 progress_callback(
