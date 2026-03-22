@@ -166,6 +166,18 @@ class MatchTaxonomyTests(unittest.TestCase):
     def test_detect_query_row_type_marks_sks_as_section(self):
         self.assertEqual(self.matcher._detect_query_row_type("СКС"), "section")
 
+    def test_detect_query_row_type_marks_header_like_rows_as_section(self):
+        for query_text in (
+            "ОБОРУДОВАНИЕ",
+            "Наименование оборудования материалов и кабелей",
+            "Раздел 1",
+            "Сетевая инфраструктура",
+            "Система кабельных лотков",
+            "Крепеж и аксессуары",
+        ):
+            with self.subTest(query_text=query_text):
+                self.assertEqual(self.matcher._detect_query_row_type(query_text), "section")
+
     def test_hard_incompatibility_blocks_power_cord_to_pdu(self):
         features = self.matcher._extract_query_features(
             "Кабель электрический соединительный 230VAC 16A IEC320 C19-C20"
@@ -933,6 +945,14 @@ class MatchTaxonomyTests(unittest.TestCase):
         query_signature = self.matcher._extract_cable_designation_signature("ВВГнг(A)-LS 4x4")
         candidate_signature = self.matcher._extract_cable_designation_signature(
             "Кабель силовой ВВГнг(А)-LS 4x4 ок(N)-1"
+        )
+
+        self.assertTrue(self.matcher._cable_designation_signatures_match(query_signature, candidate_signature))
+
+    def test_cable_designation_signature_match_tolerates_vendor_prefix_tokens(self):
+        query_signature = self.matcher._extract_cable_designation_signature("ВВГнг(A)-LS 4x6")
+        candidate_signature = self.matcher._extract_cable_designation_signature(
+            "Кабель силовой ЭЛЕКОНД(R)-АсВВГнг(А)-LS 4х6.0 ок(PE)-0.66"
         )
 
         self.assertTrue(self.matcher._cable_designation_signatures_match(query_signature, candidate_signature))

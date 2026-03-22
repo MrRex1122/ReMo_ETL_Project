@@ -676,6 +676,38 @@ class ReMoMatcher:
         )
         return items[0] if items else None
 
+    def _direct_name_match_source(self, query_text: str, item: Dict[str, Any] | None) -> str:
+        if not isinstance(item, dict):
+            return ""
+        cleaned_query = self._clean_text_value(query_text)
+        candidate_name = self._clean_text_value(item.get("name"))
+        if cleaned_query and candidate_name and cleaned_query.lower() == candidate_name.lower():
+            return "name_exact"
+        normalized_query = self._normalize_text(cleaned_query)
+        candidate_normalized = self._clean_text_value(item.get("normalized_name")) or self._normalize_text(candidate_name)
+        if normalized_query and candidate_normalized and normalized_query == candidate_normalized:
+            return "normalized_name_exact"
+        return ""
+
+    def _exact_resolution_source_for_item(
+        self,
+        query_text: str,
+        query_article: str,
+        article_source: str,
+        item: Dict[str, Any] | None,
+    ) -> str:
+        if not isinstance(item, dict):
+            return ""
+        normalized_query_article = self._normalize_article_lookup_value(query_article)
+        normalized_item_article = self._normalize_article_lookup_value(item.get("article"))
+        if normalized_query_article and normalized_item_article and normalized_query_article == normalized_item_article:
+            return "article_extracted_exact" if article_source == "text" else "article_exact"
+        return self._direct_name_match_source(query_text, item)
+
+    @staticmethod
+    def _exact_resolution_score(source: str) -> float:
+        return 0.98 if source == "normalized_name_exact" else 1.0
+
     def _entity_types_for_family(self, entity_family: str) -> set[str]:
         return registry_family_entity_types(entity_family, getattr(self, "taxonomy_rules", {}))
 
@@ -1363,6 +1395,25 @@ class ReMoMatcher:
             ]
         return tuple(tokens)
 
+    def _cable_designation_base_tokens_match(
+        self,
+        query_tokens: Tuple[str, ...],
+        item_tokens: Tuple[str, ...],
+    ) -> bool:
+        if not query_tokens or not item_tokens:
+            return False
+        item_token_set = set(item_tokens)
+        for query_token in query_tokens:
+            if query_token in item_token_set:
+                continue
+            if len(query_token) >= 4 and any(
+                len(item_token) >= 4 and (item_token.endswith(query_token) or query_token.endswith(item_token))
+                for item_token in item_tokens
+            ):
+                continue
+            return False
+        return True
+
     def _cable_designation_signatures_match(
         self,
         query_signature: Dict[str, Any],
@@ -1375,7 +1426,7 @@ class ReMoMatcher:
         query_tokens = self._cable_designation_base_tokens(query_signature)
         item_tokens = self._cable_designation_base_tokens(item_signature)
         if query_tokens and item_tokens:
-            return set(query_tokens).issubset(set(item_tokens))
+            return self._cable_designation_base_tokens_match(query_tokens, item_tokens)
         return query_signature.get("signature") == item_signature.get("signature")
 
     def _duckdb_cable_designation_candidates(self, signature: Dict[str, Any], *, limit: int = 160) -> List[Dict[str, Any]]:
@@ -1404,7 +1455,7 @@ class ReMoMatcher:
         return self._duckdb_fetch_items(
             where_sql=" AND ".join(where_parts),
             params=params,
-            limit=max(40, min(int(limit), 240)),
+            limit=max(80, min(int(limit), 1600)),
         )
 
     def _lookup_catalog_item_by_cable_designation(self, query_text: str, query_article: str = "") -> Dict[str, Any] | None:
@@ -1419,8 +1470,8 @@ class ReMoMatcher:
         lookup_features["ranked_branches"] = self._rank_branches(lookup_features)
 
         branch_paths = [entry["path"] for entry in lookup_features.get("ranked_branches", []) if entry.get("path")]
-        candidate_pool = self._duckdb_cable_designation_candidates(signature, limit=160)
-        supplemental_pool = self._typed_candidate_pool(lookup_query, lookup_features, limit=160)
+        candidate_pool = self._duckdb_cable_designation_candidates(signature, limit=640)
+        supplemental_pool = self._typed_candidate_pool(lookup_query, lookup_features, limit=320)
         if supplemental_pool:
             merged_pool: List[Dict[str, Any]] = []
             seen_row_idx: set[int] = set()
@@ -1432,11 +1483,11 @@ class ReMoMatcher:
                 merged_pool.append(item)
             candidate_pool = merged_pool
         if not candidate_pool:
-            candidate_pool = self._collect_branch_candidates(branch_paths, limit=160, query_features=lookup_features)
+            candidate_pool = self._collect_branch_candidates(branch_paths, limit=320, query_features=lookup_features)
         if not candidate_pool and self._uses_duckdb_query_backend():
-            candidate_pool, _ = self._duckdb_heuristic_candidates(lookup_query, lookup_features, limit=160)
+            candidate_pool, _ = self._duckdb_heuristic_candidates(lookup_query, lookup_features, limit=320)
         if not candidate_pool:
-            candidate_pool = self._select_candidates(lookup_query, limit=160)
+            candidate_pool = self._select_candidates(lookup_query, limit=320)
         if not candidate_pool:
             return None
 
@@ -3339,15 +3390,36 @@ class ReMoMatcher:
         if not text:
             return "empty"
         normalized = self._normalize_text(text)
-        if normalized in {"скс", "лвс"}:
+        if normalized in {
+            "скс",
+            "лвс",
+            "оборудование",
+            "сетевая инфраструктура",
+            "система кабельных лотков",
+            "крепеж и аксессуары",
+            "наименование оборудования материалов и кабелей",
+        }:
             return "section"
         patterns = getattr(self, "taxonomy_rules", {}).get("section_row_patterns", [])
         for pattern in patterns:
             if re.search(pattern, normalized, flags=re.IGNORECASE):
                 return "section"
         tokens = self._tokenize(normalized)
+        if normalized.startswith("раздел"):
+            return "section"
+        if normalized.startswith("наименование ") and len(tokens) <= 8:
+            return "section"
         if len(tokens) <= 4 and not re.search(r"\d", normalized):
-            for token in ("шкафы", "кабели", "коммутация", "электрика", "датчики", "свет"):
+            for token in (
+                "шкафы",
+                "кабели",
+                "коммутация",
+                "электрика",
+                "датчики",
+                "свет",
+                "аксессуары",
+                "оборудование",
+            ):
                 if normalized.startswith(token):
                     return "section"
         return "item"
@@ -4754,22 +4826,6 @@ class ReMoMatcher:
                 }
             )
 
-        if use_cache and query_text:
-            cached = self._get_from_cache(query_text)
-            if cached:
-                query_features = self._extract_query_features(query_text)
-                trace_steps.append(
-                    {
-                        "stage": "query_classification",
-                        "status": "ok",
-                        "row_type": str(query_features.get("row_type") or ""),
-                        "entity_type": str(query_features.get("entity_type") or ""),
-                        "query_family": self._entity_family(query_features.get("entity_type", "")),
-                    }
-                )
-                trace_steps.append({"stage": "cache", "status": "hit"})
-                return _finalize(cached, stage_of_failure="resolved", reason_code="resolved")
-
         try:
             if not query_text:
                 result = self._build_missing_result(query, "Пустая строка")
@@ -4778,7 +4834,54 @@ class ReMoMatcher:
 
             normalized_query = self._normalize_text(query_text)
             query_features = self._extract_query_features(query_text)
-            if self._should_use_family_router_gemini(query_features):
+            query_family = self._entity_family(query_features.get("entity_type", ""))
+            trace_steps.append(
+                {
+                    "stage": "query_classification",
+                    "status": "ok",
+                    "row_type": str(query_features.get("row_type") or ""),
+                    "entity_type": str(query_features.get("entity_type") or ""),
+                    "query_family": query_family,
+                    "family_confidence": float(query_features.get("family_confidence") or 0.0),
+                }
+            )
+            if query_features.get("row_type") == "section":
+                result = self._build_missing_result(
+                    query_text,
+                    "Строка похожа на раздел каталога и не является конкретной товарной позицией.",
+                    incompatibility_reason="section_row_detected",
+                )
+                trace_steps.append({"stage": "query_input", "status": "failed", "reason_code": "section_row_detected"})
+                return _finalize(result, stage_of_failure="query_input", reason_code="section_row_detected")
+
+            if use_cache and query_text:
+                cached = self._get_from_cache(query_text)
+                if cached:
+                    cached_item = {
+                        "name": cached.get("found_name"),
+                        "article": cached.get("article"),
+                        "normalized_name": self._normalize_text(self._clean_text_value(cached.get("found_name"))),
+                    }
+                    promoted_source = self._exact_resolution_source_for_item(
+                        query_text,
+                        query_article,
+                        article_source,
+                        cached_item,
+                    )
+                    if promoted_source:
+                        cached = dict(cached)
+                        cached["resolution_source"] = promoted_source
+                        cached["similarity_score"] = self._exact_resolution_score(promoted_source)
+                        cached["confidence_level"] = self._confidence_level_from_score(
+                            cached["similarity_score"],
+                            False,
+                        )
+                    trace_steps.append({"stage": "cache", "status": "hit"})
+                    return _finalize(cached, stage_of_failure="resolved", reason_code="resolved")
+
+            # Keep article-first authoritative: if we already have a parsed article/designation,
+            # let exact article resolution run before Gemini rewrites the family.
+            if not query_article and self._should_use_family_router_gemini(query_features):
                 routed = self._route_query_family_with_gemini(query_text, query_features)
                 if routed is not None:
                     route_changed = self._gemini_route_changes_query_features(query_features, routed)
@@ -4810,24 +4913,6 @@ class ReMoMatcher:
                             }
                         )
             query_family = self._entity_family(query_features.get("entity_type", ""))
-            trace_steps.append(
-                {
-                    "stage": "query_classification",
-                    "status": "ok",
-                    "row_type": str(query_features.get("row_type") or ""),
-                    "entity_type": str(query_features.get("entity_type") or ""),
-                    "query_family": query_family,
-                    "family_confidence": float(query_features.get("family_confidence") or 0.0),
-                }
-            )
-            if query_features.get("row_type") == "section":
-                result = self._build_missing_result(
-                    query_text,
-                    "Строка похожа на раздел каталога и не является конкретной товарной позицией.",
-                    incompatibility_reason="section_row_detected",
-                )
-                trace_steps.append({"stage": "query_input", "status": "failed", "reason_code": "section_row_detected"})
-                return _finalize(result, stage_of_failure="query_input", reason_code="section_row_detected")
             strictness = self._match_strictness_for_query(query_features)
 
             preferred_result: Dict[str, Any] | None = None
@@ -4952,31 +5037,59 @@ class ReMoMatcher:
 
             exact_match = self._lookup_catalog_item_by_name(query_text)
             if exact_match:
-                preferred_result = self._build_result_from_item(exact_match, 1.0, "name_exact", False, "", "")
-                preferred_entry = {"item": exact_match, "score": 1.0, "lexical_score": 1.0}
+                exact_source = self._exact_resolution_source_for_item(query_text, query_article, article_source, exact_match) or "name_exact"
+                exact_score = self._exact_resolution_score(exact_source)
+                preferred_result = self._build_result_from_item(exact_match, exact_score, exact_source, False, "", "")
+                preferred_entry = {"item": exact_match, "score": exact_score, "lexical_score": exact_score}
             else:
                 normalized_match = self._lookup_catalog_item_by_normalized_name(normalized_query)
                 if normalized_match:
+                    exact_source = self._exact_resolution_source_for_item(
+                        query_text,
+                        query_article,
+                        article_source,
+                        normalized_match,
+                    ) or "normalized_name_exact"
+                    exact_score = self._exact_resolution_score(exact_source)
                     preferred_result = self._build_result_from_item(
                         normalized_match,
-                        0.98,
-                        "normalized_name_exact",
+                        exact_score,
+                        exact_source,
                         False,
                         "",
                         "",
                     )
-                    preferred_entry = {"item": normalized_match, "score": 0.98, "lexical_score": 0.98}
+                    preferred_entry = {"item": normalized_match, "score": exact_score, "lexical_score": exact_score}
                 else:
                     local_direct = self._try_local_semantic_match(query_text)
                     if local_direct:
                         matched_item = local_direct.pop("_matched_item", None)
-                        preferred_result = dict(local_direct)
-                        if matched_item:
-                            preferred_entry = {
-                                "item": matched_item,
-                                "score": float(local_direct["similarity_score"]),
-                                "lexical_score": float(local_direct["similarity_score"]),
-                            }
+                        direct_source = self._exact_resolution_source_for_item(
+                            query_text,
+                            query_article,
+                            article_source,
+                            matched_item,
+                        )
+                        if matched_item and direct_source:
+                            direct_score = self._exact_resolution_score(direct_source)
+                            preferred_result = self._build_result_from_item(matched_item, direct_score, direct_source, False, "", "")
+                            preferred_entry = {"item": matched_item, "score": direct_score, "lexical_score": direct_score}
+                        else:
+                            preferred_result = dict(local_direct)
+                            if matched_item:
+                                preferred_entry = {
+                                    "item": matched_item,
+                                    "score": float(local_direct["similarity_score"]),
+                                    "lexical_score": float(local_direct["similarity_score"]),
+                                }
+
+            if preferred_result and str(preferred_result.get("resolution_source") or "") in {
+                "article_exact",
+                "article_extracted_exact",
+                "name_exact",
+                "normalized_name_exact",
+            }:
+                return _finalize(preferred_result, stage_of_failure="resolved", reason_code="resolved")
 
             ranked_branches = self._rank_branches(query_features)
             query_features["ranked_branches"] = ranked_branches

@@ -99,6 +99,57 @@ class NormalizedMatchTests(unittest.TestCase):
         self.assertTrue(result["diagnostic_trace"]["article_lookup_conflict"])
         self.assertEqual(result["diagnostic_trace"]["query_article"], "ART-100")
 
+    def test_match_skips_family_router_before_exact_article_resolution(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.catalog_dict = {}
+        matcher.catalog_normalized_dict = {}
+        matcher.catalog_article_dict = {
+            "36480": {
+                "name": "Перегородка SEP L3000 Н50",
+                "article": "36480",
+                "price": 456.0,
+                "row_idx": 1,
+                "branch_path": "электрика > кабели",
+                "entity_type": "cable",
+                "item_markers": {},
+            }
+        }
+        matcher.catalog_items = []
+        matcher.parallel_requests = 1
+        matcher.retrieval_backend = "memory"
+        matcher.retrieval_mode = "legacy_limited"
+        matcher._match_context_local = threading.local()
+        matcher._match_context_local.payload = {
+            "input_article": "36480",
+            "extracted_article": "",
+            "query_article": "36480",
+        }
+
+        matcher._get_from_cache = lambda _query: None
+        matcher._save_to_cache = lambda *_args, **_kwargs: None
+        matcher._match_with_gemini = lambda _query: {"success": False}
+        matcher._article_match_sanity_reason = lambda *_args, **_kwargs: ""
+        matcher._should_use_family_router_gemini = lambda _features: True
+        matcher._route_query_family_with_gemini = (
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("family router should not run"))
+        )
+        matcher._extract_query_features = lambda query: {
+            "row_type": "item",
+            "entity_type": "cable",
+            "attributes": {},
+            "markers": {},
+            "original_text": query,
+            "normalized_text": ReMoMatcher._normalize_text(matcher, query),
+            "tokens": [],
+            "family_confidence": 0.35,
+        }
+
+        result = ReMoMatcher.match(matcher, "Перегородка SEP L3000 H50", use_cache=True)
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["article"], "36480")
+        self.assertEqual(result["resolution_source"], "article_exact")
+
     @unittest.skip("Legacy encoding fixture is unstable; covered by explicit unicode regression below.")
     def test_match_uses_article_designation_exact_for_cable_signature(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
@@ -263,6 +314,178 @@ class NormalizedMatchTests(unittest.TestCase):
         self.assertEqual(result["article"], "37501R")
         self.assertEqual(result["resolution_source"], "article_series_local")
         self.assertEqual(result["compatibility_status"], "compatible")
+
+    def test_match_rejects_header_like_row_before_cache_hit(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.catalog_dict = {}
+        matcher.catalog_normalized_dict = {}
+        matcher.catalog_article_dict = {}
+        matcher.taxonomy_rules = ReMoMatcher._load_taxonomy_rules(matcher)
+        matcher._match_context_local = threading.local()
+        matcher._match_context_local.payload = {}
+
+        matcher._get_from_cache = lambda _query: {
+            "found_name": "Случайный товар из кеша",
+            "price": 1.0,
+            "article": "CACHE-1",
+            "similarity_score": 1.0,
+            "from_cache": True,
+            "success": True,
+            "error": None,
+            "reason": "",
+            "category_path": None,
+            "confidence_level": "high",
+            "requires_review": "нет",
+            "alternatives": "",
+            "resolution_source": "cache",
+            "compatibility_status": "compatible",
+            "incompatibility_reason": "",
+            "gemini_shortlist_count": 0,
+            "gemini_visible_candidates": 0,
+            "gemini_truncated_candidates": 0,
+        }
+        matcher._save_to_cache = lambda *_args, **_kwargs: None
+
+        result = ReMoMatcher.match(matcher, "ОБОРУДОВАНИЕ", use_cache=True)
+
+        self.assertEqual(result["resolution_source"], "unresolved")
+        self.assertEqual(result["diagnostic_trace"]["reason_code"], "section_row_detected")
+        self.assertFalse(result["from_cache"])
+
+    def test_match_promotes_local_direct_name_equivalence_to_normalized_name_exact(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.catalog_dict = {}
+        matcher.catalog_normalized_dict = {}
+        matcher.catalog_article_dict = {}
+        matcher.catalog_items = []
+        matcher.parallel_requests = 1
+        matcher.retrieval_backend = "memory"
+        matcher.retrieval_mode = "legacy_limited"
+        matcher.taxonomy_rules = ReMoMatcher._load_taxonomy_rules(matcher)
+        matcher.match_mode = "exact"
+        matcher._match_context_local = threading.local()
+        matcher._match_context_local.payload = {}
+
+        matched_item = {
+            "name": "SKAT TB Panel 1U-G Панель заглушка 19 1U, серая",
+            "article": "4467",
+            "price": 100.0,
+            "row_idx": 1,
+            "branch_path": "телеком > аксессуары > шкафные аксессуары",
+            "entity_type": "rack_blank_panel",
+            "item_markers": {"mount_kind": "blank_panel", "rack_unit": "1"},
+            "normalized_name": "skat tb panel 1u g панель заглушка 19 1u серая",
+            "tokens": ["skat", "tb", "panel", "1u", "панель", "заглушка", "19", "серая"],
+        }
+
+        matcher._get_from_cache = lambda _query: None
+        matcher._save_to_cache = lambda *_args, **_kwargs: None
+        matcher._should_use_family_router_gemini = lambda _features: False
+        matcher._lookup_catalog_items_by_article_series = lambda _article, _features: []
+        matcher._best_article_series_match = lambda _features, _candidates, article="": None
+        matcher._lookup_catalog_item_by_cable_designation = lambda _query_text, _article="": None
+        matcher._try_local_semantic_match = lambda _query: {
+            "found_name": matched_item["name"],
+            "price": matched_item["price"],
+            "article": matched_item["article"],
+            "similarity_score": 0.97,
+            "from_cache": False,
+            "success": True,
+            "error": None,
+            "reason": "",
+            "category_path": matched_item["branch_path"],
+            "confidence_level": "high",
+            "requires_review": "нет",
+            "alternatives": "",
+            "resolution_source": "local_semantic_match",
+            "compatibility_status": "compatible",
+            "incompatibility_reason": "",
+            "_matched_item": matched_item,
+        }
+
+        result = ReMoMatcher.match(matcher, "SKAT TB Panel 1U-G Панель заглушка 19 1U серая", use_cache=False)
+
+        self.assertEqual(result["article"], "4467")
+        self.assertEqual(result["resolution_source"], "normalized_name_exact")
+        self.assertEqual(result["compatibility_status"], "compatible")
+
+    def test_match_promotes_exact_name_with_matching_input_article_to_article_exact(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        item = {
+            "name": "Розетка Минск RJ-45 1-местная СП белая",
+            "article": "ERK01-035-10",
+            "price": 15.0,
+            "row_idx": 1,
+            "branch_path": "электрика > розетки",
+            "entity_type": "rj45_outlet",
+            "item_markers": {},
+            "normalized_name": "розетка минск rj 45 1 местная сп белая",
+        }
+        matcher.catalog_dict = {}
+        matcher.catalog_normalized_dict = {
+            "розетка минск rj 45 1 местная сп белая": item,
+        }
+        matcher.catalog_article_dict = {}
+        matcher.taxonomy_rules = ReMoMatcher._load_taxonomy_rules(matcher)
+        matcher._match_context_local = threading.local()
+        matcher._match_context_local.payload = {
+            "input_article": "ERK01-035-10",
+            "query_article": "ERK01-035-10",
+        }
+
+        matcher._get_from_cache = lambda _query: None
+        matcher._save_to_cache = lambda *_args, **_kwargs: None
+        matcher._should_use_family_router_gemini = lambda _features: False
+        matcher._lookup_catalog_item_by_name = lambda _name, candidate_pool=None: None
+        matcher._lookup_catalog_item_by_normalized_name = lambda _normalized_name: item
+        matcher._lookup_catalog_item_by_cable_designation = lambda _query_text, _article="": None
+        matcher._lookup_catalog_items_by_article_series = lambda _article, _features: []
+        matcher._best_article_series_match = lambda _features, _candidates, article="": None
+
+        result = ReMoMatcher.match(matcher, "Розетка Минск RJ-45 1-местная СП белая", use_cache=False)
+
+        self.assertEqual(result["article"], "ERK01-035-10")
+        self.assertEqual(result["resolution_source"], "article_exact")
+
+    def test_match_promotes_cache_hit_with_matching_input_article_to_article_exact(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.catalog_dict = {}
+        matcher.catalog_normalized_dict = {}
+        matcher.catalog_article_dict = {}
+        matcher.taxonomy_rules = ReMoMatcher._load_taxonomy_rules(matcher)
+        matcher._match_context_local = threading.local()
+        matcher._match_context_local.payload = {
+            "input_article": "1546799",
+            "query_article": "1546799",
+        }
+
+        matcher._get_from_cache = lambda _query: {
+            "found_name": "Блок распределения питания PDU Ippon Basic 0U",
+            "price": 111.0,
+            "article": "1546799",
+            "similarity_score": 0.91,
+            "from_cache": True,
+            "success": True,
+            "error": None,
+            "reason": "",
+            "category_path": None,
+            "confidence_level": "high",
+            "requires_review": "нет",
+            "alternatives": "",
+            "resolution_source": "cache",
+            "compatibility_status": "compatible",
+            "incompatibility_reason": "",
+            "gemini_shortlist_count": 0,
+            "gemini_visible_candidates": 0,
+            "gemini_truncated_candidates": 0,
+        }
+        matcher._save_to_cache = lambda *_args, **_kwargs: None
+
+        result = ReMoMatcher.match(matcher, "Блок распределения питания PDU Ippon Basic 0U", use_cache=True)
+
+        self.assertTrue(result["from_cache"])
+        self.assertEqual(result["resolution_source"], "article_exact")
+        self.assertEqual(result["article"], "1546799")
 
 
 if __name__ == "__main__":
