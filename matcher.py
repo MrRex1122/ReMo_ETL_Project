@@ -713,6 +713,242 @@ class ReMoMatcher:
     def _exact_resolution_score(source: str) -> float:
         return 0.98 if source == "normalized_name_exact" else 1.0
 
+    @staticmethod
+    def _resolver_path_for_source(source: str) -> str:
+        normalized = str(source or "").strip()
+        if normalized in {
+            "article_exact",
+            "article_extracted_exact",
+            "article_designation_exact",
+            "designation_exact",
+            "article_series_local",
+        }:
+            return "article_resolver"
+        if normalized in {"name_exact", "normalized_name_exact"}:
+            return "direct_exact_resolver"
+        if normalized in {"local_tree+gemini", "candidate_tiebreaker_gemini"}:
+            return "semantic_resolver"
+        if normalized.endswith("_fallback") or normalized in {"assembly_possible_local_fallback"}:
+            return "fallback_resolver"
+        if normalized == "unresolved":
+            return "reject_resolver"
+        return ""
+
+    def _resolve_article_stack(
+        self,
+        query_text: str,
+        query_article: str,
+        article_source: str,
+        article_lookup_conflict: bool,
+        query_features: Dict[str, Any],
+        trace_steps: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        article_lookup_hit = False
+        article_series_candidates: List[Dict[str, Any]] = []
+
+        article_match = self._lookup_catalog_item_by_article(query_article) if query_article else None
+        article_sanity_reason = ""
+        if query_article:
+            article_lookup_hit = article_match is not None
+            article_lookup_status = "miss"
+            if article_match is not None:
+                query_features["article_candidate_text"] = " ".join(
+                    filter(
+                        None,
+                        [
+                            self._clean_text_value(article_match.get("name")),
+                            self._clean_text_value(article_match.get("normalized_name")),
+                            self._clean_text_value(article_match.get("branch_path")),
+                        ],
+                    )
+                )
+                query_features["article_candidate_family"] = self._entity_family(article_match.get("entity_type", ""))
+                article_sanity_reason = self._article_match_sanity_reason(query_features, article_match)
+                article_lookup_status = "rejected" if article_sanity_reason else "hit"
+                if article_sanity_reason and self._should_use_article_validator_gemini(query_features, article_sanity_reason):
+                    validated_result = self._validate_article_match_with_gemini(query_text, query_features, article_match, query_article)
+                    if validated_result is not None:
+                        query_features["gemini_validation_used"] = True
+                        query_features["article_validation_status"] = "validated_by_gemini"
+                        trace_steps.append(
+                            {
+                                "stage": "article_lookup",
+                                "status": "validated",
+                                "article_source": article_source,
+                                "query_article": query_article,
+                                "article_lookup_conflict": article_lookup_conflict,
+                                "reason_code": article_sanity_reason,
+                                "gemini_validation_used": True,
+                            }
+                        )
+                        validated_result["resolver_path"] = "article_resolver"
+                        return {
+                            "result": validated_result,
+                            "article_lookup_hit": article_lookup_hit,
+                            "article_series_candidates": article_series_candidates,
+                        }
+                    query_features["gemini_validation_used"] = True
+                    query_features["article_validation_status"] = "rejected_by_gemini"
+                if article_sanity_reason:
+                    query_features["article_lookup_rejected_reason"] = article_sanity_reason
+                    query_features.setdefault("article_validation_status", "rejected")
+            trace_steps.append(
+                {
+                    "stage": "article_lookup",
+                    "status": article_lookup_status,
+                    "article_source": article_source,
+                    "query_article": query_article,
+                    "article_lookup_conflict": article_lookup_conflict,
+                    "reason_code": article_sanity_reason,
+                }
+            )
+        if article_match is not None and not article_sanity_reason:
+            article_reason = "Exact article match from input column."
+            resolution_source = "article_exact"
+            if article_source == "text":
+                article_reason = "Exact article match extracted from row text."
+                resolution_source = "article_extracted_exact"
+            elif article_lookup_conflict:
+                article_reason = "Exact article match from input column; column article took priority over text."
+            result = self._build_result_from_item(
+                article_match,
+                1.0,
+                resolution_source,
+                False,
+                "",
+                article_reason,
+            )
+            result["resolver_path"] = "article_resolver"
+            return {
+                "result": result,
+                "article_lookup_hit": article_lookup_hit,
+                "article_series_candidates": article_series_candidates,
+            }
+
+        cable_designation_match = self._lookup_catalog_item_by_cable_designation(query_text, query_article)
+        if cable_designation_match is not None:
+            trace_steps.append(
+                {
+                    "stage": "designation_lookup",
+                    "status": "hit",
+                    "designation_source": article_source if query_article else "query",
+                }
+            )
+            result = self._build_result_from_item(
+                cable_designation_match,
+                0.995,
+                "article_designation_exact" if query_article else "designation_exact",
+                False,
+                "",
+                "Техническое обозначение кабеля из строки точно сопоставлено с номенклатурой каталога.",
+            )
+            result["resolver_path"] = "article_resolver"
+            return {
+                "result": result,
+                "article_lookup_hit": article_lookup_hit,
+                "article_series_candidates": article_series_candidates,
+            }
+
+        if query_article:
+            article_series_candidates = self._lookup_catalog_items_by_article_series(query_article, query_features)
+            if article_series_candidates:
+                trace_steps.append(
+                    {
+                        "stage": "article_lookup",
+                        "status": "series_candidates",
+                        "article_source": article_source,
+                        "query_article": query_article,
+                        "series_candidate_count": len(article_series_candidates),
+                    }
+                )
+                article_series_match = self._best_article_series_match(
+                    query_features,
+                    article_series_candidates,
+                    article=query_article,
+                )
+                if article_series_match is not None:
+                    result = self._build_result_from_item(
+                        article_series_match,
+                        0.985,
+                        "article_series_local",
+                        True,
+                        "",
+                        "Сопоставлено по расширенной серии артикула с проверкой на смысловую и размерную совместимость.",
+                    )
+                    result["resolver_path"] = "article_resolver"
+                    return {
+                        "result": result,
+                        "article_lookup_hit": article_lookup_hit,
+                        "article_series_candidates": article_series_candidates,
+                    }
+
+        return {
+            "result": None,
+            "article_lookup_hit": article_lookup_hit,
+            "article_series_candidates": article_series_candidates,
+        }
+
+    def _resolve_direct_exact_stack(
+        self,
+        query_text: str,
+        normalized_query: str,
+        query_article: str,
+        article_source: str,
+    ) -> Tuple[Dict[str, Any] | None, Dict[str, Any] | None]:
+        exact_match = self._lookup_catalog_item_by_name(query_text)
+        if exact_match:
+            exact_source = self._exact_resolution_source_for_item(query_text, query_article, article_source, exact_match) or "name_exact"
+            exact_score = self._exact_resolution_score(exact_source)
+            result = self._build_result_from_item(exact_match, exact_score, exact_source, False, "", "")
+            result["resolver_path"] = "direct_exact_resolver"
+            return result, {"item": exact_match, "score": exact_score, "lexical_score": exact_score}
+
+        normalized_match = self._lookup_catalog_item_by_normalized_name(normalized_query)
+        if normalized_match:
+            exact_source = self._exact_resolution_source_for_item(
+                query_text,
+                query_article,
+                article_source,
+                normalized_match,
+            ) or "normalized_name_exact"
+            exact_score = self._exact_resolution_score(exact_source)
+            result = self._build_result_from_item(
+                normalized_match,
+                exact_score,
+                exact_source,
+                False,
+                "",
+                "",
+            )
+            result["resolver_path"] = "direct_exact_resolver"
+            return result, {"item": normalized_match, "score": exact_score, "lexical_score": exact_score}
+
+        local_direct = self._try_local_semantic_match(query_text)
+        if local_direct:
+            matched_item = local_direct.pop("_matched_item", None)
+            direct_source = self._exact_resolution_source_for_item(
+                query_text,
+                query_article,
+                article_source,
+                matched_item,
+            )
+            if matched_item and direct_source:
+                direct_score = self._exact_resolution_score(direct_source)
+                result = self._build_result_from_item(matched_item, direct_score, direct_source, False, "", "")
+                result["resolver_path"] = "direct_exact_resolver"
+                return result, {"item": matched_item, "score": direct_score, "lexical_score": direct_score}
+            result = dict(local_direct)
+            result["resolver_path"] = "direct_exact_resolver"
+            if matched_item:
+                return result, {
+                    "item": matched_item,
+                    "score": float(local_direct["similarity_score"]),
+                    "lexical_score": float(local_direct["similarity_score"]),
+                }
+            return result, None
+
+        return None, None
+
     def _entity_types_for_family(self, entity_family: str) -> set[str]:
         return registry_family_entity_types(entity_family, getattr(self, "taxonomy_rules", {}))
 
@@ -3959,6 +4195,8 @@ class ReMoMatcher:
         row_type = str((query_features or {}).get("row_type") or "")
         entity_type = str((query_features or {}).get("entity_type") or "")
         query_family = self._entity_family(entity_type)
+        resolver_source = str(result.get("resolution_source") or "")
+        resolver_path = str(result.get("resolver_path") or self._resolver_path_for_source(resolver_source))
         diagnostic_trace = {
             "query_text": self._clean_text_value(query_text),
             "query_article": self._clean_text_value(query_article),
@@ -3975,8 +4213,9 @@ class ReMoMatcher:
             "family_confidence": float((query_features or {}).get("family_confidence") or 0.0),
             "retrieval_mode": str((pipeline_counts or {}).get("retrieval_mode") or getattr(self, "retrieval_mode", "")),
             "retrieval_backend": str((pipeline_counts or {}).get("retrieval_backend") or getattr(self, "retrieval_backend", "")),
-            "resolution_source": str(result.get("resolution_source") or ""),
-            "resolver_name": str(result.get("resolution_source") or ""),
+            "resolution_source": resolver_source,
+            "resolver_name": resolver_source,
+            "resolver_path": resolver_path,
             "resolver_confidence": float(result.get("similarity_score") or 0.0),
             "compatibility_status": str(result.get("compatibility_status") or ""),
             "incompatibility_reason": str(result.get("incompatibility_reason") or ""),
@@ -3994,6 +4233,7 @@ class ReMoMatcher:
         result["stage_of_failure"] = diagnostic_trace["stage_of_failure"]
         result["reason_code"] = diagnostic_trace["reason_code"]
         result["reason_class"] = diagnostic_trace["reason_class"]
+        result["resolver_path"] = diagnostic_trace["resolver_path"]
         result["diagnostic_trace"] = diagnostic_trace
         return result
 
@@ -4938,6 +5178,33 @@ class ReMoMatcher:
 
             preferred_result: Dict[str, Any] | None = None
             preferred_entry: Dict[str, Any] | None = None
+
+            article_resolution = self._resolve_article_stack(
+                query_text,
+                query_article,
+                article_source,
+                article_lookup_conflict,
+                query_features,
+                trace_steps,
+            )
+            article_lookup_hit = bool(article_resolution.get("article_lookup_hit"))
+            article_series_candidates = list(article_resolution.get("article_series_candidates") or [])
+            if article_resolution.get("result") is not None:
+                return _finalize(article_resolution["result"], stage_of_failure="resolved", reason_code="resolved")
+
+            preferred_result, preferred_entry = self._resolve_direct_exact_stack(
+                query_text,
+                normalized_query,
+                query_article,
+                article_source,
+            )
+            if preferred_result and str(preferred_result.get("resolution_source") or "") in {
+                "article_exact",
+                "article_extracted_exact",
+                "name_exact",
+                "normalized_name_exact",
+            }:
+                return _finalize(preferred_result, stage_of_failure="resolved", reason_code="resolved")
 
             article_match = self._lookup_catalog_item_by_article(query_article) if query_article else None
             if query_article:

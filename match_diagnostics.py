@@ -387,6 +387,7 @@ def apply_match_diagnostics_to_result_dataframe(
     reason_code_column = "Код причины"
     reason_class_column = "Класс причины"
     resolver_name_column = "Резолвер"
+    resolver_path_column = "Resolver path"
     resolver_confidence_column = "Уверенность резолвера"
     family_confidence_column = "Уверенность family"
     article_validation_column = "Статус article validation"
@@ -401,6 +402,7 @@ def apply_match_diagnostics_to_result_dataframe(
         reason_code_column,
         reason_class_column,
         resolver_name_column,
+        resolver_path_column,
         resolver_confidence_column,
         family_confidence_column,
         article_validation_column,
@@ -435,6 +437,7 @@ def apply_match_diagnostics_to_result_dataframe(
         df_result.at[dataframe_index, resolver_name_column] = _clean_text_value(
             row.get("resolver_name") or row.get("resolution_source")
         )
+        df_result.at[dataframe_index, resolver_path_column] = _clean_text_value(row.get("resolver_path"))
         df_result.at[dataframe_index, resolver_confidence_column] = round(_safe_float(row.get("resolver_confidence")), 4)
         df_result.at[dataframe_index, family_confidence_column] = round(_safe_float(row.get("family_confidence")), 4)
         df_result.at[dataframe_index, article_validation_column] = _clean_text_value(row.get("article_validation_status"))
