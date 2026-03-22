@@ -1,0 +1,121 @@
+case_id,suite,tier,input_mode,query_text,query_article,expected_family,expected_outcome,expected_articles_json,forbidden_articles_json,allowed_resolvers_json,notes,source_ref
+electrical_exact_001,electrical_article,smoke,article_in_text,Кабель артикул ВВГнг(A)-LS 4x6,,cable,exact,"[""00-00009842""]","[]","[""article_designation_exact""]",cable designation exact,result_20260322_054148#8
+electrical_exact_002,electrical_article,smoke,article_in_text,Кабель артикул ВВГнг(A)-LS 4x10,,cable,exact,"[""4582""]","[]","[""article_designation_exact""]",cable designation exact,result_20260322_054148#9
+electrical_exact_003,electrical_article,full,article_in_text,Кабель артикул ВВГнг(A)-LS 4x25,,cable,exact,"[""4594""]","[]","[""article_designation_exact""]",cable designation exact,result_20260322_054148#10
+electrical_exact_004,electrical_article,smoke,article_column,Крышка лотка прямая 50х100 L3000,35522,rack_accessory_strict,exact,"[""35522""]","[]","[""article_exact""]",tray cover exact,result_20260322_054148#14
+electrical_exact_005,electrical_article,full,article_column,Крышка лотка прямая 50х200 L3000,35524,rack_accessory_strict,exact,"[""35524""]","[]","[""article_exact""]",tray cover exact,result_20260322_054148#16
+electrical_exact_006,electrical_article,smoke,article_column,Перегородка SEP L3000 H50,36480,rack_accessory_strict,exact,"[""36480""]","[]","[""article_exact""]",partition exact,result_20260322_054148#19
+electrical_exact_007,electrical_article,full,article_column,Угол CD 90 вертикальный внешний 100x50,36782K,rack_accessory_strict,exact,"[""36782K""]","[]","[""article_exact""]",angle exact,result_20260322_054148#20
+electrical_exact_008,electrical_article,full,article_column,Угол CD 90 вертикальный внешний 200x50,36784K,rack_accessory_strict,exact,"[""36784K""]","[]","[""article_exact""]",angle exact,result_20260322_054148#21
+electrical_exact_009,electrical_article,smoke,article_column,Угол CPO 90 горизонтальный 100x50,36002K,rack_accessory_strict,exact,"[""36002K""]","[]","[""article_exact""]",horizontal angle exact,result_20260322_054148#22
+electrical_exact_010,electrical_article,full,article_column,Угол CPO 90 горизонтальный 200x50,36004K,rack_accessory_strict,exact,"[""36004K""]","[]","[""article_exact""]",horizontal angle exact,result_20260322_054148#23
+electrical_exact_011,electrical_article,full,article_column,Ответвитель DL 100x50,36235K,rack_accessory_strict,exact,"[""36235K""]","[]","[""article_exact""]",branch exact,result_20260322_054148#24
+electrical_exact_012,electrical_article,smoke,article_column,Консоль универсальная основание 200 мм,BBN5020,rack_accessory_strict,exact,"[""BBN5020""]","[]","[""article_exact""]",console exact,result_20260322_054148#26
+electrical_exact_013,electrical_article,full,article_column,Стальной забивной анкер М8,CM400830,fastener,exact,"[""CM400830""]","[]","[""article_exact""]",fastener exact,result_20260322_054148#27
+electrical_exact_014,electrical_article,full,article_column,Болт шестигранный М8x70,CM020870,fastener,exact,"[""CM020870""]","[]","[""article_exact""]",fastener exact,result_20260322_054148#28
+electrical_exact_015,electrical_article,full,article_column,П-образный профиль PSL L400 толщина 1.5мм,BPL2904,rack_accessory_strict,exact,"[""BPL2904""]","[]","[""article_exact""]",profile exact,result_20260322_054148#29
+electrical_exact_016,electrical_article,full,article_column,Стальной забивной анкер М10,CM401040,fastener,exact,"[""CM401040""]","[]","[""article_exact""]",fastener exact,result_20260322_054148#30
+electrical_exact_017,electrical_article,full,article_column,Шпилька М10x1000,CM201001,fastener,exact,"[""CM201001""]","[]","[""article_exact""]",fastener exact,result_20260322_054148#31
+electrical_exact_018,electrical_article,full,article_column,Металлорукав DN 20 мм в ПВХ изоляции черный 50 м,6071R-020N,cable,exact,"[""6071R-020N""]","[]","[""article_exact""]",metallohose exact,result_20260322_054148#32
+electrical_exact_019,electrical_article,smoke,article_column,Крепежный комплект для стальных хомутов 100 шт,63768,fastener,exact,"[""63768""]","[]","[""article_exact""]",fastener exact,result_20260322_054148#34
+electrical_exact_020,electrical_article,smoke,article_column,Блок распределения питания PDU Ippon Basic 0U,1546799,pdu,exact,"[""1546799""]","[]","[""article_exact""]",direct catalog exact,telecom_catalog_direct
+electrical_exact_021,electrical_article,full,article_column,Блок распределения питания PDU Ippon Basic 1 U,1546798,pdu,exact,"[""1546798""]","[]","[""article_exact""]",direct catalog exact,telecom_catalog_direct
+electrical_exact_022,electrical_article,full,article_column,Блок распределения питания PDU Ippon Meter,1546800,pdu,exact,"[""1546800""]","[]","[""article_exact""]",direct catalog exact,telecom_catalog_direct
+electrical_exact_023,electrical_article,smoke,article_column,SKAT TB Panel 1U-G Панель заглушка 19 1U серая,4467,rack_blank_panel,exact,"[""4467""]","[]","[""article_exact""]",direct catalog exact,telecom_catalog_direct
+electrical_exact_024,electrical_article,full,article_column,SKAT TB Panel 2U-B Панель заглушка 19 2U черная,4470,rack_blank_panel,exact,"[""4470""]","[]","[""article_exact""]",direct catalog exact,telecom_catalog_direct
+electrical_exact_025,electrical_article,full,article_column,SKAT TB Panel 2U-G Панель заглушка 19 2U серая,4468,rack_blank_panel,exact,"[""4468""]","[]","[""article_exact""]",direct catalog exact,telecom_catalog_direct
+electrical_exact_026,electrical_article,full,article_column,Connect Коннектор RJ45 категория 6 UTP,CJ545U,rj45_connector,exact,"[""CJ545U""]","[]","[""article_exact""]",direct catalog exact,telecom_catalog_direct
+electrical_exact_027,electrical_article,full,article_column,Connect Коннектор RJ45 категория 6 FTP экранированный металл,CJ645FM,rj45_connector,exact,"[""CJ645FM""]","[]","[""article_exact""]",direct catalog exact,telecom_catalog_direct
+electrical_exact_028,electrical_article,full,article_column,Розетка Минск RJ-45 1-местная СП белая,ERK01-035-10,rj45_outlet,exact,"[""ERK01-035-10""]","[]","[""article_exact""]",direct catalog exact,telecom_catalog_direct
+electrical_exact_029,electrical_article,full,article_column,Валенсия розетка компьютерная RJ-45 2-местная кремовая,EWK02-035-20,rj45_outlet,exact,"[""EWK02-035-20""]","[]","[""article_exact""]",direct catalog exact,telecom_catalog_direct
+electrical_exact_030,electrical_article,full,article_column,Розетка компьютерная одноместная RJ-45 серия Эрна черный Stekker,39475,rj45_outlet,exact,"[""39475""]","[]","[""article_exact""]",direct catalog exact,telecom_catalog_direct
+electrical_exact_031,electrical_article,full,article_column,Розетка RJ-45 категория 6 Viva 1 модуль серая,45158,rj45_outlet,exact,"[""45158""]","[]","[""article_exact""]",direct catalog exact,telecom_catalog_direct
+electrical_exact_032,electrical_article,full,name_only,Крышка на лоток 100 мм L=3000мм с заземлением,,rack_accessory_strict,exact,"[""35522""]","[]","[""name_exact"",""normalized_name_exact""]",direct name exact,telecom_catalog_direct
+electrical_exact_033,electrical_article,full,name_only,Крышка с заземлением на лоток осн.200 L3000,,rack_accessory_strict,exact,"[""35524""]","[]","[""name_exact"",""normalized_name_exact""]",direct name exact,telecom_catalog_direct
+electrical_exact_034,electrical_article,full,name_only,Перегородка SEP L3000 Н50,,rack_accessory_strict,exact,"[""36480""]","[]","[""name_exact"",""normalized_name_exact""]",direct name exact,telecom_catalog_direct
+electrical_exact_035,electrical_article,full,name_only,Консоль универсальная основание 200 мм,,rack_accessory_strict,exact,"[""BBN5020""]","[]","[""name_exact"",""normalized_name_exact""]",direct name exact,telecom_catalog_direct
+electrical_exact_036,electrical_article,full,name_only,Металлорукав DN 20мм в ПВХ изоляции D внутренний 20.5 мм D наружный 25.5 50 м цветчерный,,cable,exact,"[""6071R-020N""]","[]","[""name_exact"",""normalized_name_exact""]",direct name exact,telecom_catalog_direct
+electrical_exact_037,electrical_article,full,name_only,Блок распределения питания PDU Ippon Basic 0U,,pdu,exact,"[""1546799""]","[]","[""name_exact"",""normalized_name_exact""]",direct name exact,telecom_catalog_direct
+electrical_exact_038,electrical_article,full,name_only,SKAT TB Panel 1U-G Панель заглушка 19 1U серая,,rack_blank_panel,exact,"[""4467""]","[]","[""name_exact"",""normalized_name_exact""]",direct name exact,telecom_catalog_direct
+electrical_exact_039,electrical_article,full,name_only,Connect Коннектор RJ45 категория 6 FTP экранированный металл,,rj45_connector,exact,"[""CJ645FM""]","[]","[""name_exact"",""normalized_name_exact""]",direct name exact,telecom_catalog_direct
+electrical_exact_040,electrical_article,full,name_only,Розетка компьютерная одноместная RJ-45 серия Эрна черный Stekker,,rj45_outlet,exact,"[""39475""]","[]","[""name_exact"",""normalized_name_exact""]",direct name exact,telecom_catalog_direct
+rack_review_041,rack_accessory,smoke,article_in_text,Лоток 50х100 L3000 артикул 35262,,rack_accessory_strict,review,"[]","[""35262""]","[]",short article collision,adversarial_short_article
+rack_review_042,rack_accessory,smoke,article_in_text,Лоток 50х200 L3000 артикул 35264,,rack_accessory_strict,review,"[]","[""35264""]","[]",short article collision,adversarial_short_article
+rack_review_043,rack_accessory,smoke,article_in_text,Пластина для заземления PTCE артикул 37501,,grounding,review,"[]","[""37501""]","[""article_series_local""]",series match should stay review,result_20260322_054148#18
+rack_review_044,rack_accessory,full,article_in_text,Соединительная пластина GTO артикул 37301,,rack_accessory_strict,review,"[]","[]","[]",known unresolved rack item,result_20260322_054148#17
+rack_review_045,rack_accessory,smoke,article_in_text,Держатель оцинкованный D=25-26 артикул 53344,,rack_accessory_strict,review,"[]","[]","[]",holder should not auto-accept via wrong family,result_20260322_054148#33
+rack_review_046,rack_accessory,smoke,article_in_text,Ответвитель DL 200x50 артикул 36238K,,rack_accessory_strict,review,"[]","[]","[]",dimension-sensitive rack item,result_20260322_054148#25
+rack_review_047,rack_accessory,full,article_in_text,Угол CPO 90 горизонтальный 100x50 артикул 36782K,,rack_accessory_strict,review,"[]","[""36782K""]","[]",wrong subtype should not accept article,synthetic_subtype_mismatch
+rack_review_048,rack_accessory,full,article_in_text,Ответвитель DL 100x50 артикул 36002K,,rack_accessory_strict,review,"[]","[""36002K""]","[]",wrong subtype should not accept article,synthetic_subtype_mismatch
+rack_review_049,rack_accessory,full,article_in_text,Консоль универсальная основание 200 мм артикул 36480,,rack_accessory_strict,review,"[]","[""36480""]","[]",wrong subtype should not accept article,synthetic_subtype_mismatch
+rack_review_050,rack_accessory,full,article_in_text,Держатель D=25-26 артикул CM401040,,rack_accessory_strict,review,"[]","[""CM401040""]","[]",holder must not become anchor,synthetic_family_conflict
+rack_review_051,rack_accessory,full,article_in_text,Ответвитель DL 200x50 артикул 36235K,,rack_accessory_strict,review,"[]","[""36235K""]","[]",wrong size same subtype,synthetic_dimension_mismatch
+rack_review_052,rack_accessory,full,article_in_text,Угол CD 90 внешний 100x50 артикул 36784K,,rack_accessory_strict,review,"[]","[""36784K""]","[]",wrong size same subtype,synthetic_dimension_mismatch
+rack_review_053,rack_accessory,full,name_only,Система кабельных лотков,,non_item,non_target,"[]","[]","[]",section-like row,synthetic_non_target
+rack_review_054,rack_accessory,full,name_only,Крепеж и аксессуары,,non_item,non_target,"[]","[]","[]",section-like row,synthetic_non_target
+rack_review_055,rack_accessory,full,name_only,Угол CD 90 вертикальный внешний 90 градусов 100/50 в комплекте с крепежными элементами и соединительными пластинами,,rack_accessory_strict,exact,"[""36782K""]","[]","[""name_exact"",""normalized_name_exact""]",direct name exact,telecom_catalog_direct
+rack_review_056,rack_accessory,full,name_only,Ответвитель DL 100х50 в комплекте с крепежными элементами и соединительными пластинами необходимыми для монтажа,,rack_accessory_strict,exact,"[""36235K""]","[]","[""name_exact"",""normalized_name_exact""]",direct name exact,telecom_catalog_direct
+rack_review_057,rack_accessory,full,name_only,Профиль П-образный PSL L400 толщина 1.5мм,,rack_accessory_strict,exact,"[""BPL2904""]","[]","[""name_exact"",""normalized_name_exact""]",direct name exact,telecom_catalog_direct
+rack_review_058,rack_accessory,full,name_only,Комплект крепежный для стальных хомутов винт-шуруп и дюбель,,fastener,review,"[]","[]","[]",should stay review until proven,synthetic_review_policy
+rack_review_059,rack_accessory,full,article_in_text,Пластина для заземления PTCE артикул 37301,,grounding,review,"[]","[""37301""]","[]",wrong article for PTCE,synthetic_series_collision
+rack_review_060,rack_accessory,full,article_in_text,Соединительная пластина GTO артикул 37501,,rack_accessory_strict,review,"[]","[""37501""]","[]",wrong article for GTO,synthetic_series_collision
+rack_review_061,rack_accessory,full,article_in_text,Консоль 200 мм артикул 35262,,rack_accessory_strict,review,"[]","[""35262""]","[]",tray short article collision,synthetic_short_article
+rack_review_062,rack_accessory,full,article_in_text,Крышка лотка 200 мм артикул 35264,,rack_accessory_strict,review,"[]","[""35264""]","[]",tray short article collision,synthetic_short_article
+rack_review_063,rack_accessory,full,article_in_text,Угол CD 90 внешний 200x50 артикул 36002K,,rack_accessory_strict,review,"[]","[""36002K""]","[]",wrong family article should not pass,synthetic_subtype_mismatch
+rack_review_064,rack_accessory,full,article_in_text,Ответвитель DL 100x50 артикул 36782K,,rack_accessory_strict,review,"[]","[""36782K""]","[]",wrong family article should not pass,synthetic_subtype_mismatch
+rack_review_065,rack_accessory,full,name_only,Раздел аксессуары для трасс,,non_item,non_target,"[]","[]","[]",section-like row,synthetic_non_target
+telecom_case_066,telecom_semantic,smoke,name_only,Измерительный блок распределения питания PDU в стойку,,pdu,review,"[]","[]","[]",semantic pdu row should not blindly auto-accept,result_20260304_161307#2
+telecom_case_067,telecom_semantic,smoke,name_only,Горизонтальный кабельный органайзер 19 в шкаф,,rack_accessory_strict,review,"[]","[]","[]",semantic rack accessory should stay review,result_20260304_161307#4
+telecom_case_068,telecom_semantic,smoke,name_only,Щеточный ввод для ввода кабеля,,rack_accessory_strict,review,"[]","[]","[]",semantic rack accessory should stay review,result_20260304_161307#6
+telecom_case_069,telecom_semantic,smoke,name_only,Панель-заглушка свободных юнитов 1U-8U,,rack_blank_panel,review,"[]","[]","[]",semantic rack blank panel should stay review,result_20260304_161307#8
+telecom_case_070,telecom_semantic,smoke,name_only,Вертикальный блок розеток PDU Zero U,,pdu,catalog_gap,"[]","[]","[]",known unresolved pdu zero u,result_20260304_161307#10
+telecom_case_071,telecom_semantic,smoke,name_only,Вертикальный кабельный органайзер Zero U,,rack_accessory_strict,catalog_gap,"[]","[]","[]",known unresolved rack accessory,result_20260304_161307#7
+telecom_case_072,telecom_semantic,full,name_only,Панель коммутационная неэкранированная 24 порта блочная категория 6,,patch_panel,catalog_gap,"[]","[]","[]",known patch panel gap,result_20260304_161307#22
+telecom_case_073,telecom_semantic,full,name_only,Панель коммутационная экранированная 24 порта блочная категория 6а,,patch_panel,catalog_gap,"[]","[]","[]",known patch panel gap,result_20260304_161307#23
+telecom_case_074,telecom_semantic,full,name_only,Панель коммутационная неэкранированная 24 порта наборная категория 6,,patch_panel,catalog_gap,"[]","[]","[]",known patch panel gap,result_20260304_161307#24
+telecom_case_075,telecom_semantic,full,name_only,Панель коммутационная экранированная 24 порта наборная категория 6а,,patch_panel,catalog_gap,"[]","[]","[]",known patch panel gap,result_20260304_161307#25
+telecom_case_076,telecom_semantic,full,name_only,Модуль Keystone неэкранированный категория 6,,keystone,catalog_gap,"[]","[]","[]",known keystone gap,result_20260304_161307#26
+telecom_case_077,telecom_semantic,full,name_only,Модуль Keystone экранированный категория 6,,keystone,catalog_gap,"[]","[]","[]",known keystone gap,result_20260304_161307#27
+telecom_case_078,telecom_semantic,full,name_only,Модуль Keystone неэкранированный категория 6a,,keystone,catalog_gap,"[]","[]","[]",known keystone gap,result_20260304_161307#28
+telecom_case_079,telecom_semantic,full,name_only,Модуль Keystone экранированный категория 6a,,keystone,catalog_gap,"[]","[]","[]",known keystone gap,result_20260304_161307#29
+telecom_case_080,telecom_semantic,full,name_only,Коннектор RJ-45 неэкранированный категория 6,,rj45_connector,review,"[]","[]","[]",semantic connector should stay review,result_20260304_161307#30
+telecom_case_081,telecom_semantic,full,name_only,Коннектор RJ-45 экранированный категория 6,,rj45_connector,review,"[]","[]","[]",semantic connector should stay review,result_20260304_161307#31
+telecom_case_082,telecom_semantic,full,name_only,Коннектор RJ-45 неэкранированный категория 6a,,rj45_connector,catalog_gap,"[]","[]","[]",known connector gap,result_20260304_161307#32
+telecom_case_083,telecom_semantic,full,name_only,Коннектор RJ-45 экранированный категория 6a,,rj45_connector,catalog_gap,"[]","[]","[]",known connector gap,result_20260304_161307#33
+telecom_case_084,telecom_semantic,full,name_only,Конструктив сетевой розетки для одного порта RJ-45 в кабель-канал в сборе,,rj45_outlet,review,"[]","[]","[]",semantic outlet should stay review,result_20260304_161307#34
+telecom_case_085,telecom_semantic,full,name_only,Конструктив сетевой розетки для одного порта RJ-45 в настенную коробку в сборе,,rj45_outlet,review,"[]","[]","[]",semantic outlet should stay review,result_20260304_161307#35
+telecom_case_086,telecom_semantic,full,name_only,Конструктив сетевой розетки для одного порта RJ-45 в лючок напольный в сборе,,rj45_outlet,review,"[]","[]","[]",semantic outlet should stay review,result_20260304_161307#36
+telecom_case_087,telecom_semantic,full,name_only,Конструктив сетевой розетки для двух портов RJ-45 в кабель-канал в сборе,,rj45_outlet,review,"[]","[]","[]",semantic outlet should stay review,result_20260304_161307#37
+telecom_case_088,telecom_semantic,full,name_only,Конструктив сетевой розетки для двух портов RJ-45 в настенную коробку в сборе,,rj45_outlet,review,"[]","[]","[]",semantic outlet should stay review,result_20260304_161307#38
+telecom_case_089,telecom_semantic,full,name_only,Конструктив сетевой розетки для двух портов RJ-45 в лючок напольный в сборе,,rj45_outlet,catalog_gap,"[]","[]","[]",known outlet gap,result_20260304_161307#39
+telecom_case_090,telecom_semantic,full,name_only,Полка консольная 1U 19,,rack_accessory_strict,review,"[]","[]","[]",semantic rack shelf should stay review,result_20260304_161307#11
+adversarial_091,adversarial,smoke,name_only,Наименование оборудования материалов и кабелей,,non_item,non_target,"[]","[]","[]",header-like row,synthetic_non_target
+adversarial_092,adversarial,smoke,name_only,ОБОРУДОВАНИЕ,,non_item,non_target,"[]","[]","[]",section row,synthetic_non_target
+adversarial_093,adversarial,smoke,name_only,СКС,,non_item,non_target,"[]","[]","[]",section row,synthetic_non_target
+adversarial_094,adversarial,smoke,name_only,Шкафы телекоммуникационные,,non_item,non_target,"[]","[]","[]",section row,synthetic_non_target
+adversarial_095,adversarial,full,name_only,Раздел 1,,non_item,non_target,"[]","[]","[]",section row,synthetic_non_target
+adversarial_096,adversarial,full,name_only,Сетевая инфраструктура,,non_item,non_target,"[]","[]","[]",section row,synthetic_non_target
+adversarial_097,adversarial,full,name_only,ПО Сервер Орион Про,,software,review,"[]","[]","[]",software should not turn into hardware,synthetic_software
+adversarial_098,adversarial,full,name_only,ПО Мониторинга Орион Про,,software,review,"[]","[]","[]",software should not turn into hardware,synthetic_software
+adversarial_099,adversarial,full,name_only,АРМ СПЗ,,monitoring_hw,review,"[]","[]","[]",abstract workstation row should stay review,synthetic_review_policy
+adversarial_100,adversarial,full,name_only,Монитор 27,,monitoring_hw,review,"[]","[]","[]",generic monitor should stay review,synthetic_review_policy
+adversarial_101,adversarial,full,name_only,Блок контроля и индикации,,monitoring_hw,review,"[]","[]","[]",ambiguous hardware row should stay review,synthetic_review_policy
+adversarial_102,adversarial,full,name_only,Заглушка для управления потоком воздуха,,airflow_blanking_panel,review,"[]","[]","[]",known false-positive-prone row,synthetic_review_policy
+adversarial_103,adversarial,full,article_in_text,Держатель D=25-26 артикул 53344,,rack_accessory_strict,review,"[]","[]","[]",holder versus wheel blocker,synthetic_holder_vs_wheel
+adversarial_104,adversarial,full,article_in_text,Лоток 100x50 L3000 артикул 35262,,rack_accessory_strict,review,"[]","[""35262""]","[]",lamp collision blocker,synthetic_short_article
+adversarial_105,adversarial,full,article_in_text,Пластина PTCE артикул 37501,,grounding,review,"[]","[""37501""]","[""article_series_local""]",series collision blocker,synthetic_series_collision
+adversarial_106,adversarial,full,name_only,Кабель ВВГнг(A)-LS 4x1.5,,cable,review,"[]","[]","[]",designation mismatch should not auto-accept,synthetic_cable_mismatch
+adversarial_107,adversarial,full,name_only,Кабель ВВГнг(A)-LS 2x1.5,,cable,review,"[]","[]","[]",designation mismatch should not auto-accept,synthetic_cable_mismatch
+adversarial_108,adversarial,full,name_only,Вертикальный блок розеток PDU Zero U,,pdu,review,"[]","[]","[]",form factor ambiguity should stay review,synthetic_pdu_mismatch
+adversarial_109,adversarial,full,name_only,Розетка RJ-45 для кабель-канала,,rj45_outlet,review,"[]","[]","[]",generic outlet row should stay review,synthetic_review_policy
+adversarial_110,adversarial,full,name_only,Датчик температуры температуры влажности,,sensor,review,"[]","[]","[]",sensor row should stay review,synthetic_sensor_review
+catalog_gap_111,catalog_gap,full,name_only,Оптический патч-корд LC-LC duplex OS2 2м,,optical_patch_cord,catalog_gap,"[]","[]","[]",known optical gap,telecom_gap
+catalog_gap_112,catalog_gap,full,name_only,Оптический патч-корд LC-LC duplex OS2 3м,,optical_patch_cord,catalog_gap,"[]","[]","[]",known optical gap,telecom_gap
+catalog_gap_113,catalog_gap,full,name_only,Оптический патч-корд LC-LC duplex OS2 5м,,optical_patch_cord,catalog_gap,"[]","[]","[]",known optical gap,telecom_gap
+catalog_gap_114,catalog_gap,full,name_only,Оптический патч-корд LC-LC duplex OS2 15м,,optical_patch_cord,catalog_gap,"[]","[]","[]",known optical gap,telecom_gap
+catalog_gap_115,catalog_gap,full,name_only,Оптический кросс на 24 волокна 1U укомплектованный,,optical_cross,catalog_gap,"[]","[]","[]",known optical gap,telecom_gap
+catalog_gap_116,catalog_gap,full,name_only,Оптический кросс на 36 волокон 1U укомплектованный,,optical_cross,catalog_gap,"[]","[]","[]",known optical gap,telecom_gap
+catalog_gap_117,catalog_gap,full,name_only,Оптический кросс на 96 волокон 2U укомплектованный,,optical_cross,catalog_gap,"[]","[]","[]",known optical gap,telecom_gap
+catalog_gap_118,catalog_gap,full,name_only,Панель коммутационная экранированная 24 порта наборная категория 6а,,patch_panel,catalog_gap,"[]","[]","[]",known patch panel gap,telecom_gap
+catalog_gap_119,catalog_gap,full,name_only,Конструктив сетевой розетки для двух портов RJ-45 в лючок напольный в сборе,,rj45_outlet,catalog_gap,"[]","[]","[]",known outlet gap,telecom_gap
+catalog_gap_120,catalog_gap,full,name_only,Панель для управления потоком воздуха 1U 8U,,airflow_blanking_panel,catalog_gap,"[]","[]","[]",known airflow gap,telecom_gap

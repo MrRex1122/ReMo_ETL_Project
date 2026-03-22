@@ -52,6 +52,7 @@ matcher_cache.db
 *.xls
 *.csv
 !price_clean.csv
+!tests/fixtures/golden_match_cases.csv
 
 # Logs
 *.log
