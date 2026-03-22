@@ -68,6 +68,11 @@ from config import (
     get_matcher_skip_weak_shortlist,
 )
 from match_diagnostics import build_match_diagnostics_payload, infer_reason_class
+from query_parser import (
+    detect_query_row_type as shared_detect_query_row_type,
+    extract_query_article_from_text as shared_extract_query_article_from_text,
+    parse_query_spec as shared_parse_query_spec,
+)
 from taxonomy_registry import (
     allowed_cross_family_pairs as registry_allowed_cross_family_pairs,
     audit_family_groups as registry_audit_family_groups,
@@ -3507,6 +3512,19 @@ class ReMoMatcher:
         features["markers"] = dict(features["attributes"])
         return features
 
+    def _detect_query_row_type(self, text: str) -> str:
+        return shared_detect_query_row_type(text, getattr(self, "taxonomy_rules", {}))
+
+    def _extract_query_article_from_text(self, query: str) -> str:
+        return shared_extract_query_article_from_text(query)
+
+    def _extract_query_features(self, query: str) -> Dict[str, Any]:
+        parsed = shared_parse_query_spec(query, taxonomy_rules=getattr(self, "taxonomy_rules", {}))
+        features = parsed.to_feature_dict()
+        if features.get("branch_hint") == "прочее":
+            features["branch_hint"] = ""
+        return features
+
     def _rank_branches(self, query_features: Dict[str, Any]) -> List[Dict[str, Any]]:
         scores: Dict[str, float] = defaultdict(float)
         normalized = query_features.get("normalized_text", "")
@@ -3948,6 +3966,9 @@ class ReMoMatcher:
             "article_lookup_hit": bool(article_lookup_hit),
             "article_lookup_conflict": bool(article_lookup_conflict),
             "article_validation_status": self._clean_text_value((query_features or {}).get("article_validation_status")),
+            "parser_source": self._clean_text_value((query_features or {}).get("parser_source")) or "legacy",
+            "parsed_article_in_text": self._clean_text_value((query_features or {}).get("extracted_article")),
+            "designation_signature": self._clean_text_value((query_features or {}).get("designation_signature")),
             "row_type": row_type,
             "entity_type": entity_type,
             "query_family": query_family,

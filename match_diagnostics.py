@@ -390,6 +390,9 @@ def apply_match_diagnostics_to_result_dataframe(
     resolver_confidence_column = "Уверенность резолвера"
     family_confidence_column = "Уверенность family"
     article_validation_column = "Статус article validation"
+    parser_source_column = "Parser source"
+    parsed_article_column = "Parsed article"
+    designation_signature_column = "Designation signature"
     gemini_route_column = "Gemini route"
     gemini_validation_column = "Gemini validation"
     secondary_filter_column = "Правила secondary filter"
@@ -401,6 +404,9 @@ def apply_match_diagnostics_to_result_dataframe(
         resolver_confidence_column,
         family_confidence_column,
         article_validation_column,
+        parser_source_column,
+        parsed_article_column,
+        designation_signature_column,
         gemini_route_column,
         gemini_validation_column,
         secondary_filter_column,
@@ -432,6 +438,9 @@ def apply_match_diagnostics_to_result_dataframe(
         df_result.at[dataframe_index, resolver_confidence_column] = round(_safe_float(row.get("resolver_confidence")), 4)
         df_result.at[dataframe_index, family_confidence_column] = round(_safe_float(row.get("family_confidence")), 4)
         df_result.at[dataframe_index, article_validation_column] = _clean_text_value(row.get("article_validation_status"))
+        df_result.at[dataframe_index, parser_source_column] = _clean_text_value(row.get("parser_source"))
+        df_result.at[dataframe_index, parsed_article_column] = _clean_text_value(row.get("parsed_article_in_text"))
+        df_result.at[dataframe_index, designation_signature_column] = _clean_text_value(row.get("designation_signature"))
         df_result.at[dataframe_index, gemini_route_column] = bool(row.get("gemini_route_used"))
         df_result.at[dataframe_index, gemini_validation_column] = bool(row.get("gemini_validation_used"))
         df_result.at[dataframe_index, secondary_filter_column] = ", ".join(
