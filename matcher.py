@@ -900,12 +900,50 @@ class ReMoMatcher:
         query_features["active_resolver_path"] = resolver_path
         return resolver_path
 
+    def _fallback_resolver_path_for_query(self, query_features: Dict[str, Any]) -> str:
+        query_family = self._entity_family(query_features.get("entity_type", ""))
+        taxonomy_rules = self._runtime_taxonomy_rules()
+        normalized_query = self._normalize_text(
+            query_features.get("original_text")
+            or query_features.get("original_query")
+            or query_features.get("query_text")
+            or ""
+        )
+        domain_match = registry_infer_domain_match(
+            normalized_query,
+            entity_family=query_family,
+            rules=taxonomy_rules,
+        )
+        domain_label = self._clean_text_value(domain_match.get("label")).lower()
+        domain_confidence = float(domain_match.get("confidence") or 0.0)
+        query_article = self._normalize_article_lookup_value(query_features.get("query_article"))
+        has_dimensions = bool(
+            query_features.get("dimension_pairs")
+            or query_features.get("dimension_triples")
+            or query_features.get("dimension_lengths")
+            or query_features.get("dimension_diameters")
+        )
+        if query_family == "software" or normalized_query.startswith("по ") or (domain_label == "software" and domain_confidence >= 0.5):
+            return "software_review_resolver"
+        if query_family == "sensor" or (domain_label == "monitoring_hw" and "датчик" in normalized_query and domain_confidence >= 0.5):
+            return "sensor_review_resolver"
+        if query_family == "monitoring_hw" or (
+            any(token in normalized_query for token in {"арм", "индикац", "контрол"})
+            or (
+            domain_label in {"monitoring_hw", "monitor_display"} and domain_confidence >= 0.5
+            )
+        ):
+            return "monitoring_review_resolver"
+        if (query_article or "артикул" in normalized_query) and has_dimensions and domain_label in {"tray", ""}:
+            return "series_review_resolver"
+        return "fallback_resolver"
+
     def _cached_result_resolver_path(self, query_features: Dict[str, Any]) -> str:
         if self._should_use_rack_tray_resolver(query_features):
             return "rack_tray_resolver"
         query_family = self._entity_family(query_features.get("entity_type", ""))
         if query_family in {"other", "sensor", "software", "monitoring_hw"}:
-            return "fallback_resolver"
+            return self._fallback_resolver_path_for_query(query_features)
         if self._clean_text_value(query_features.get("row_type")) == "item" and self._is_telecom_family(query_family):
             return "telecom_semantic_resolver"
         return "semantic_resolver"

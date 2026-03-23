@@ -302,6 +302,118 @@ class NormalizedMatchTests(unittest.TestCase):
 
         self.assertEqual(resolver_path, "fallback_resolver")
 
+    def test_cached_result_resolver_path_uses_series_review_for_short_article_dimensions(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "other",
+                "query_article": "35262",
+                "dimension_pairs": ["50x100"],
+                "dimension_lengths": ["3000"],
+                "original_query": "Лоток 50х100 L3000 артикул 35262",
+            }
+        )
+
+        self.assertEqual(resolver_path, "series_review_resolver")
+
+    def test_cached_result_resolver_path_uses_software_review_for_software_family(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "software",
+            }
+        )
+
+        self.assertEqual(resolver_path, "software_review_resolver")
+
+    def test_cached_result_resolver_path_uses_software_review_for_software_domain(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "other",
+                "original_query": "ПО Сервер Орион Про",
+            }
+        )
+
+        self.assertEqual(resolver_path, "software_review_resolver")
+
+    def test_cached_result_resolver_path_uses_monitoring_review_for_monitoring_family(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "monitoring_hw",
+            }
+        )
+
+        self.assertEqual(resolver_path, "monitoring_review_resolver")
+
+    def test_cached_result_resolver_path_uses_monitoring_review_for_monitor_domain(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "other",
+                "original_query": "Монитор 27",
+            }
+        )
+
+        self.assertEqual(resolver_path, "monitoring_review_resolver")
+
+    def test_cached_result_resolver_path_uses_monitoring_review_for_monitoring_keywords(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "other",
+                "original_query": "Блок контроля и индикации",
+            }
+        )
+
+        self.assertEqual(resolver_path, "monitoring_review_resolver")
+
+    def test_cached_result_resolver_path_uses_sensor_review_for_sensor_family(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "sensor",
+            }
+        )
+
+        self.assertEqual(resolver_path, "sensor_review_resolver")
+
+    def test_cached_result_resolver_path_uses_sensor_review_for_sensor_domain(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "other",
+                "original_query": "Датчик температуры и влажности",
+            }
+        )
+
+        self.assertEqual(resolver_path, "sensor_review_resolver")
+
     @unittest.skip("Legacy encoding fixture is unstable; covered by explicit unicode regression below.")
     def test_match_uses_article_designation_exact_for_cable_signature(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)

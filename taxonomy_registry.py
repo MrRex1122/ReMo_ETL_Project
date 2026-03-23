@@ -676,6 +676,42 @@ DEFAULT_VERIFIER_POLICY: Dict[str, Dict[str, Any]] = {
         "compatible_default_decision": "review",
         "default_review_reason": "review_generic_semantic_match",
     },
+    "series_review_resolver": {
+        "auto_accept_sources": [],
+        "review_sources": [
+            "compatible_local_fallback",
+            "assembly_possible_local_fallback",
+        ],
+        "compatible_default_decision": "review",
+        "default_review_reason": "review_series_or_short_article_match",
+    },
+    "software_review_resolver": {
+        "auto_accept_sources": [],
+        "review_sources": [
+            "compatible_local_fallback",
+            "assembly_possible_local_fallback",
+        ],
+        "compatible_default_decision": "review",
+        "default_review_reason": "review_software_or_license_match",
+    },
+    "monitoring_review_resolver": {
+        "auto_accept_sources": [],
+        "review_sources": [
+            "compatible_local_fallback",
+            "assembly_possible_local_fallback",
+        ],
+        "compatible_default_decision": "review",
+        "default_review_reason": "review_monitoring_hw_match",
+    },
+    "sensor_review_resolver": {
+        "auto_accept_sources": [],
+        "review_sources": [
+            "compatible_local_fallback",
+            "assembly_possible_local_fallback",
+        ],
+        "compatible_default_decision": "review",
+        "default_review_reason": "review_sensor_match",
+    },
     "fallback_resolver": {
         "auto_accept_sources": [],
         "review_sources": [
