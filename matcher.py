@@ -723,11 +723,14 @@ class ReMoMatcher:
         if normalized in {
             "article_exact",
             "article_extracted_exact",
-            "article_designation_exact",
-            "designation_exact",
             "article_series_local",
         }:
             return "article_resolver"
+        if normalized in {
+            "article_designation_exact",
+            "designation_exact",
+        }:
+            return "cable_designation_resolver"
         if normalized in {"name_exact", "normalized_name_exact"}:
             return "direct_exact_resolver"
         if normalized in {"local_tree+gemini", "candidate_tiebreaker_gemini"}:
@@ -1048,7 +1051,7 @@ class ReMoMatcher:
                 "",
                 "Техническое обозначение кабеля из строки точно сопоставлено с номенклатурой каталога.",
             )
-            result["resolver_path"] = "article_resolver"
+            result["resolver_path"] = self._resolver_path_for_source(result.get("resolution_source")) or "cable_designation_resolver"
             return {
                 "result": result,
                 "article_lookup_hit": article_lookup_hit,
