@@ -290,6 +290,9 @@ def _is_unresolved(actual: dict[str, Any]) -> bool:
 
 
 def is_auto_accept_result(case: dict[str, Any], actual: dict[str, Any]) -> bool:
+    verifier_decision = _clean_text(actual.get("verifier_decision")).lower()
+    if verifier_decision:
+        return verifier_decision == "auto_accept"
     resolver_name = _clean_text(actual.get("resolver_name"))
     requires_review = _clean_text(actual.get("requires_review")).lower()
     compatibility_status = _clean_text(actual.get("compatibility_status"))
@@ -377,6 +380,7 @@ def _per_case_record(
         "found_article": _result_value(result_row, "Артикул"),
         "resolver_name": _result_value(result_row, "Резолвер") or _result_value(result_row, "Источник решения"),
         "resolver_path": _clean_text(diagnostics_row.get("resolver_path")),
+        "verifier_decision": _clean_text(diagnostics_row.get("verifier_decision") or _result_value(result_row, "Verifier decision")),
         "compatibility_status": _result_value(result_row, "Совместимость решения"),
         "requires_review": _result_value(result_row, "Требует проверки"),
         "pipeline_stage": _result_value(result_row, "Этап отказа"),
@@ -416,6 +420,7 @@ def _per_case_record(
         "actual_query_family": actual["query_family"],
         "resolver_name": actual["resolver_name"],
         "resolver_path": actual["resolver_path"],
+        "verifier_decision": actual["verifier_decision"],
         "resolver_confidence": round(actual["resolver_confidence"], 4),
         "family_confidence": round(actual["family_confidence"], 4),
         "compatibility_status": actual["compatibility_status"],

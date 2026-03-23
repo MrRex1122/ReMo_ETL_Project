@@ -735,6 +735,46 @@ class ReMoMatcher:
         return ""
 
     @staticmethod
+    def _auto_accept_resolution_sources() -> set[str]:
+        return {
+            "article_exact",
+            "article_extracted_exact",
+            "article_designation_exact",
+            "name_exact",
+            "normalized_name_exact",
+        }
+
+    @staticmethod
+    def _is_reject_result_payload(result: Dict[str, Any]) -> bool:
+        resolution_source = str(result.get("resolution_source") or "").strip()
+        compatibility_status = str(result.get("compatibility_status") or "").strip()
+        return (
+            resolution_source == "unresolved"
+            or compatibility_status.startswith("unresolved")
+            or compatibility_status.startswith("rejected_")
+            or not bool(result.get("success", True))
+        )
+
+    def _verifier_decision_for_result(self, result: Dict[str, Any]) -> str:
+        if self._is_reject_result_payload(result):
+            return "reject"
+        compatibility_status = str(result.get("compatibility_status") or "").strip()
+        if compatibility_status != "compatible":
+            return "review"
+        requires_review = self._clean_text_value(result.get("requires_review")).lower()
+        if requires_review == "да":
+            return "review"
+        resolution_source = str(result.get("resolution_source") or "").strip()
+        if resolution_source in self._auto_accept_resolution_sources():
+            return "auto_accept"
+        return "review"
+
+    def _apply_verifier_decision(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        result["verifier_decision"] = self._verifier_decision_for_result(result)
+        result["auto_accept"] = result["verifier_decision"] == "auto_accept"
+        return result
+
+    @staticmethod
     def _is_rack_tray_family(entity_family: str) -> bool:
         normalized = str(entity_family or "").strip()
         return normalized in {
@@ -749,6 +789,33 @@ class ReMoMatcher:
         if self._clean_text_value(query_features.get("row_type")) != "item":
             return False
         return self._is_rack_tray_family(self._entity_family(query_features.get("entity_type", "")))
+
+    def _is_telecom_family(self, entity_family: str) -> bool:
+        normalized_family = self._clean_text_value(entity_family)
+        if not normalized_family:
+            return False
+        default_branches = registry_family_default_branches(
+            normalized_family,
+            getattr(self, "taxonomy_rules", {}),
+        )
+        for branch in default_branches:
+            normalized_branch = self._normalize_text(self._clean_text_value(branch))
+            if normalized_branch.startswith("телеком"):
+                return True
+        return False
+
+    def _semantic_resolver_path_for_query(self, query_features: Dict[str, Any]) -> str:
+        if self._should_use_rack_tray_resolver(query_features):
+            return "rack_tray_resolver"
+        query_family = self._entity_family(query_features.get("entity_type", ""))
+        if self._clean_text_value(query_features.get("row_type")) == "item" and self._is_telecom_family(query_family):
+            return "telecom_semantic_resolver"
+        return "semantic_resolver"
+
+    def _activate_semantic_resolver_path(self, query_features: Dict[str, Any]) -> str:
+        resolver_path = self._semantic_resolver_path_for_query(query_features)
+        query_features["active_resolver_path"] = resolver_path
+        return resolver_path
 
     def _typed_candidate_pool_for_rack_tray(
         self,
@@ -4315,6 +4382,8 @@ class ReMoMatcher:
             "resolver_name": resolver_source,
             "resolver_path": resolver_path,
             "resolver_confidence": float(result.get("similarity_score") or 0.0),
+            "verifier_decision": str(result.get("verifier_decision") or ""),
+            "auto_accept": bool(result.get("auto_accept")),
             "compatibility_status": str(result.get("compatibility_status") or ""),
             "incompatibility_reason": str(result.get("incompatibility_reason") or ""),
             "stage_of_failure": stage_of_failure,
@@ -5148,6 +5217,7 @@ class ReMoMatcher:
             }
 
         def _finalize(result: Dict[str, Any], *, stage_of_failure: str, reason_code: str) -> Dict[str, Any]:
+            result = self._apply_verifier_decision(dict(result))
             trace_steps_with_final = list(trace_steps)
             trace_steps_with_final.append(
                 {
@@ -5477,6 +5547,7 @@ class ReMoMatcher:
             }:
                 return _finalize(preferred_result, stage_of_failure="resolved", reason_code="resolved")
 
+            self._activate_semantic_resolver_path(query_features)
             ranked_branches = self._rank_branches(query_features)
             query_features["ranked_branches"] = ranked_branches
             branch_paths = [entry["path"] for entry in ranked_branches if entry.get("path")]
@@ -6149,6 +6220,8 @@ class ReMoMatcher:
             "Этап отказа",
             "Код причины",
             "Класс причины",
+            "Verifier decision",
+            "Auto accept",
             "Gemini shortlist",
             "Gemini visible candidates",
             "Gemini truncated",
@@ -6245,6 +6318,8 @@ class ReMoMatcher:
             df.at[idx, "Источник решения"] = result.get("resolution_source")
             df.at[idx, "Совместимость решения"] = result.get("compatibility_status")
             df.at[idx, "Причина несовместимости"] = result.get("incompatibility_reason")
+            df.at[idx, "Verifier decision"] = result.get("verifier_decision")
+            df.at[idx, "Auto accept"] = bool(result.get("auto_accept"))
             df.at[idx, "Этап отказа"] = result.get("stage_of_failure")
             df.at[idx, "Код причины"] = result.get("reason_code")
             df.at[idx, "Класс причины"] = result.get("reason_class")

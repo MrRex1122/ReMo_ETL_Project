@@ -153,6 +153,25 @@ class BenchmarkScoringTests(unittest.TestCase):
         self.assertNotIn("article_series_local", AUTO_ACCEPT_RESOLVERS)
         self.assertFalse(is_auto_accept_result(case, actual))
 
+    def test_verifier_decision_takes_precedence_for_auto_accept(self):
+        case = {
+            "expected_outcome": "review",
+            "expected_articles": [],
+            "forbidden_articles": [],
+            "allowed_resolvers": [],
+        }
+        actual = {
+            "found_name": "Крышка на лоток 100 мм L=3000мм с заземлением",
+            "found_article": "35522",
+            "resolver_name": "article_exact",
+            "verifier_decision": "review",
+            "compatibility_status": "compatible",
+            "requires_review": "нет",
+            "pipeline_stage": "resolved",
+            "root_cause_code": "resolved",
+        }
+        self.assertFalse(is_auto_accept_result(case, actual))
+
 
 if __name__ == "__main__":
     unittest.main()

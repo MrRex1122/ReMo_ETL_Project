@@ -1177,6 +1177,26 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.assertEqual(features["entity_type"], "rack_accessory_strict")
         self.assertTrue(self.matcher._should_use_rack_tray_resolver(features))
 
+    def test_semantic_resolver_path_uses_telecom_resolver_for_patch_panel_family(self):
+        features = self.matcher._extract_query_features(
+            "Панель коммутационная неэкранированная 24 порта блочная категория 6"
+        )
+
+        self.assertEqual(features["entity_type"], "patch_panel")
+        self.assertEqual(
+            self.matcher._semantic_resolver_path_for_query(features),
+            "telecom_semantic_resolver",
+        )
+
+    def test_semantic_resolver_path_uses_generic_semantic_for_non_telecom_cable(self):
+        features = self.matcher._extract_query_features("Кабель ВВГнг(A)-LS 4x6")
+
+        self.assertEqual(features["entity_type"], "cable")
+        self.assertEqual(
+            self.matcher._semantic_resolver_path_for_query(features),
+            "semantic_resolver",
+        )
+
     def test_typed_candidate_pool_sets_rack_tray_resolver_path(self):
         self.matcher._match_strictness_for_query = lambda _features: "strict"
         self.matcher._should_use_whole_category_retrieval = lambda _features: False

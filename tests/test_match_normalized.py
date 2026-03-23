@@ -96,7 +96,9 @@ class NormalizedMatchTests(unittest.TestCase):
         self.assertEqual(result["article"], "ART-100")
         self.assertEqual(result["resolution_source"], "article_exact")
         self.assertEqual(result["resolver_path"], "article_resolver")
+        self.assertEqual(result["verifier_decision"], "auto_accept")
         self.assertEqual(result["diagnostic_trace"]["resolver_path"], "article_resolver")
+        self.assertEqual(result["diagnostic_trace"]["verifier_decision"], "auto_accept")
         self.assertTrue(result["diagnostic_trace"]["article_lookup_hit"])
         self.assertTrue(result["diagnostic_trace"]["article_lookup_conflict"])
         self.assertEqual(result["diagnostic_trace"]["query_article"], "ART-100")
@@ -451,7 +453,9 @@ class NormalizedMatchTests(unittest.TestCase):
         self.assertEqual(result["article"], "ERK01-035-10")
         self.assertEqual(result["resolution_source"], "article_exact")
         self.assertEqual(result["resolver_path"], "direct_exact_resolver")
+        self.assertEqual(result["verifier_decision"], "auto_accept")
         self.assertEqual(result["diagnostic_trace"]["resolver_path"], "direct_exact_resolver")
+        self.assertEqual(result["diagnostic_trace"]["verifier_decision"], "auto_accept")
 
     def test_match_promotes_cache_hit_with_matching_input_article_to_article_exact(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
