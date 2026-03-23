@@ -92,6 +92,8 @@ from taxonomy_registry import (
     infer_domain_match as registry_infer_domain_match,
     is_whole_category_family as registry_is_whole_category_family,
     load_registry_taxonomy_rules,
+    verifier_auto_accept_sources as registry_verifier_auto_accept_sources,
+    verifier_compatible_default_decision as registry_verifier_compatible_default_decision,
 )
 
 logging.basicConfig(
@@ -735,16 +737,6 @@ class ReMoMatcher:
         return ""
 
     @staticmethod
-    def _auto_accept_resolution_sources() -> set[str]:
-        return {
-            "article_exact",
-            "article_extracted_exact",
-            "article_designation_exact",
-            "name_exact",
-            "normalized_name_exact",
-        }
-
-    @staticmethod
     def _is_reject_result_payload(result: Dict[str, Any]) -> bool:
         resolution_source = str(result.get("resolution_source") or "").strip()
         compatibility_status = str(result.get("compatibility_status") or "").strip()
@@ -755,7 +747,24 @@ class ReMoMatcher:
             or not bool(result.get("success", True))
         )
 
-    def _verifier_decision_for_result(self, result: Dict[str, Any]) -> str:
+    def _effective_resolver_path_for_result(
+        self,
+        result: Dict[str, Any],
+        query_features: Dict[str, Any] | None = None,
+    ) -> str:
+        return str(
+            result.get("resolver_path")
+            or (query_features or {}).get("active_resolver_path")
+            or self._resolver_path_for_source(result.get("resolution_source"))
+            or ""
+        )
+
+    def _verifier_decision_for_result(
+        self,
+        result: Dict[str, Any],
+        *,
+        resolver_path: str = "",
+    ) -> str:
         if self._is_reject_result_payload(result):
             return "reject"
         compatibility_status = str(result.get("compatibility_status") or "").strip()
@@ -764,13 +773,31 @@ class ReMoMatcher:
         requires_review = self._clean_text_value(result.get("requires_review")).lower()
         if requires_review == "да":
             return "review"
+        active_resolver_path = self._clean_text_value(resolver_path)
         resolution_source = str(result.get("resolution_source") or "").strip()
-        if resolution_source in self._auto_accept_resolution_sources():
+        taxonomy_rules = self._runtime_taxonomy_rules()
+        auto_accept_sources = registry_verifier_auto_accept_sources(
+            taxonomy_rules,
+            active_resolver_path,
+        )
+        if resolution_source in auto_accept_sources:
             return "auto_accept"
-        return "review"
+        return registry_verifier_compatible_default_decision(
+            taxonomy_rules,
+            active_resolver_path,
+            default="review",
+        )
 
-    def _apply_verifier_decision(self, result: Dict[str, Any]) -> Dict[str, Any]:
-        result["verifier_decision"] = self._verifier_decision_for_result(result)
+    def _apply_verifier_decision(
+        self,
+        result: Dict[str, Any],
+        query_features: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        result["resolver_path"] = self._effective_resolver_path_for_result(result, query_features)
+        result["verifier_decision"] = self._verifier_decision_for_result(
+            result,
+            resolver_path=str(result.get("resolver_path") or ""),
+        )
         result["auto_accept"] = result["verifier_decision"] == "auto_accept"
         return result
 
@@ -1059,7 +1086,7 @@ class ReMoMatcher:
             exact_source = self._exact_resolution_source_for_item(query_text, query_article, article_source, exact_match) or "name_exact"
             exact_score = self._exact_resolution_score(exact_source)
             result = self._build_result_from_item(exact_match, exact_score, exact_source, False, "", "")
-            result["resolver_path"] = "direct_exact_resolver"
+            result["resolver_path"] = self._resolver_path_for_source(exact_source) or "direct_exact_resolver"
             return result, {"item": exact_match, "score": exact_score, "lexical_score": exact_score}
 
         normalized_match = self._lookup_catalog_item_by_normalized_name(normalized_query)
@@ -1079,7 +1106,7 @@ class ReMoMatcher:
                 "",
                 "",
             )
-            result["resolver_path"] = "direct_exact_resolver"
+            result["resolver_path"] = self._resolver_path_for_source(exact_source) or "direct_exact_resolver"
             return result, {"item": normalized_match, "score": exact_score, "lexical_score": exact_score}
 
         local_direct = self._try_local_semantic_match(query_text)
@@ -1094,7 +1121,7 @@ class ReMoMatcher:
             if matched_item and direct_source:
                 direct_score = self._exact_resolution_score(direct_source)
                 result = self._build_result_from_item(matched_item, direct_score, direct_source, False, "", "")
-                result["resolver_path"] = "direct_exact_resolver"
+                result["resolver_path"] = self._resolver_path_for_source(direct_source) or "direct_exact_resolver"
                 return result, {"item": matched_item, "score": direct_score, "lexical_score": direct_score}
             result = dict(local_direct)
             result["resolver_path"] = "direct_exact_resolver"
@@ -1664,6 +1691,14 @@ class ReMoMatcher:
         except Exception as exc:
             logger.warning("Failed to load taxonomy rules from %s: %s", path, exc)
             return load_registry_taxonomy_rules(base_rules=DEFAULT_TAXONOMY_RULES)
+
+    def _runtime_taxonomy_rules(self) -> Dict[str, Any]:
+        rules = getattr(self, "taxonomy_rules", None)
+        if isinstance(rules, dict) and rules:
+            return rules
+        loaded = self._load_taxonomy_rules()
+        self.taxonomy_rules = loaded
+        return loaded
 
     def _load_prompt_template(self) -> str:
         path_raw = os.getenv("REMO_MATCH_PROMPT_TEMPLATE_PATH")
@@ -5217,7 +5252,7 @@ class ReMoMatcher:
             }
 
         def _finalize(result: Dict[str, Any], *, stage_of_failure: str, reason_code: str) -> Dict[str, Any]:
-            result = self._apply_verifier_decision(dict(result))
+            result = self._apply_verifier_decision(dict(result), query_features=query_features)
             trace_steps_with_final = list(trace_steps)
             trace_steps_with_final.append(
                 {

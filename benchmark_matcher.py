@@ -455,12 +455,15 @@ def _per_case_record(
 def _summary_frame(df: pd.DataFrame, *, group_column: str) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame()
+    prepared = df.copy()
+    prepared["_correct_auto_accept"] = prepared["auto_accept"] & prepared["benchmark_pass"]
     grouped = (
-        df.groupby(group_column, dropna=False)
+        prepared.groupby(group_column, dropna=False)
         .agg(
             cases=("case_id", "count"),
             passed=("benchmark_pass", "sum"),
             auto_accepts=("auto_accept", "sum"),
+            correct_auto_accepts=("_correct_auto_accept", "sum"),
             false_positives=("failure_bucket", lambda values: int(sum(value == "false_positive" for value in values))),
             false_negatives=("failure_bucket", lambda values: int(sum(value == "false_negative" for value in values))),
         )
@@ -468,9 +471,10 @@ def _summary_frame(df: pd.DataFrame, *, group_column: str) -> pd.DataFrame:
     )
     grouped["pass_rate"] = (grouped["passed"] / grouped["cases"]).round(4)
     grouped["auto_accept_precision"] = grouped.apply(
-        lambda row: round(row["passed"] / row["auto_accepts"], 4) if row["auto_accepts"] else None,
+        lambda row: round(row["correct_auto_accepts"] / row["auto_accepts"], 4) if row["auto_accepts"] else None,
         axis=1,
     )
+    grouped = grouped.drop(columns=["correct_auto_accepts"])
     return grouped
 
 
@@ -587,6 +591,7 @@ def run_benchmark(
 
     per_case_df = pd.DataFrame(per_case_records)
     resolver_summary_df = _summary_frame(per_case_df, group_column="resolver_name")
+    resolver_path_summary_df = _summary_frame(per_case_df, group_column="resolver_path")
     family_summary_df = _summary_frame(per_case_df, group_column="expected_family")
     suite_summary_df = _summary_frame(per_case_df, group_column="suite")
     false_positive_df = per_case_df[per_case_df["failure_bucket"] == "false_positive"].copy()
@@ -611,6 +616,7 @@ def run_benchmark(
         "suite_summary": suite_summary_df.to_dict(orient="records"),
         "family_summary": family_summary_df.to_dict(orient="records"),
         "resolver_summary": resolver_summary_df.to_dict(orient="records"),
+        "resolver_path_summary": resolver_path_summary_df.to_dict(orient="records"),
     }
 
     _write_json(output_dir / "summary.json", summary_payload)
@@ -620,6 +626,7 @@ def run_benchmark(
 
     per_case_df.to_csv(output_dir / "per_case.csv", index=False, encoding="utf-8-sig")
     resolver_summary_df.to_csv(output_dir / "resolver_summary.csv", index=False, encoding="utf-8-sig")
+    resolver_path_summary_df.to_csv(output_dir / "resolver_path_summary.csv", index=False, encoding="utf-8-sig")
     family_summary_df.to_csv(output_dir / "family_summary.csv", index=False, encoding="utf-8-sig")
     suite_summary_df.to_csv(output_dir / "suite_summary.csv", index=False, encoding="utf-8-sig")
     false_positive_df.to_csv(output_dir / "false_positives.csv", index=False, encoding="utf-8-sig")

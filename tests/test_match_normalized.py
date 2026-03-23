@@ -2,6 +2,7 @@ import threading
 import unittest
 
 from matcher import ReMoMatcher
+from taxonomy_registry import load_registry_taxonomy_rules
 
 
 class NormalizedMatchTests(unittest.TestCase):
@@ -153,6 +154,24 @@ class NormalizedMatchTests(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertEqual(result["article"], "36480")
         self.assertEqual(result["resolution_source"], "article_exact")
+
+    def test_verifier_policy_uses_resolver_path_not_only_resolution_source(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        result = matcher._apply_verifier_decision(
+            {
+                "success": True,
+                "resolution_source": "name_exact",
+                "compatibility_status": "compatible",
+                "requires_review": "нет",
+                "resolver_path": "telecom_semantic_resolver",
+            }
+        )
+
+        self.assertEqual(result["resolver_path"], "telecom_semantic_resolver")
+        self.assertEqual(result["verifier_decision"], "review")
+        self.assertFalse(result["auto_accept"])
 
     @unittest.skip("Legacy encoding fixture is unstable; covered by explicit unicode regression below.")
     def test_match_uses_article_designation_exact_for_cable_signature(self):
@@ -452,9 +471,9 @@ class NormalizedMatchTests(unittest.TestCase):
 
         self.assertEqual(result["article"], "ERK01-035-10")
         self.assertEqual(result["resolution_source"], "article_exact")
-        self.assertEqual(result["resolver_path"], "direct_exact_resolver")
+        self.assertEqual(result["resolver_path"], "article_resolver")
         self.assertEqual(result["verifier_decision"], "auto_accept")
-        self.assertEqual(result["diagnostic_trace"]["resolver_path"], "direct_exact_resolver")
+        self.assertEqual(result["diagnostic_trace"]["resolver_path"], "article_resolver")
         self.assertEqual(result["diagnostic_trace"]["verifier_decision"], "auto_accept")
 
     def test_match_promotes_cache_hit_with_matching_input_article_to_article_exact(self):

@@ -615,6 +615,48 @@ DEFAULT_GEMINI_POLICY: Dict[str, Any] = {
     },
 }
 
+DEFAULT_VERIFIER_POLICY: Dict[str, Dict[str, Any]] = {
+    "default": {
+        "auto_accept_sources": [],
+        "compatible_default_decision": "review",
+    },
+    "article_resolver": {
+        "auto_accept_sources": [
+            "article_exact",
+            "article_extracted_exact",
+            "article_designation_exact",
+        ],
+        "compatible_default_decision": "review",
+    },
+    "direct_exact_resolver": {
+        "auto_accept_sources": [
+            "name_exact",
+            "normalized_name_exact",
+        ],
+        "compatible_default_decision": "review",
+    },
+    "rack_tray_resolver": {
+        "auto_accept_sources": [],
+        "compatible_default_decision": "review",
+    },
+    "telecom_semantic_resolver": {
+        "auto_accept_sources": [],
+        "compatible_default_decision": "review",
+    },
+    "semantic_resolver": {
+        "auto_accept_sources": [],
+        "compatible_default_decision": "review",
+    },
+    "fallback_resolver": {
+        "auto_accept_sources": [],
+        "compatible_default_decision": "review",
+    },
+    "reject_resolver": {
+        "auto_accept_sources": [],
+        "compatible_default_decision": "reject",
+    },
+}
+
 DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
     "audited_families": [
         "airflow_blanking_panel",
@@ -686,6 +728,7 @@ DEFAULT_TAXONOMY_EXTENSIONS: Dict[str, Any] = {
     "family_registry": DEFAULT_FAMILY_REGISTRY,
     "domain_registry": DEFAULT_DOMAIN_REGISTRY,
     "gemini_policy": DEFAULT_GEMINI_POLICY,
+    "verifier_policy": DEFAULT_VERIFIER_POLICY,
     "audit_scope": DEFAULT_AUDIT_SCOPE,
 }
 
@@ -881,6 +924,40 @@ def gemini_policy_value(
     gemini_policy = ((rules or {}).get("gemini_policy", {}) or {}).get(policy_name, {}) or {}
     value = gemini_policy.get(field_name)
     return default if value is None else value
+
+
+def verifier_policy_for_resolver(
+    rules: Mapping[str, Any] | None,
+    resolver_path: str,
+) -> Dict[str, Any]:
+    root = (rules or {}).get("verifier_policy", {}) or {}
+    default_policy = dict(root.get("default", {}) or {})
+    resolver_policy = dict(root.get(clean_registry_text(resolver_path), {}) or {})
+    return merge_registry_dicts(default_policy, resolver_policy)
+
+
+def verifier_auto_accept_sources(
+    rules: Mapping[str, Any] | None,
+    resolver_path: str,
+) -> set[str]:
+    policy = verifier_policy_for_resolver(rules, resolver_path)
+    return {
+        clean_registry_text(item)
+        for item in (policy.get("auto_accept_sources", []) or [])
+        if clean_registry_text(item)
+    }
+
+
+def verifier_compatible_default_decision(
+    rules: Mapping[str, Any] | None,
+    resolver_path: str,
+    default: str = "review",
+) -> str:
+    policy = verifier_policy_for_resolver(rules, resolver_path)
+    decision = clean_registry_text(policy.get("compatible_default_decision")).lower()
+    if decision in {"auto_accept", "review", "reject"}:
+        return decision
+    return default
 
 
 def _patterns_match(text: str, patterns: Iterable[str]) -> int:

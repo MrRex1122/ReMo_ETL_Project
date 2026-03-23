@@ -5,6 +5,7 @@ from benchmark_matcher import (
     AUTO_ACCEPT_RESOLVERS,
     DEFAULT_FIXTURE_PATH,
     FIXTURE_COLUMNS,
+    _summary_frame,
     build_benchmark_input_dataframe,
     is_auto_accept_result,
     load_golden_cases,
@@ -171,6 +172,41 @@ class BenchmarkScoringTests(unittest.TestCase):
             "root_cause_code": "resolved",
         }
         self.assertFalse(is_auto_accept_result(case, actual))
+
+    def test_summary_frame_uses_only_correct_auto_accepts_for_precision(self):
+        import pandas as pd
+
+        df = pd.DataFrame(
+            [
+                {
+                    "case_id": "a",
+                    "suite": "demo",
+                    "benchmark_pass": True,
+                    "auto_accept": True,
+                    "failure_bucket": "",
+                },
+                {
+                    "case_id": "b",
+                    "suite": "demo",
+                    "benchmark_pass": True,
+                    "auto_accept": False,
+                    "failure_bucket": "",
+                },
+                {
+                    "case_id": "c",
+                    "suite": "demo",
+                    "benchmark_pass": False,
+                    "auto_accept": True,
+                    "failure_bucket": "false_positive",
+                },
+            ]
+        )
+
+        summary = _summary_frame(df, group_column="suite")
+
+        self.assertEqual(summary.at[0, "auto_accepts"], 2)
+        self.assertEqual(summary.at[0, "passed"], 2)
+        self.assertEqual(summary.at[0, "auto_accept_precision"], 0.5)
 
 
 if __name__ == "__main__":
