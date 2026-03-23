@@ -193,6 +193,25 @@ class NormalizedMatchTests(unittest.TestCase):
         self.assertEqual(result["verifier_reason"], "review_telecom_component_match")
         self.assertFalse(result["auto_accept"])
 
+    def test_verifier_policy_uses_panel_resolver_review_reason(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        result = matcher._apply_verifier_decision(
+            {
+                "success": True,
+                "resolution_source": "name_exact",
+                "compatibility_status": "compatible",
+                "requires_review": "Ð½ÐµÑ‚",
+                "resolver_path": "telecom_panel_resolver",
+            }
+        )
+
+        self.assertEqual(result["resolver_path"], "telecom_panel_resolver")
+        self.assertEqual(result["verifier_decision"], "review")
+        self.assertEqual(result["verifier_reason"], "review_telecom_panel_match")
+        self.assertFalse(result["auto_accept"])
+
     def test_verifier_policy_marks_rack_tray_fallback_as_review_only(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
         matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
@@ -442,7 +461,7 @@ class NormalizedMatchTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(resolver_path, "telecom_component_resolver")
+        self.assertEqual(resolver_path, "telecom_outlet_resolver")
 
     def test_cached_result_resolver_path_uses_telecom_infra_resolver_for_pdu_family(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
@@ -456,6 +475,32 @@ class NormalizedMatchTests(unittest.TestCase):
         )
 
         self.assertEqual(resolver_path, "telecom_infra_resolver")
+
+    def test_cached_result_resolver_path_uses_telecom_panel_resolver_for_patch_panel_family(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "patch_panel",
+            }
+        )
+
+        self.assertEqual(resolver_path, "telecom_panel_resolver")
+
+    def test_cached_result_resolver_path_uses_telecom_connector_resolver_for_rj45_connector_family(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "rj45_connector",
+            }
+        )
+
+        self.assertEqual(resolver_path, "telecom_connector_resolver")
 
     def test_cached_result_resolver_path_uses_software_review_for_software_family(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)

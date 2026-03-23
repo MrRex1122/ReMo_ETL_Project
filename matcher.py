@@ -886,7 +886,14 @@ class ReMoMatcher:
                 return "reject_rack_tray_family_gate"
             if normalized_reason in no_compatible_reasons:
                 return "reject_rack_tray_no_compatible_candidates"
-        if normalized_path in {"telecom_semantic_resolver", "telecom_component_resolver", "telecom_infra_resolver"}:
+        if normalized_path in {
+            "telecom_semantic_resolver",
+            "telecom_component_resolver",
+            "telecom_panel_resolver",
+            "telecom_connector_resolver",
+            "telecom_outlet_resolver",
+            "telecom_infra_resolver",
+        }:
             if normalized_reason == "non_target_family":
                 return "reject_telecom_non_target_family"
             if normalized_reason in no_compatible_reasons:
@@ -966,13 +973,24 @@ class ReMoMatcher:
             "rj45_outlet",
         }
 
+    @staticmethod
+    def _telecom_component_resolver_path_for_family(entity_family: str) -> str:
+        normalized = str(entity_family or "").strip()
+        if normalized == "patch_panel":
+            return "telecom_panel_resolver"
+        if normalized == "rj45_connector":
+            return "telecom_connector_resolver"
+        if normalized in {"keystone", "rj45_outlet"}:
+            return "telecom_outlet_resolver"
+        return "telecom_component_resolver"
+
     def _semantic_resolver_path_for_query(self, query_features: Dict[str, Any]) -> str:
         if self._should_use_rack_tray_resolver(query_features):
             return self._rack_tray_semantic_resolver_path_for_query(query_features)
         query_family = self._entity_family(query_features.get("entity_type", ""))
         if self._clean_text_value(query_features.get("row_type")) == "item" and self._is_telecom_family(query_family):
             if self._is_telecom_component_family(query_family):
-                return "telecom_component_resolver"
+                return self._telecom_component_resolver_path_for_family(query_family)
             return "telecom_infra_resolver"
         return "semantic_resolver"
 
@@ -1027,7 +1045,7 @@ class ReMoMatcher:
             return self._fallback_resolver_path_for_query(query_features)
         if self._clean_text_value(query_features.get("row_type")) == "item" and self._is_telecom_family(query_family):
             if self._is_telecom_component_family(query_family):
-                return "telecom_component_resolver"
+                return self._telecom_component_resolver_path_for_family(query_family)
             return "telecom_infra_resolver"
         return "semantic_resolver"
 
