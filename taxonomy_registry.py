@@ -666,10 +666,18 @@ DEFAULT_VERIFIER_POLICY: Dict[str, Dict[str, Any]] = {
     },
     "semantic_resolver": {
         "auto_accept_sources": [],
+        "review_sources": [
+            "local_tree+gemini",
+            "candidate_tiebreaker_gemini",
+        ],
         "compatible_default_decision": "review",
     },
     "fallback_resolver": {
         "auto_accept_sources": [],
+        "review_sources": [
+            "compatible_local_fallback",
+            "assembly_possible_local_fallback",
+        ],
         "compatible_default_decision": "review",
     },
     "reject_resolver": {

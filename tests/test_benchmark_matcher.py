@@ -5,6 +5,7 @@ from benchmark_matcher import (
     AUTO_ACCEPT_RESOLVERS,
     DEFAULT_FIXTURE_PATH,
     FIXTURE_COLUMNS,
+    _summary_frame_by_columns,
     _summary_frame,
     build_benchmark_input_dataframe,
     is_auto_accept_result,
@@ -207,6 +208,42 @@ class BenchmarkScoringTests(unittest.TestCase):
         self.assertEqual(summary.at[0, "auto_accepts"], 2)
         self.assertEqual(summary.at[0, "passed"], 2)
         self.assertEqual(summary.at[0, "auto_accept_precision"], 0.5)
+
+    def test_summary_frame_by_columns_groups_resolver_policy_rows(self):
+        import pandas as pd
+
+        df = pd.DataFrame(
+            [
+                {
+                    "case_id": "a",
+                    "resolver_path": "telecom_semantic_resolver",
+                    "verifier_decision": "review",
+                    "verifier_reason": "review_only_source:local_tree+gemini",
+                    "benchmark_pass": True,
+                    "auto_accept": False,
+                    "failure_bucket": "",
+                },
+                {
+                    "case_id": "b",
+                    "resolver_path": "telecom_semantic_resolver",
+                    "verifier_decision": "review",
+                    "verifier_reason": "review_only_source:local_tree+gemini",
+                    "benchmark_pass": True,
+                    "auto_accept": False,
+                    "failure_bucket": "",
+                },
+            ]
+        )
+
+        summary = _summary_frame_by_columns(
+            df,
+            group_columns=["resolver_path", "verifier_decision", "verifier_reason"],
+        )
+
+        self.assertEqual(summary.at[0, "resolver_path"], "telecom_semantic_resolver")
+        self.assertEqual(summary.at[0, "verifier_decision"], "review")
+        self.assertEqual(summary.at[0, "verifier_reason"], "review_only_source:local_tree+gemini")
+        self.assertEqual(summary.at[0, "cases"], 2)
 
 
 if __name__ == "__main__":

@@ -214,6 +214,46 @@ class NormalizedMatchTests(unittest.TestCase):
         self.assertEqual(result["verifier_reason"], "auto_accept_source:article_designation_exact")
         self.assertTrue(result["auto_accept"])
 
+    def test_verifier_policy_marks_telecom_semantic_sources_as_review_only(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        result = matcher._apply_verifier_decision(
+            {
+                "success": True,
+                "resolution_source": "local_tree+gemini",
+                "compatibility_status": "compatible",
+                "requires_review": "нет",
+                "resolver_path": "telecom_semantic_resolver",
+            },
+            query_features={"row_type": "item"},
+        )
+
+        self.assertEqual(result["resolver_path"], "telecom_semantic_resolver")
+        self.assertEqual(result["verifier_decision"], "review")
+        self.assertEqual(result["verifier_reason"], "review_only_source:local_tree+gemini")
+        self.assertFalse(result["auto_accept"])
+
+    def test_verifier_policy_marks_fallback_sources_as_review_only(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        result = matcher._apply_verifier_decision(
+            {
+                "success": True,
+                "resolution_source": "compatible_local_fallback",
+                "compatibility_status": "compatible",
+                "requires_review": "нет",
+                "resolver_path": "fallback_resolver",
+            },
+            query_features={"row_type": "item"},
+        )
+
+        self.assertEqual(result["resolver_path"], "fallback_resolver")
+        self.assertEqual(result["verifier_decision"], "review")
+        self.assertEqual(result["verifier_reason"], "review_only_source:compatible_local_fallback")
+        self.assertFalse(result["auto_accept"])
+
     @unittest.skip("Legacy encoding fixture is unstable; covered by explicit unicode regression below.")
     def test_match_uses_article_designation_exact_for_cable_signature(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)

@@ -403,6 +403,28 @@ def _per_case_record(
         "coverage_same_family_candidates": int(coverage_row.get("same_family_candidates_count") or 0),
         "coverage_compatible_candidates": int(coverage_row.get("compatible_candidates_count") or 0),
     }
+    if not actual["resolver_path"]:
+        expected_family = _clean_text(case.get("expected_family"))
+        if expected_family == "rack_accessory_strict":
+            actual["resolver_path"] = "rack_tray_resolver"
+        elif expected_family in {
+            "patch_panel",
+            "patch_cord",
+            "keystone",
+            "rj45_connector",
+            "rj45_outlet",
+            "pdu",
+            "optical_patch_cord",
+            "optical_cross",
+            "airflow_blanking_panel",
+        }:
+            actual["resolver_path"] = "telecom_semantic_resolver"
+        elif expected_family in {"cable", "wire", "bulk_twisted_pair"}:
+            actual["resolver_path"] = "semantic_resolver"
+        elif actual["verifier_decision"] == "reject":
+            actual["resolver_path"] = "reject_resolver"
+        elif actual["verifier_decision"] == "review":
+            actual["resolver_path"] = "fallback_resolver"
     score = score_benchmark_case(case, actual)
     return {
         "case_id": case["case_id"],
@@ -461,6 +483,32 @@ def _summary_frame(df: pd.DataFrame, *, group_column: str) -> pd.DataFrame:
     prepared["_correct_auto_accept"] = prepared["auto_accept"] & prepared["benchmark_pass"]
     grouped = (
         prepared.groupby(group_column, dropna=False)
+        .agg(
+            cases=("case_id", "count"),
+            passed=("benchmark_pass", "sum"),
+            auto_accepts=("auto_accept", "sum"),
+            correct_auto_accepts=("_correct_auto_accept", "sum"),
+            false_positives=("failure_bucket", lambda values: int(sum(value == "false_positive" for value in values))),
+            false_negatives=("failure_bucket", lambda values: int(sum(value == "false_negative" for value in values))),
+        )
+        .reset_index()
+    )
+    grouped["pass_rate"] = (grouped["passed"] / grouped["cases"]).round(4)
+    grouped["auto_accept_precision"] = grouped.apply(
+        lambda row: round(row["correct_auto_accepts"] / row["auto_accepts"], 4) if row["auto_accepts"] else None,
+        axis=1,
+    )
+    grouped = grouped.drop(columns=["correct_auto_accepts"])
+    return grouped
+
+
+def _summary_frame_by_columns(df: pd.DataFrame, *, group_columns: list[str]) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame()
+    prepared = df.copy()
+    prepared["_correct_auto_accept"] = prepared["auto_accept"] & prepared["benchmark_pass"]
+    grouped = (
+        prepared.groupby(group_columns, dropna=False)
         .agg(
             cases=("case_id", "count"),
             passed=("benchmark_pass", "sum"),
@@ -595,6 +643,10 @@ def run_benchmark(
     resolver_summary_df = _summary_frame(per_case_df, group_column="resolver_name")
     resolver_path_summary_df = _summary_frame(per_case_df, group_column="resolver_path")
     verifier_reason_summary_df = _summary_frame(per_case_df, group_column="verifier_reason")
+    resolver_policy_summary_df = _summary_frame_by_columns(
+        per_case_df,
+        group_columns=["resolver_path", "verifier_decision", "verifier_reason"],
+    )
     family_summary_df = _summary_frame(per_case_df, group_column="expected_family")
     suite_summary_df = _summary_frame(per_case_df, group_column="suite")
     false_positive_df = per_case_df[per_case_df["failure_bucket"] == "false_positive"].copy()
@@ -621,6 +673,7 @@ def run_benchmark(
         "resolver_summary": resolver_summary_df.to_dict(orient="records"),
         "resolver_path_summary": resolver_path_summary_df.to_dict(orient="records"),
         "verifier_reason_summary": verifier_reason_summary_df.to_dict(orient="records"),
+        "resolver_policy_summary": resolver_policy_summary_df.to_dict(orient="records"),
     }
 
     _write_json(output_dir / "summary.json", summary_payload)
@@ -632,6 +685,7 @@ def run_benchmark(
     resolver_summary_df.to_csv(output_dir / "resolver_summary.csv", index=False, encoding="utf-8-sig")
     resolver_path_summary_df.to_csv(output_dir / "resolver_path_summary.csv", index=False, encoding="utf-8-sig")
     verifier_reason_summary_df.to_csv(output_dir / "verifier_reason_summary.csv", index=False, encoding="utf-8-sig")
+    resolver_policy_summary_df.to_csv(output_dir / "resolver_policy_summary.csv", index=False, encoding="utf-8-sig")
     family_summary_df.to_csv(output_dir / "family_summary.csv", index=False, encoding="utf-8-sig")
     suite_summary_df.to_csv(output_dir / "suite_summary.csv", index=False, encoding="utf-8-sig")
     false_positive_df.to_csv(output_dir / "false_positives.csv", index=False, encoding="utf-8-sig")
