@@ -618,6 +618,8 @@ DEFAULT_GEMINI_POLICY: Dict[str, Any] = {
 DEFAULT_VERIFIER_POLICY: Dict[str, Dict[str, Any]] = {
     "default": {
         "auto_accept_sources": [],
+        "review_sources": [],
+        "reject_row_types": ["section"],
         "compatible_default_decision": "review",
     },
     "article_resolver": {
@@ -625,6 +627,9 @@ DEFAULT_VERIFIER_POLICY: Dict[str, Dict[str, Any]] = {
             "article_exact",
             "article_extracted_exact",
             "article_designation_exact",
+        ],
+        "review_sources": [
+            "article_series_local",
         ],
         "compatible_default_decision": "review",
     },
@@ -637,10 +642,20 @@ DEFAULT_VERIFIER_POLICY: Dict[str, Dict[str, Any]] = {
     },
     "rack_tray_resolver": {
         "auto_accept_sources": [],
+        "review_sources": [
+            "compatible_local_fallback",
+            "local_tree+gemini",
+            "candidate_tiebreaker_gemini",
+        ],
         "compatible_default_decision": "review",
     },
     "telecom_semantic_resolver": {
         "auto_accept_sources": [],
+        "review_sources": [
+            "compatible_local_fallback",
+            "local_tree+gemini",
+            "candidate_tiebreaker_gemini",
+        ],
         "compatible_default_decision": "review",
     },
     "semantic_resolver": {
@@ -944,6 +959,30 @@ def verifier_auto_accept_sources(
     return {
         clean_registry_text(item)
         for item in (policy.get("auto_accept_sources", []) or [])
+        if clean_registry_text(item)
+    }
+
+
+def verifier_review_sources(
+    rules: Mapping[str, Any] | None,
+    resolver_path: str,
+) -> set[str]:
+    policy = verifier_policy_for_resolver(rules, resolver_path)
+    return {
+        clean_registry_text(item)
+        for item in (policy.get("review_sources", []) or [])
+        if clean_registry_text(item)
+    }
+
+
+def verifier_reject_row_types(
+    rules: Mapping[str, Any] | None,
+    resolver_path: str,
+) -> set[str]:
+    policy = verifier_policy_for_resolver(rules, resolver_path)
+    return {
+        clean_registry_text(item).lower()
+        for item in (policy.get("reject_row_types", []) or [])
         if clean_registry_text(item)
     }
 

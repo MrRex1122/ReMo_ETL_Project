@@ -94,6 +94,8 @@ from taxonomy_registry import (
     load_registry_taxonomy_rules,
     verifier_auto_accept_sources as registry_verifier_auto_accept_sources,
     verifier_compatible_default_decision as registry_verifier_compatible_default_decision,
+    verifier_reject_row_types as registry_verifier_reject_row_types,
+    verifier_review_sources as registry_verifier_review_sources,
 )
 
 logging.basicConfig(
@@ -759,34 +761,49 @@ class ReMoMatcher:
             or ""
         )
 
-    def _verifier_decision_for_result(
+    def _verifier_evaluation_for_result(
         self,
         result: Dict[str, Any],
         *,
         resolver_path: str = "",
-    ) -> str:
+        query_features: Dict[str, Any] | None = None,
+    ) -> Tuple[str, str]:
         if self._is_reject_result_payload(result):
-            return "reject"
+            return "reject", "reject_payload"
+        taxonomy_rules = self._runtime_taxonomy_rules()
+        row_type = self._clean_text_value((query_features or {}).get("row_type")).lower()
+        active_resolver_path = self._clean_text_value(resolver_path)
+        reject_row_types = registry_verifier_reject_row_types(
+            taxonomy_rules,
+            active_resolver_path,
+        )
+        if row_type and row_type in reject_row_types:
+            return "reject", f"reject_row_type:{row_type}"
         compatibility_status = str(result.get("compatibility_status") or "").strip()
         if compatibility_status != "compatible":
-            return "review"
+            return "review", f"compatibility:{compatibility_status or 'unknown'}"
         requires_review = self._clean_text_value(result.get("requires_review")).lower()
         if requires_review == "да":
-            return "review"
-        active_resolver_path = self._clean_text_value(resolver_path)
+            return "review", "requires_review_flag"
         resolution_source = str(result.get("resolution_source") or "").strip()
-        taxonomy_rules = self._runtime_taxonomy_rules()
         auto_accept_sources = registry_verifier_auto_accept_sources(
             taxonomy_rules,
             active_resolver_path,
         )
         if resolution_source in auto_accept_sources:
-            return "auto_accept"
-        return registry_verifier_compatible_default_decision(
+            return "auto_accept", f"auto_accept_source:{resolution_source}"
+        review_sources = registry_verifier_review_sources(
+            taxonomy_rules,
+            active_resolver_path,
+        )
+        if resolution_source in review_sources:
+            return "review", f"review_only_source:{resolution_source}"
+        decision = registry_verifier_compatible_default_decision(
             taxonomy_rules,
             active_resolver_path,
             default="review",
         )
+        return decision, f"default_{decision}"
 
     def _apply_verifier_decision(
         self,
@@ -794,10 +811,13 @@ class ReMoMatcher:
         query_features: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         result["resolver_path"] = self._effective_resolver_path_for_result(result, query_features)
-        result["verifier_decision"] = self._verifier_decision_for_result(
+        verifier_decision, verifier_reason = self._verifier_evaluation_for_result(
             result,
             resolver_path=str(result.get("resolver_path") or ""),
+            query_features=query_features,
         )
+        result["verifier_decision"] = verifier_decision
+        result["verifier_reason"] = verifier_reason
         result["auto_accept"] = result["verifier_decision"] == "auto_accept"
         return result
 
@@ -4418,6 +4438,7 @@ class ReMoMatcher:
             "resolver_path": resolver_path,
             "resolver_confidence": float(result.get("similarity_score") or 0.0),
             "verifier_decision": str(result.get("verifier_decision") or ""),
+            "verifier_reason": str(result.get("verifier_reason") or ""),
             "auto_accept": bool(result.get("auto_accept")),
             "compatibility_status": str(result.get("compatibility_status") or ""),
             "incompatibility_reason": str(result.get("incompatibility_reason") or ""),

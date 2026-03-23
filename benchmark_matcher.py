@@ -381,6 +381,7 @@ def _per_case_record(
         "resolver_name": _result_value(result_row, "Резолвер") or _result_value(result_row, "Источник решения"),
         "resolver_path": _clean_text(diagnostics_row.get("resolver_path")),
         "verifier_decision": _clean_text(diagnostics_row.get("verifier_decision") or _result_value(result_row, "Verifier decision")),
+        "verifier_reason": _clean_text(diagnostics_row.get("verifier_reason") or _result_value(result_row, "Verifier reason")),
         "compatibility_status": _result_value(result_row, "Совместимость решения"),
         "requires_review": _result_value(result_row, "Требует проверки"),
         "pipeline_stage": _result_value(result_row, "Этап отказа"),
@@ -421,6 +422,7 @@ def _per_case_record(
         "resolver_name": actual["resolver_name"],
         "resolver_path": actual["resolver_path"],
         "verifier_decision": actual["verifier_decision"],
+        "verifier_reason": actual["verifier_reason"],
         "resolver_confidence": round(actual["resolver_confidence"], 4),
         "family_confidence": round(actual["family_confidence"], 4),
         "compatibility_status": actual["compatibility_status"],
@@ -592,6 +594,7 @@ def run_benchmark(
     per_case_df = pd.DataFrame(per_case_records)
     resolver_summary_df = _summary_frame(per_case_df, group_column="resolver_name")
     resolver_path_summary_df = _summary_frame(per_case_df, group_column="resolver_path")
+    verifier_reason_summary_df = _summary_frame(per_case_df, group_column="verifier_reason")
     family_summary_df = _summary_frame(per_case_df, group_column="expected_family")
     suite_summary_df = _summary_frame(per_case_df, group_column="suite")
     false_positive_df = per_case_df[per_case_df["failure_bucket"] == "false_positive"].copy()
@@ -617,6 +620,7 @@ def run_benchmark(
         "family_summary": family_summary_df.to_dict(orient="records"),
         "resolver_summary": resolver_summary_df.to_dict(orient="records"),
         "resolver_path_summary": resolver_path_summary_df.to_dict(orient="records"),
+        "verifier_reason_summary": verifier_reason_summary_df.to_dict(orient="records"),
     }
 
     _write_json(output_dir / "summary.json", summary_payload)
@@ -627,6 +631,7 @@ def run_benchmark(
     per_case_df.to_csv(output_dir / "per_case.csv", index=False, encoding="utf-8-sig")
     resolver_summary_df.to_csv(output_dir / "resolver_summary.csv", index=False, encoding="utf-8-sig")
     resolver_path_summary_df.to_csv(output_dir / "resolver_path_summary.csv", index=False, encoding="utf-8-sig")
+    verifier_reason_summary_df.to_csv(output_dir / "verifier_reason_summary.csv", index=False, encoding="utf-8-sig")
     family_summary_df.to_csv(output_dir / "family_summary.csv", index=False, encoding="utf-8-sig")
     suite_summary_df.to_csv(output_dir / "suite_summary.csv", index=False, encoding="utf-8-sig")
     false_positive_df.to_csv(output_dir / "false_positives.csv", index=False, encoding="utf-8-sig")

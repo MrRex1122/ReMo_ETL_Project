@@ -390,6 +390,7 @@ def apply_match_diagnostics_to_result_dataframe(
     resolver_path_column = "Resolver path"
     resolver_confidence_column = "Уверенность резолвера"
     verifier_decision_column = "Verifier decision"
+    verifier_reason_column = "Verifier reason"
     auto_accept_column = "Auto accept"
     family_confidence_column = "Уверенность family"
     article_validation_column = "Статус article validation"
@@ -407,6 +408,7 @@ def apply_match_diagnostics_to_result_dataframe(
         resolver_path_column,
         resolver_confidence_column,
         verifier_decision_column,
+        verifier_reason_column,
         auto_accept_column,
         family_confidence_column,
         article_validation_column,
@@ -444,6 +446,7 @@ def apply_match_diagnostics_to_result_dataframe(
         df_result.at[dataframe_index, resolver_path_column] = _clean_text_value(row.get("resolver_path"))
         df_result.at[dataframe_index, resolver_confidence_column] = round(_safe_float(row.get("resolver_confidence")), 4)
         df_result.at[dataframe_index, verifier_decision_column] = _clean_text_value(row.get("verifier_decision"))
+        df_result.at[dataframe_index, verifier_reason_column] = _clean_text_value(row.get("verifier_reason"))
         df_result.at[dataframe_index, auto_accept_column] = bool(row.get("auto_accept"))
         df_result.at[dataframe_index, family_confidence_column] = round(_safe_float(row.get("family_confidence")), 4)
         df_result.at[dataframe_index, article_validation_column] = _clean_text_value(row.get("article_validation_status"))
