@@ -174,6 +174,25 @@ class NormalizedMatchTests(unittest.TestCase):
         self.assertEqual(result["verifier_reason"], "review_telecom_semantic_match")
         self.assertFalse(result["auto_accept"])
 
+    def test_verifier_policy_uses_component_resolver_review_reason(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        result = matcher._apply_verifier_decision(
+            {
+                "success": True,
+                "resolution_source": "name_exact",
+                "compatibility_status": "compatible",
+                "requires_review": "нет",
+                "resolver_path": "telecom_component_resolver",
+            }
+        )
+
+        self.assertEqual(result["resolver_path"], "telecom_component_resolver")
+        self.assertEqual(result["verifier_decision"], "review")
+        self.assertEqual(result["verifier_reason"], "review_telecom_component_match")
+        self.assertFalse(result["auto_accept"])
+
     def test_verifier_policy_marks_rack_tray_fallback_as_review_only(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
         matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
@@ -363,7 +382,7 @@ class NormalizedMatchTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(resolver_path, "rack_tray_resolver")
+        self.assertEqual(resolver_path, "rack_tray_semantic_resolver")
 
     def test_cached_result_resolver_path_uses_fallback_for_other_family(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
@@ -394,6 +413,49 @@ class NormalizedMatchTests(unittest.TestCase):
         )
 
         self.assertEqual(resolver_path, "series_review_resolver")
+
+    def test_cached_result_resolver_path_uses_rack_tray_series_resolver_for_short_article_dimensions(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "rack_accessory_strict",
+                "query_article": "35262",
+                "dimension_pairs": ["50x100"],
+                "dimension_lengths": ["3000"],
+                "original_query": "Лоток 50x100 L3000 артикул 35262",
+            }
+        )
+
+        self.assertEqual(resolver_path, "rack_tray_series_resolver")
+
+    def test_cached_result_resolver_path_uses_telecom_component_resolver_for_keystone_family(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "keystone",
+            }
+        )
+
+        self.assertEqual(resolver_path, "telecom_component_resolver")
+
+    def test_cached_result_resolver_path_uses_telecom_infra_resolver_for_pdu_family(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "pdu",
+            }
+        )
+
+        self.assertEqual(resolver_path, "telecom_infra_resolver")
 
     def test_cached_result_resolver_path_uses_software_review_for_software_family(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)

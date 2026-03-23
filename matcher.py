@@ -831,7 +831,7 @@ class ReMoMatcher:
         query_features = query_features or {}
         query_article = self._normalize_article_lookup_value(query_features.get("query_article"))
         found_article = self._normalize_article_lookup_value(result.get("article"))
-        if normalized_path == "rack_tray_resolver":
+        if normalized_path in {"rack_tray_resolver", "rack_tray_series_resolver", "rack_tray_semantic_resolver"}:
             if query_article and found_article and query_article != found_article:
                 return "review_rack_tray_series_match"
             return registry_verifier_default_review_reason(
@@ -881,12 +881,12 @@ class ReMoMatcher:
                 return "reject_non_item_row"
             if normalized_reason == "empty_query":
                 return "reject_empty_query"
-        if normalized_path == "rack_tray_resolver":
+        if normalized_path in {"rack_tray_resolver", "rack_tray_series_resolver", "rack_tray_semantic_resolver"}:
             if normalized_reason == "strict_fallback_family_mismatch":
                 return "reject_rack_tray_family_gate"
             if normalized_reason in no_compatible_reasons:
                 return "reject_rack_tray_no_compatible_candidates"
-        if normalized_path == "telecom_semantic_resolver":
+        if normalized_path in {"telecom_semantic_resolver", "telecom_component_resolver", "telecom_infra_resolver"}:
             if normalized_reason == "non_target_family":
                 return "reject_telecom_non_target_family"
             if normalized_reason in no_compatible_reasons:
@@ -930,6 +930,18 @@ class ReMoMatcher:
             return False
         return self._is_rack_tray_family(self._entity_family(query_features.get("entity_type", "")))
 
+    def _rack_tray_semantic_resolver_path_for_query(self, query_features: Dict[str, Any]) -> str:
+        query_article = self._normalize_article_lookup_value(query_features.get("query_article"))
+        has_dimensions = bool(
+            query_features.get("dimension_pairs")
+            or query_features.get("dimension_triples")
+            or query_features.get("dimension_lengths")
+            or query_features.get("dimension_diameters")
+        )
+        if query_article and has_dimensions:
+            return "rack_tray_series_resolver"
+        return "rack_tray_semantic_resolver"
+
     def _is_telecom_family(self, entity_family: str) -> bool:
         normalized_family = self._clean_text_value(entity_family)
         if not normalized_family:
@@ -944,12 +956,24 @@ class ReMoMatcher:
                 return True
         return False
 
+    @staticmethod
+    def _is_telecom_component_family(entity_family: str) -> bool:
+        normalized = str(entity_family or "").strip()
+        return normalized in {
+            "keystone",
+            "patch_panel",
+            "rj45_connector",
+            "rj45_outlet",
+        }
+
     def _semantic_resolver_path_for_query(self, query_features: Dict[str, Any]) -> str:
         if self._should_use_rack_tray_resolver(query_features):
-            return "rack_tray_resolver"
+            return self._rack_tray_semantic_resolver_path_for_query(query_features)
         query_family = self._entity_family(query_features.get("entity_type", ""))
         if self._clean_text_value(query_features.get("row_type")) == "item" and self._is_telecom_family(query_family):
-            return "telecom_semantic_resolver"
+            if self._is_telecom_component_family(query_family):
+                return "telecom_component_resolver"
+            return "telecom_infra_resolver"
         return "semantic_resolver"
 
     def _activate_semantic_resolver_path(self, query_features: Dict[str, Any]) -> str:
@@ -997,12 +1021,14 @@ class ReMoMatcher:
 
     def _cached_result_resolver_path(self, query_features: Dict[str, Any]) -> str:
         if self._should_use_rack_tray_resolver(query_features):
-            return "rack_tray_resolver"
+            return self._rack_tray_semantic_resolver_path_for_query(query_features)
         query_family = self._entity_family(query_features.get("entity_type", ""))
         if query_family in {"other", "sensor", "software", "monitoring_hw"}:
             return self._fallback_resolver_path_for_query(query_features)
         if self._clean_text_value(query_features.get("row_type")) == "item" and self._is_telecom_family(query_family):
-            return "telecom_semantic_resolver"
+            if self._is_telecom_component_family(query_family):
+                return "telecom_component_resolver"
+            return "telecom_infra_resolver"
         return "semantic_resolver"
 
     def _typed_candidate_pool_for_rack_tray(
@@ -1017,7 +1043,7 @@ class ReMoMatcher:
         typed_pool: List[Dict[str, Any]] = []
         seen: set[int] = set()
         supplemented = 0
-        query_features["active_resolver_path"] = "rack_tray_resolver"
+        query_features["active_resolver_path"] = self._rack_tray_semantic_resolver_path_for_query(query_features)
 
         def _matches_rack_tray_candidate(item: Dict[str, Any]) -> bool:
             item_family = self._entity_family(item.get("entity_type", ""))

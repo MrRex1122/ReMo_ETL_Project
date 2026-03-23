@@ -657,6 +657,26 @@ DEFAULT_VERIFIER_POLICY: Dict[str, Dict[str, Any]] = {
         "compatible_default_decision": "review",
         "default_review_reason": "review_rack_tray_semantic_match",
     },
+    "rack_tray_series_resolver": {
+        "auto_accept_sources": [],
+        "review_sources": [
+            "compatible_local_fallback",
+            "local_tree+gemini",
+            "candidate_tiebreaker_gemini",
+        ],
+        "compatible_default_decision": "review",
+        "default_review_reason": "review_rack_tray_series_match",
+    },
+    "rack_tray_semantic_resolver": {
+        "auto_accept_sources": [],
+        "review_sources": [
+            "compatible_local_fallback",
+            "local_tree+gemini",
+            "candidate_tiebreaker_gemini",
+        ],
+        "compatible_default_decision": "review",
+        "default_review_reason": "review_rack_tray_semantic_match",
+    },
     "telecom_semantic_resolver": {
         "auto_accept_sources": [],
         "review_sources": [
@@ -666,6 +686,26 @@ DEFAULT_VERIFIER_POLICY: Dict[str, Dict[str, Any]] = {
         ],
         "compatible_default_decision": "review",
         "default_review_reason": "review_telecom_semantic_match",
+    },
+    "telecom_component_resolver": {
+        "auto_accept_sources": [],
+        "review_sources": [
+            "compatible_local_fallback",
+            "local_tree+gemini",
+            "candidate_tiebreaker_gemini",
+        ],
+        "compatible_default_decision": "review",
+        "default_review_reason": "review_telecom_component_match",
+    },
+    "telecom_infra_resolver": {
+        "auto_accept_sources": [],
+        "review_sources": [
+            "compatible_local_fallback",
+            "local_tree+gemini",
+            "candidate_tiebreaker_gemini",
+        ],
+        "compatible_default_decision": "review",
+        "default_review_reason": "review_telecom_infra_match",
     },
     "semantic_resolver": {
         "auto_accept_sources": [],
