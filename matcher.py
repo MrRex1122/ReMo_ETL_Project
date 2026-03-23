@@ -772,11 +772,15 @@ class ReMoMatcher:
         resolver_path: str = "",
         query_features: Dict[str, Any] | None = None,
     ) -> Tuple[str, str]:
+        active_resolver_path = self._clean_text_value(resolver_path)
         if self._is_reject_result_payload(result):
-            return "reject", "reject_payload"
+            return "reject", self._reject_reason_for_result(
+                result,
+                resolver_path=active_resolver_path,
+                query_features=query_features,
+            )
         taxonomy_rules = self._runtime_taxonomy_rules()
         row_type = self._clean_text_value((query_features or {}).get("row_type")).lower()
-        active_resolver_path = self._clean_text_value(resolver_path)
         reject_row_types = registry_verifier_reject_row_types(
             taxonomy_rules,
             active_resolver_path,
@@ -840,6 +844,59 @@ class ReMoMatcher:
             normalized_path,
             default="default_review",
         )
+
+    def _reject_reason_for_result(
+        self,
+        result: Dict[str, Any],
+        *,
+        resolver_path: str = "",
+        query_features: Dict[str, Any] | None = None,
+    ) -> str:
+        taxonomy_rules = self._runtime_taxonomy_rules()
+        normalized_path = self._clean_text_value(resolver_path)
+        row_type = self._clean_text_value((query_features or {}).get("row_type")).lower()
+        reject_row_types = registry_verifier_reject_row_types(
+            taxonomy_rules,
+            normalized_path,
+        )
+        if row_type and row_type in reject_row_types:
+            if row_type in {"section", "header", "non_item"}:
+                return "reject_non_item_row"
+            return f"reject_row_type:{row_type}"
+
+        reason_candidates = [
+            str(result.get("reason_code") or "").strip(),
+            str(result.get("incompatibility_reason") or "").strip(),
+            str(((result.get("diagnostic_trace") or {}).get("reason_code")) or "").strip(),
+        ]
+        normalized_reason = next((reason for reason in reason_candidates if reason), "")
+        no_compatible_reasons = {
+            "no_compatible_candidates",
+            "no_confirmed_compatible_candidate",
+            "strict_class_no_compatible_candidate",
+        }
+
+        if normalized_path == "reject_resolver":
+            if normalized_reason == "section_row_detected":
+                return "reject_non_item_row"
+            if normalized_reason == "empty_query":
+                return "reject_empty_query"
+        if normalized_path == "rack_tray_resolver":
+            if normalized_reason == "strict_fallback_family_mismatch":
+                return "reject_rack_tray_family_gate"
+            if normalized_reason in no_compatible_reasons:
+                return "reject_rack_tray_no_compatible_candidates"
+        if normalized_path == "telecom_semantic_resolver":
+            if normalized_reason == "non_target_family":
+                return "reject_telecom_non_target_family"
+            if normalized_reason in no_compatible_reasons:
+                return "reject_telecom_no_compatible_candidates"
+        if normalized_path == "semantic_resolver":
+            if normalized_reason == "non_target_family":
+                return "reject_semantic_non_target_family"
+            if normalized_reason in no_compatible_reasons:
+                return "reject_semantic_no_compatible_candidates"
+        return "reject_payload"
 
     def _apply_verifier_decision(
         self,
