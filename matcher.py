@@ -734,6 +734,98 @@ class ReMoMatcher:
             return "reject_resolver"
         return ""
 
+    @staticmethod
+    def _is_rack_tray_family(entity_family: str) -> bool:
+        normalized = str(entity_family or "").strip()
+        return normalized in {
+            "rack_accessory_strict",
+            "rack_shelf",
+            "rack_rail",
+            "rack_blank_panel",
+            "rack_brush_panel",
+        }
+
+    def _should_use_rack_tray_resolver(self, query_features: Dict[str, Any]) -> bool:
+        if self._clean_text_value(query_features.get("row_type")) != "item":
+            return False
+        return self._is_rack_tray_family(self._entity_family(query_features.get("entity_type", "")))
+
+    def _typed_candidate_pool_for_rack_tray(
+        self,
+        query_text: str,
+        query_features: Dict[str, Any],
+        limit: int,
+    ) -> List[Dict[str, Any]]:
+        entity_family = self._entity_family(query_features.get("entity_type", ""))
+        typed_limit = min(limit, 300)
+        branch_paths = [entry["path"] for entry in query_features.get("ranked_branches", []) if entry.get("path")]
+        typed_pool: List[Dict[str, Any]] = []
+        seen: set[int] = set()
+        supplemented = 0
+        query_features["active_resolver_path"] = "rack_tray_resolver"
+
+        def _matches_rack_tray_candidate(item: Dict[str, Any]) -> bool:
+            item_family = self._entity_family(item.get("entity_type", ""))
+            if item_family != entity_family:
+                return False
+            return not self._is_hard_incompatible_match(query_features, item)
+
+        def _append_candidates(items: List[Dict[str, Any]], *, stop_after_limit: bool) -> bool:
+            nonlocal supplemented
+            for item in items:
+                if not _matches_rack_tray_candidate(item):
+                    continue
+                row_idx = int(item.get("row_idx", -1))
+                if row_idx in seen:
+                    continue
+                typed_pool.append(item)
+                seen.add(row_idx)
+                if stop_after_limit and len(typed_pool) >= typed_limit:
+                    return True
+            return False
+
+        if self._should_use_whole_category_retrieval(query_features):
+            category_key, category_candidates, _elapsed_ms = self._duckdb_category_candidates(query_features)
+            query_features["query_category_key"] = category_key
+            _append_candidates(category_candidates, stop_after_limit=False)
+        else:
+            branch_candidates = self._collect_branch_candidates(
+                branch_paths,
+                limit=max(typed_limit * 2, typed_limit),
+                query_features=query_features,
+            )
+            if _append_candidates(branch_candidates, stop_after_limit=True):
+                logger.info(
+                    "🧠 Rack/tray typed candidate pool: query=%s family=%s typed_candidates=%s supplemented=%s",
+                    query_text[:120],
+                    entity_family or "other",
+                    len(typed_pool),
+                    supplemented,
+                )
+                return typed_pool
+
+        general_candidates = self._select_candidates(query_text, limit=max(limit * 2, typed_limit))
+        for item in general_candidates:
+            if not _matches_rack_tray_candidate(item):
+                continue
+            row_idx = int(item.get("row_idx", -1))
+            if row_idx in seen:
+                continue
+            typed_pool.append(item)
+            seen.add(row_idx)
+            supplemented += 1
+            if len(typed_pool) >= typed_limit:
+                break
+
+        logger.info(
+            "🧠 Rack/tray typed candidate pool: query=%s family=%s typed_candidates=%s supplemented=%s",
+            query_text[:120],
+            entity_family or "other",
+            len(typed_pool),
+            supplemented,
+        )
+        return typed_pool
+
     def _resolve_article_stack(
         self,
         query_text: str,
@@ -2806,6 +2898,8 @@ class ReMoMatcher:
             return []
 
         entity_family = self._entity_family(query_features.get("entity_type", ""))
+        if self._should_use_rack_tray_resolver(query_features):
+            return self._typed_candidate_pool_for_rack_tray(query_text, query_features, limit)
         typed_limit = min(limit, 300)
         branch_paths = [entry["path"] for entry in query_features.get("ranked_branches", []) if entry.get("path")]
         typed_pool = []
@@ -4196,7 +4290,11 @@ class ReMoMatcher:
         entity_type = str((query_features or {}).get("entity_type") or "")
         query_family = self._entity_family(entity_type)
         resolver_source = str(result.get("resolution_source") or "")
-        resolver_path = str(result.get("resolver_path") or self._resolver_path_for_source(resolver_source))
+        resolver_path = str(
+            result.get("resolver_path")
+            or (query_features or {}).get("active_resolver_path")
+            or self._resolver_path_for_source(resolver_source)
+        )
         diagnostic_trace = {
             "query_text": self._clean_text_value(query_text),
             "query_article": self._clean_text_value(query_article),

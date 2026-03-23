@@ -75,6 +75,8 @@ class MatchTaxonomyTests(unittest.TestCase):
             ReMoMatcher,
         )
         self.matcher._should_use_whole_category_retrieval = ReMoMatcher._should_use_whole_category_retrieval.__get__(self.matcher, ReMoMatcher)
+        self.matcher._should_use_rack_tray_resolver = ReMoMatcher._should_use_rack_tray_resolver.__get__(self.matcher, ReMoMatcher)
+        self.matcher._typed_candidate_pool_for_rack_tray = ReMoMatcher._typed_candidate_pool_for_rack_tray.__get__(self.matcher, ReMoMatcher)
         self.matcher._whole_category_secondary_filter_groups = ReMoMatcher._whole_category_secondary_filter_groups.__get__(self.matcher, ReMoMatcher)
         self.matcher._apply_whole_category_secondary_filter = ReMoMatcher._apply_whole_category_secondary_filter.__get__(self.matcher, ReMoMatcher)
         self.matcher._gemini_route_changes_query_features = ReMoMatcher._gemini_route_changes_query_features.__get__(self.matcher, ReMoMatcher)
@@ -1168,6 +1170,46 @@ class MatchTaxonomyTests(unittest.TestCase):
 
         self.assertIsNotNone(item)
         self.assertEqual(item["article"], "3526210")
+
+    def test_should_use_rack_tray_resolver_for_rack_accessory_family(self):
+        features = self.matcher._extract_query_features("Угол CD 90 вертикальный внешний 100x50")
+
+        self.assertEqual(features["entity_type"], "rack_accessory_strict")
+        self.assertTrue(self.matcher._should_use_rack_tray_resolver(features))
+
+    def test_typed_candidate_pool_sets_rack_tray_resolver_path(self):
+        self.matcher._match_strictness_for_query = lambda _features: "strict"
+        self.matcher._should_use_whole_category_retrieval = lambda _features: False
+        self.matcher._select_candidates = lambda _query, limit=0: []
+        features = self.matcher._extract_query_features("Угол CD 90 вертикальный внешний 100x50")
+        matching_markers = dict(features.get("markers") or {})
+        self.matcher._collect_branch_candidates = lambda _branches, limit=None, query_features=None: [
+            {
+                "name": "Угол CD 90 вертикальный внешний 100x50",
+                "normalized_name": "угол cd 90 вертикальный внешний 100x50",
+                "article": "36782K",
+                "row_idx": 1,
+                "entity_type": "rack_accessory_strict",
+                "branch_path": "электрика > лотки > углы",
+                "item_markers": matching_markers,
+            },
+            {
+                "name": "Кассета монтажная",
+                "normalized_name": "кассета монтажная",
+                "article": "X-1",
+                "row_idx": 2,
+                "entity_type": "rack_accessory_strict",
+                "branch_path": "электрика > лотки > аксессуары",
+                "item_markers": {"accessory_kind": "cassette", "mount_kind": "cassette"},
+            },
+        ]
+        features["ranked_branches"] = [{"path": "электрика > лотки > углы"}]
+
+        result = self.matcher._typed_candidate_pool("Угол CD 90 вертикальный внешний 100x50", features, 50)
+
+        self.assertEqual(features["active_resolver_path"], "rack_tray_resolver")
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["article"], "36782K")
 
 
 if __name__ == "__main__":
