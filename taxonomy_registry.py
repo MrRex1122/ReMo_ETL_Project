@@ -621,6 +621,7 @@ DEFAULT_VERIFIER_POLICY: Dict[str, Dict[str, Any]] = {
         "review_sources": [],
         "reject_row_types": ["section"],
         "compatible_default_decision": "review",
+        "default_review_reason": "default_review",
     },
     "article_resolver": {
         "auto_accept_sources": [
@@ -654,6 +655,7 @@ DEFAULT_VERIFIER_POLICY: Dict[str, Dict[str, Any]] = {
             "candidate_tiebreaker_gemini",
         ],
         "compatible_default_decision": "review",
+        "default_review_reason": "review_rack_tray_semantic_match",
     },
     "telecom_semantic_resolver": {
         "auto_accept_sources": [],
@@ -663,6 +665,7 @@ DEFAULT_VERIFIER_POLICY: Dict[str, Dict[str, Any]] = {
             "candidate_tiebreaker_gemini",
         ],
         "compatible_default_decision": "review",
+        "default_review_reason": "review_telecom_semantic_match",
     },
     "semantic_resolver": {
         "auto_accept_sources": [],
@@ -671,6 +674,7 @@ DEFAULT_VERIFIER_POLICY: Dict[str, Dict[str, Any]] = {
             "candidate_tiebreaker_gemini",
         ],
         "compatible_default_decision": "review",
+        "default_review_reason": "review_generic_semantic_match",
     },
     "fallback_resolver": {
         "auto_accept_sources": [],
@@ -679,6 +683,7 @@ DEFAULT_VERIFIER_POLICY: Dict[str, Dict[str, Any]] = {
             "assembly_possible_local_fallback",
         ],
         "compatible_default_decision": "review",
+        "default_review_reason": "review_fallback_match",
     },
     "reject_resolver": {
         "auto_accept_sources": [],
@@ -1011,6 +1016,16 @@ def verifier_compatible_default_decision(
     if decision in {"auto_accept", "review", "reject"}:
         return decision
     return default
+
+
+def verifier_default_review_reason(
+    rules: Mapping[str, Any] | None,
+    resolver_path: str,
+    default: str = "default_review",
+) -> str:
+    policy = verifier_policy_for_resolver(rules, resolver_path)
+    reason = clean_registry_text(policy.get("default_review_reason"))
+    return reason or default
 
 
 def _patterns_match(text: str, patterns: Iterable[str]) -> int:

@@ -94,6 +94,7 @@ from taxonomy_registry import (
     load_registry_taxonomy_rules,
     verifier_auto_accept_sources as registry_verifier_auto_accept_sources,
     verifier_compatible_default_decision as registry_verifier_compatible_default_decision,
+    verifier_default_review_reason as registry_verifier_default_review_reason,
     verifier_reject_row_types as registry_verifier_reject_row_types,
     verifier_review_sources as registry_verifier_review_sources,
 )
@@ -806,7 +807,39 @@ class ReMoMatcher:
             active_resolver_path,
             default="review",
         )
+        if decision == "review":
+            return decision, self._default_review_reason_for_result(
+                result,
+                resolver_path=active_resolver_path,
+                query_features=query_features,
+            )
         return decision, f"default_{decision}"
+
+    def _default_review_reason_for_result(
+        self,
+        result: Dict[str, Any],
+        *,
+        resolver_path: str = "",
+        query_features: Dict[str, Any] | None = None,
+    ) -> str:
+        taxonomy_rules = self._runtime_taxonomy_rules()
+        normalized_path = self._clean_text_value(resolver_path)
+        query_features = query_features or {}
+        query_article = self._normalize_article_lookup_value(query_features.get("query_article"))
+        found_article = self._normalize_article_lookup_value(result.get("article"))
+        if normalized_path == "rack_tray_resolver":
+            if query_article and found_article and query_article != found_article:
+                return "review_rack_tray_series_match"
+            return registry_verifier_default_review_reason(
+                taxonomy_rules,
+                normalized_path,
+                default="review_rack_tray_semantic_match",
+            )
+        return registry_verifier_default_review_reason(
+            taxonomy_rules,
+            normalized_path,
+            default="default_review",
+        )
 
     def _apply_verifier_decision(
         self,
@@ -866,6 +899,16 @@ class ReMoMatcher:
         resolver_path = self._semantic_resolver_path_for_query(query_features)
         query_features["active_resolver_path"] = resolver_path
         return resolver_path
+
+    def _cached_result_resolver_path(self, query_features: Dict[str, Any]) -> str:
+        if self._should_use_rack_tray_resolver(query_features):
+            return "rack_tray_resolver"
+        query_family = self._entity_family(query_features.get("entity_type", ""))
+        if query_family in {"other", "sensor", "software", "monitoring_hw"}:
+            return "fallback_resolver"
+        if self._clean_text_value(query_features.get("row_type")) == "item" and self._is_telecom_family(query_family):
+            return "telecom_semantic_resolver"
+        return "semantic_resolver"
 
     def _typed_candidate_pool_for_rack_tray(
         self,
@@ -5322,6 +5365,8 @@ class ReMoMatcher:
 
             normalized_query = self._normalize_text(query_text)
             query_features = self._extract_query_features(query_text)
+            query_features["query_article"] = query_article
+            query_features["article_source"] = article_source
             query_family = self._entity_family(query_features.get("entity_type", ""))
             trace_steps.append(
                 {
@@ -5359,11 +5404,16 @@ class ReMoMatcher:
                     if promoted_source:
                         cached = dict(cached)
                         cached["resolution_source"] = promoted_source
+                        cached["resolver_path"] = self._resolver_path_for_source(promoted_source) or cached.get("resolver_path", "")
                         cached["similarity_score"] = self._exact_resolution_score(promoted_source)
                         cached["confidence_level"] = self._confidence_level_from_score(
                             cached["similarity_score"],
                             False,
                         )
+                    else:
+                        cached = dict(cached)
+                        cached["resolver_path"] = self._cached_result_resolver_path(query_features)
+                    cached = self._apply_verifier_decision(cached, query_features=query_features)
                     trace_steps.append({"stage": "cache", "status": "hit"})
                     return _finalize(cached, stage_of_failure="resolved", reason_code="resolved")
 

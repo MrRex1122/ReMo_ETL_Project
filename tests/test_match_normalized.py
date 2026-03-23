@@ -171,7 +171,7 @@ class NormalizedMatchTests(unittest.TestCase):
 
         self.assertEqual(result["resolver_path"], "telecom_semantic_resolver")
         self.assertEqual(result["verifier_decision"], "review")
-        self.assertEqual(result["verifier_reason"], "default_review")
+        self.assertEqual(result["verifier_reason"], "review_telecom_semantic_match")
         self.assertFalse(result["auto_accept"])
 
     def test_verifier_policy_marks_rack_tray_fallback_as_review_only(self):
@@ -253,6 +253,54 @@ class NormalizedMatchTests(unittest.TestCase):
         self.assertEqual(result["verifier_decision"], "review")
         self.assertEqual(result["verifier_reason"], "review_only_source:compatible_local_fallback")
         self.assertFalse(result["auto_accept"])
+
+    def test_verifier_policy_marks_rack_tray_series_review_reason(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+        matcher._runtime_taxonomy_rules = lambda: matcher.taxonomy_rules
+
+        result = matcher._apply_verifier_decision(
+            {
+                "success": True,
+                "resolution_source": "",
+                "compatibility_status": "compatible",
+                "requires_review": "нет",
+                "resolver_path": "rack_tray_resolver",
+                "article": "3526210HDZ",
+            },
+            query_features={"row_type": "item", "query_article": "35262"},
+        )
+
+        self.assertEqual(result["resolver_path"], "rack_tray_resolver")
+        self.assertEqual(result["verifier_decision"], "review")
+        self.assertEqual(result["verifier_reason"], "review_rack_tray_series_match")
+        self.assertFalse(result["auto_accept"])
+
+    def test_cached_result_resolver_path_prefers_rack_tray_family(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "rack_brush_panel",
+            }
+        )
+
+        self.assertEqual(resolver_path, "rack_tray_resolver")
+
+    def test_cached_result_resolver_path_uses_fallback_for_other_family(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "other",
+            }
+        )
+
+        self.assertEqual(resolver_path, "fallback_resolver")
 
     @unittest.skip("Legacy encoding fixture is unstable; covered by explicit unicode regression below.")
     def test_match_uses_article_designation_exact_for_cable_signature(self):
