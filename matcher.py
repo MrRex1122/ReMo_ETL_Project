@@ -891,11 +891,17 @@ class ReMoMatcher:
             "telecom_component_resolver",
             "telecom_panel_resolver",
             "telecom_connector_resolver",
+            "telecom_keystone_resolver",
+            "telecom_construct_resolver",
             "telecom_outlet_resolver",
             "telecom_infra_resolver",
         }:
             if normalized_reason == "non_target_family":
                 return "reject_telecom_non_target_family"
+            if normalized_path == "telecom_keystone_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_keystone_no_compatible_candidates"
+            if normalized_path == "telecom_construct_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_construct_no_compatible_candidates"
             if normalized_reason in no_compatible_reasons:
                 return "reject_telecom_no_compatible_candidates"
         if normalized_path == "semantic_resolver":
@@ -973,14 +979,32 @@ class ReMoMatcher:
             "rj45_outlet",
         }
 
-    @staticmethod
-    def _telecom_component_resolver_path_for_family(entity_family: str) -> str:
-        normalized = str(entity_family or "").strip()
+    def _telecom_component_resolver_path_for_query(self, query_features: Dict[str, Any]) -> str:
+        normalized = self._clean_text_value(query_features.get("entity_type")).lower()
+        if not normalized:
+            normalized = str(self._entity_family(query_features.get("entity_type", "")) or "").strip()
+        query_markers = query_features.get("markers", {}) or {}
+        query_component = self._clean_text_value(query_markers.get("component_kind"))
+        query_installation = self._clean_text_value(query_markers.get("installation_kind"))
+        normalized_query = self._normalize_text(
+            query_features.get("original_text")
+            or query_features.get("original_query")
+            or query_features.get("query_text")
+            or ""
+        )
         if normalized == "patch_panel":
             return "telecom_panel_resolver"
         if normalized == "rj45_connector":
             return "telecom_connector_resolver"
-        if normalized in {"keystone", "rj45_outlet"}:
+        if normalized == "keystone":
+            return "telecom_keystone_resolver"
+        if normalized == "rj45_outlet":
+            if (
+                query_component == "assembly"
+                or query_installation in {"cable_channel", "floor_box"}
+                or ("конструктив" in normalized_query and "розет" in normalized_query)
+            ):
+                return "telecom_construct_resolver"
             return "telecom_outlet_resolver"
         return "telecom_component_resolver"
 
@@ -990,7 +1014,7 @@ class ReMoMatcher:
         query_family = self._entity_family(query_features.get("entity_type", ""))
         if self._clean_text_value(query_features.get("row_type")) == "item" and self._is_telecom_family(query_family):
             if self._is_telecom_component_family(query_family):
-                return self._telecom_component_resolver_path_for_family(query_family)
+                return self._telecom_component_resolver_path_for_query(query_features)
             return "telecom_infra_resolver"
         return "semantic_resolver"
 
@@ -1045,7 +1069,7 @@ class ReMoMatcher:
             return self._fallback_resolver_path_for_query(query_features)
         if self._clean_text_value(query_features.get("row_type")) == "item" and self._is_telecom_family(query_family):
             if self._is_telecom_component_family(query_family):
-                return self._telecom_component_resolver_path_for_family(query_family)
+                return self._telecom_component_resolver_path_for_query(query_features)
             return "telecom_infra_resolver"
         return "semantic_resolver"
 

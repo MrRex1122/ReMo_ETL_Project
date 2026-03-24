@@ -212,6 +212,44 @@ class NormalizedMatchTests(unittest.TestCase):
         self.assertEqual(result["verifier_reason"], "review_telecom_panel_match")
         self.assertFalse(result["auto_accept"])
 
+    def test_verifier_policy_uses_keystone_resolver_review_reason(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        result = matcher._apply_verifier_decision(
+            {
+                "success": True,
+                "resolution_source": "local_tree+gemini",
+                "compatibility_status": "compatible",
+                "requires_review": "нет",
+                "resolver_path": "telecom_keystone_resolver",
+            }
+        )
+
+        self.assertEqual(result["resolver_path"], "telecom_keystone_resolver")
+        self.assertEqual(result["verifier_decision"], "review")
+        self.assertEqual(result["verifier_reason"], "review_only_source:local_tree+gemini")
+        self.assertFalse(result["auto_accept"])
+
+    def test_verifier_policy_uses_construct_resolver_review_reason(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        result = matcher._apply_verifier_decision(
+            {
+                "success": True,
+                "resolution_source": "compatible_local_fallback",
+                "compatibility_status": "compatible",
+                "requires_review": "нет",
+                "resolver_path": "telecom_construct_resolver",
+            }
+        )
+
+        self.assertEqual(result["resolver_path"], "telecom_construct_resolver")
+        self.assertEqual(result["verifier_decision"], "review")
+        self.assertEqual(result["verifier_reason"], "review_only_source:compatible_local_fallback")
+        self.assertFalse(result["auto_accept"])
+
     def test_verifier_policy_marks_rack_tray_fallback_as_review_only(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
         matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
@@ -371,6 +409,44 @@ class NormalizedMatchTests(unittest.TestCase):
         self.assertEqual(result["verifier_decision"], "reject")
         self.assertEqual(result["verifier_reason"], "reject_telecom_no_compatible_candidates")
 
+    def test_verifier_policy_marks_keystone_no_compatible_reject_reason(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+        matcher._runtime_taxonomy_rules = lambda: matcher.taxonomy_rules
+
+        result = matcher._apply_verifier_decision(
+            {
+                "success": True,
+                "resolution_source": "unresolved",
+                "compatibility_status": "unresolved_no_compatible_candidates",
+                "incompatibility_reason": "no_compatible_candidates",
+                "resolver_path": "telecom_keystone_resolver",
+            },
+            query_features={"row_type": "item"},
+        )
+
+        self.assertEqual(result["verifier_decision"], "reject")
+        self.assertEqual(result["verifier_reason"], "reject_telecom_keystone_no_compatible_candidates")
+
+    def test_verifier_policy_marks_construct_no_compatible_reject_reason(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+        matcher._runtime_taxonomy_rules = lambda: matcher.taxonomy_rules
+
+        result = matcher._apply_verifier_decision(
+            {
+                "success": True,
+                "resolution_source": "unresolved",
+                "compatibility_status": "unresolved_no_compatible_candidates",
+                "incompatibility_reason": "no_compatible_candidates",
+                "resolver_path": "telecom_construct_resolver",
+            },
+            query_features={"row_type": "item"},
+        )
+
+        self.assertEqual(result["verifier_decision"], "reject")
+        self.assertEqual(result["verifier_reason"], "reject_telecom_construct_no_compatible_candidates")
+
     def test_verifier_policy_marks_section_reject_as_non_item_row(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
         matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
@@ -450,7 +526,7 @@ class NormalizedMatchTests(unittest.TestCase):
 
         self.assertEqual(resolver_path, "rack_tray_series_resolver")
 
-    def test_cached_result_resolver_path_uses_telecom_component_resolver_for_keystone_family(self):
+    def test_cached_result_resolver_path_uses_telecom_keystone_resolver_for_keystone_family(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
         matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
 
@@ -461,7 +537,25 @@ class NormalizedMatchTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(resolver_path, "telecom_outlet_resolver")
+        self.assertEqual(resolver_path, "telecom_keystone_resolver")
+
+    def test_cached_result_resolver_path_uses_telecom_construct_resolver_for_outlet_assembly(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "rj45_outlet",
+                "query_text": "Конструктив сетевой розетки для одного порта RJ-45 в кабель-канал в сборе",
+                "markers": {
+                    "component_kind": "assembly",
+                    "installation_kind": "cable_channel",
+                },
+            }
+        )
+
+        self.assertEqual(resolver_path, "telecom_construct_resolver")
 
     def test_cached_result_resolver_path_uses_telecom_infra_resolver_for_pdu_family(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
