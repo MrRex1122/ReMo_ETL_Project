@@ -260,12 +260,12 @@ class NormalizedMatchTests(unittest.TestCase):
                 "resolution_source": "compatible_local_fallback",
                 "compatibility_status": "compatible",
                 "requires_review": "нет",
-                "resolver_path": "rack_tray_resolver",
+                "resolver_path": "rack_tray_series_resolver",
             },
             query_features={"row_type": "item"},
         )
 
-        self.assertEqual(result["resolver_path"], "rack_tray_resolver")
+        self.assertEqual(result["resolver_path"], "rack_tray_series_resolver")
         self.assertEqual(result["verifier_decision"], "review")
         self.assertEqual(result["verifier_reason"], "review_only_source:compatible_local_fallback")
         self.assertFalse(result["auto_accept"])
@@ -349,7 +349,29 @@ class NormalizedMatchTests(unittest.TestCase):
 
         self.assertEqual(result["resolver_path"], "rack_tray_resolver")
         self.assertEqual(result["verifier_decision"], "review")
-        self.assertEqual(result["verifier_reason"], "review_rack_tray_series_match")
+        self.assertEqual(result["verifier_reason"], "review_rack_tray_semantic_match")
+        self.assertFalse(result["auto_accept"])
+
+    def test_verifier_policy_marks_rack_tray_support_series_review_reason(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+        matcher._runtime_taxonomy_rules = lambda: matcher.taxonomy_rules
+
+        result = matcher._apply_verifier_decision(
+            {
+                "success": True,
+                "resolution_source": "",
+                "compatibility_status": "compatible",
+                "requires_review": "нет",
+                "resolver_path": "rack_tray_support_series_resolver",
+                "article": "CM401040X",
+            },
+            query_features={"row_type": "item", "query_article": "CM401040"},
+        )
+
+        self.assertEqual(result["resolver_path"], "rack_tray_support_series_resolver")
+        self.assertEqual(result["verifier_decision"], "review")
+        self.assertEqual(result["verifier_reason"], "review_rack_tray_support_series_match")
         self.assertFalse(result["auto_accept"])
 
     def test_verifier_policy_marks_rack_tray_family_gate_reject_reason(self):
@@ -563,6 +585,57 @@ class NormalizedMatchTests(unittest.TestCase):
         )
 
         self.assertEqual(resolver_path, "rack_tray_series_resolver")
+
+    def test_cached_result_resolver_path_uses_rack_tray_support_series_resolver_for_holder_article(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "rack_accessory_strict",
+                "query_article": "53344",
+                "dimension_diameters": ["25-26"],
+                "markers": {"accessory_kind": "holder"},
+                "original_query": "Держатель D=25-26 артикул 53344",
+            }
+        )
+
+        self.assertEqual(resolver_path, "rack_tray_support_series_resolver")
+
+    def test_cached_result_resolver_path_uses_rack_tray_fitting_series_resolver_for_corner_article(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "rack_accessory_strict",
+                "query_article": "36782K",
+                "dimension_pairs": ["100x50"],
+                "markers": {"accessory_kind": "corner"},
+                "original_query": "Угол CPO 90 горизонтальный 100x50 артикул 36782K",
+            }
+        )
+
+        self.assertEqual(resolver_path, "rack_tray_fitting_series_resolver")
+
+    def test_cached_result_resolver_path_uses_rack_tray_channel_series_resolver_for_cover_article(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "rack_accessory_strict",
+                "query_article": "35264",
+                "dimension_lengths": ["200"],
+                "markers": {"accessory_kind": "cover"},
+                "original_query": "Крышка лотка 200 мм артикул 35264",
+            }
+        )
+
+        self.assertEqual(resolver_path, "rack_tray_channel_series_resolver")
 
     def test_cached_result_resolver_path_uses_telecom_keystone_resolver_for_keystone_family(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)

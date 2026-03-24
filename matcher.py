@@ -831,9 +831,20 @@ class ReMoMatcher:
         query_features = query_features or {}
         query_article = self._normalize_article_lookup_value(query_features.get("query_article"))
         found_article = self._normalize_article_lookup_value(result.get("article"))
-        if normalized_path in {"rack_tray_resolver", "rack_tray_series_resolver", "rack_tray_semantic_resolver"}:
+        if normalized_path in {
+            "rack_tray_resolver",
+            "rack_tray_series_resolver",
+            "rack_tray_support_series_resolver",
+            "rack_tray_fitting_series_resolver",
+            "rack_tray_channel_series_resolver",
+            "rack_tray_semantic_resolver",
+        }:
             if query_article and found_article and query_article != found_article:
-                return "review_rack_tray_series_match"
+                return registry_verifier_default_review_reason(
+                    taxonomy_rules,
+                    normalized_path,
+                    default="review_rack_tray_series_match",
+                )
             return registry_verifier_default_review_reason(
                 taxonomy_rules,
                 normalized_path,
@@ -881,7 +892,14 @@ class ReMoMatcher:
                 return "reject_non_item_row"
             if normalized_reason == "empty_query":
                 return "reject_empty_query"
-        if normalized_path in {"rack_tray_resolver", "rack_tray_series_resolver", "rack_tray_semantic_resolver"}:
+        if normalized_path in {
+            "rack_tray_resolver",
+            "rack_tray_series_resolver",
+            "rack_tray_support_series_resolver",
+            "rack_tray_fitting_series_resolver",
+            "rack_tray_channel_series_resolver",
+            "rack_tray_semantic_resolver",
+        }:
             if normalized_reason == "strict_fallback_family_mismatch":
                 return "reject_rack_tray_family_gate"
             if normalized_reason in no_compatible_reasons:
@@ -961,6 +979,14 @@ class ReMoMatcher:
             or query_features.get("dimension_diameters")
         )
         if query_article and has_dimensions:
+            query_markers = query_features.get("markers", {}) or {}
+            accessory_kind = self._clean_text_value(query_markers.get("accessory_kind"))
+            if accessory_kind in {"holder", "console", "profile"}:
+                return "rack_tray_support_series_resolver"
+            if accessory_kind in {"tee", "corner", "plate", "connector_plate", "grounding_plate", "fastener"}:
+                return "rack_tray_fitting_series_resolver"
+            if accessory_kind == "cover":
+                return "rack_tray_channel_series_resolver"
             return "rack_tray_series_resolver"
         return "rack_tray_semantic_resolver"
 
