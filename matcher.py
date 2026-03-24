@@ -894,6 +894,9 @@ class ReMoMatcher:
             "telecom_keystone_resolver",
             "telecom_construct_resolver",
             "telecom_outlet_resolver",
+            "telecom_pdu_resolver",
+            "telecom_airflow_resolver",
+            "telecom_optical_resolver",
             "telecom_infra_resolver",
         }:
             if normalized_reason == "non_target_family":
@@ -902,6 +905,12 @@ class ReMoMatcher:
                 return "reject_telecom_keystone_no_compatible_candidates"
             if normalized_path == "telecom_construct_resolver" and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_construct_no_compatible_candidates"
+            if normalized_path == "telecom_pdu_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_pdu_no_compatible_candidates"
+            if normalized_path == "telecom_airflow_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_airflow_no_compatible_candidates"
+            if normalized_path == "telecom_optical_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_optical_no_compatible_candidates"
             if normalized_reason in no_compatible_reasons:
                 return "reject_telecom_no_compatible_candidates"
         if normalized_path == "semantic_resolver":
@@ -1015,13 +1024,25 @@ class ReMoMatcher:
         if self._clean_text_value(query_features.get("row_type")) == "item" and self._is_telecom_family(query_family):
             if self._is_telecom_component_family(query_family):
                 return self._telecom_component_resolver_path_for_query(query_features)
-            return "telecom_infra_resolver"
+            return self._telecom_infra_resolver_path_for_query(query_features)
         return "semantic_resolver"
 
     def _activate_semantic_resolver_path(self, query_features: Dict[str, Any]) -> str:
         resolver_path = self._semantic_resolver_path_for_query(query_features)
         query_features["active_resolver_path"] = resolver_path
         return resolver_path
+
+    def _telecom_infra_resolver_path_for_query(self, query_features: Dict[str, Any]) -> str:
+        entity_family = self._clean_text_value(query_features.get("entity_type")).lower()
+        if not entity_family:
+            entity_family = str(self._entity_family(query_features.get("entity_type", "")) or "").strip()
+        if entity_family == "pdu":
+            return "telecom_pdu_resolver"
+        if entity_family in {"airflow_blanking_panel"}:
+            return "telecom_airflow_resolver"
+        if entity_family in {"optical_patch_cord", "optical_cross"}:
+            return "telecom_optical_resolver"
+        return "telecom_infra_resolver"
 
     def _fallback_resolver_path_for_query(self, query_features: Dict[str, Any]) -> str:
         query_family = self._entity_family(query_features.get("entity_type", ""))
@@ -1070,7 +1091,7 @@ class ReMoMatcher:
         if self._clean_text_value(query_features.get("row_type")) == "item" and self._is_telecom_family(query_family):
             if self._is_telecom_component_family(query_family):
                 return self._telecom_component_resolver_path_for_query(query_features)
-            return "telecom_infra_resolver"
+            return self._telecom_infra_resolver_path_for_query(query_features)
         return "semantic_resolver"
 
     def _typed_candidate_pool_for_rack_tray(
