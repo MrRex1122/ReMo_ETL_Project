@@ -939,6 +939,8 @@ class ReMoMatcher:
             "telecom_floorbox_dual_port_construct_resolver",
             "telecom_outlet_resolver",
             "telecom_pdu_resolver",
+            "telecom_pdu_vertical_resolver",
+            "telecom_pdu_metered_resolver",
             "telecom_airflow_resolver",
             "telecom_airflow_panel_resolver",
             "telecom_airflow_blanking_resolver",
@@ -981,6 +983,10 @@ class ReMoMatcher:
                 return "reject_telecom_floorbox_dual_port_construct_no_compatible_candidates"
             if normalized_path == "telecom_floorbox_construct_resolver" and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_floorbox_construct_no_compatible_candidates"
+            if normalized_path == "telecom_pdu_vertical_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_pdu_vertical_no_compatible_candidates"
+            if normalized_path == "telecom_pdu_metered_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_pdu_metered_no_compatible_candidates"
             if normalized_path == "telecom_pdu_resolver" and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_pdu_no_compatible_candidates"
             if normalized_path == "telecom_airflow_panel_resolver" and normalized_reason in no_compatible_reasons:
@@ -1186,6 +1192,10 @@ class ReMoMatcher:
             or ""
         )
         if entity_family == "pdu":
+            if any(token in normalized_query for token in {"измерительн", "metered", "meter"}):
+                return "telecom_pdu_metered_resolver"
+            if any(token in normalized_query for token in {"zero u", "zero-u", "0u", "вертикальн"}):
+                return "telecom_pdu_vertical_resolver"
             return "telecom_pdu_resolver"
         if entity_family in {"airflow_blanking_panel"}:
             if "заглуш" in normalized_query:

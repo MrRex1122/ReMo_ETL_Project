@@ -810,6 +810,43 @@ class NormalizedMatchTests(unittest.TestCase):
         self.assertEqual(result["verifier_decision"], "reject")
         self.assertEqual(result["verifier_reason"], "reject_telecom_pdu_no_compatible_candidates")
 
+    def test_verifier_policy_marks_pdu_vertical_no_compatible_reject_reason(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+        matcher._runtime_taxonomy_rules = lambda: matcher.taxonomy_rules
+
+        result = matcher._apply_verifier_decision(
+            {
+                "success": True,
+                "resolution_source": "unresolved",
+                "compatibility_status": "unresolved_no_compatible_candidates",
+                "incompatibility_reason": "no_compatible_candidates",
+                "resolver_path": "telecom_pdu_vertical_resolver",
+            },
+            query_features={"row_type": "item"},
+        )
+
+        self.assertEqual(result["verifier_decision"], "reject")
+        self.assertEqual(result["verifier_reason"], "reject_telecom_pdu_vertical_no_compatible_candidates")
+
+    def test_verifier_policy_marks_pdu_metered_review_reason(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+        matcher._runtime_taxonomy_rules = lambda: matcher.taxonomy_rules
+
+        result = matcher._apply_verifier_decision(
+            {
+                "success": True,
+                "resolution_source": "",
+                "compatibility_status": "compatible",
+                "resolver_path": "telecom_pdu_metered_resolver",
+            },
+            query_features={"row_type": "item"},
+        )
+
+        self.assertEqual(result["verifier_decision"], "review")
+        self.assertEqual(result["verifier_reason"], "review_telecom_pdu_metered_match")
+
     def test_verifier_policy_marks_airflow_panel_no_compatible_reject_reason(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
         matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
@@ -1214,6 +1251,34 @@ class NormalizedMatchTests(unittest.TestCase):
         )
 
         self.assertEqual(resolver_path, "telecom_pdu_resolver")
+
+    def test_cached_result_resolver_path_uses_pdu_vertical_resolver_for_zero_u_query(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "pdu",
+                "query_text": "Вертикальный блок розеток PDU Zero U",
+            }
+        )
+
+        self.assertEqual(resolver_path, "telecom_pdu_vertical_resolver")
+
+    def test_cached_result_resolver_path_uses_pdu_metered_resolver_for_metered_query(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "pdu",
+                "query_text": "Измерительный блок распределения питания PDU в стойку",
+            }
+        )
+
+        self.assertEqual(resolver_path, "telecom_pdu_metered_resolver")
 
     def test_cached_result_resolver_path_uses_telecom_airflow_resolver_for_airflow_family(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
