@@ -973,7 +973,10 @@ class ReMoMatcher:
             "telecom_airflow_panel_resolver",
             "telecom_airflow_blanking_resolver",
             "telecom_optical_patch_resolver",
+            "telecom_optical_patch_singlemode_resolver",
+            "telecom_optical_patch_multimode_resolver",
             "telecom_optical_cross_resolver",
+            "telecom_optical_cross_populated_resolver",
             "telecom_optical_resolver",
             "telecom_infra_resolver",
         }:
@@ -1040,8 +1043,14 @@ class ReMoMatcher:
                 return "reject_telecom_airflow_no_compatible_candidates"
             if normalized_path == "telecom_optical_patch_resolver" and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_optical_patch_no_compatible_candidates"
+            if normalized_path == "telecom_optical_patch_singlemode_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_optical_patch_singlemode_no_compatible_candidates"
+            if normalized_path == "telecom_optical_patch_multimode_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_optical_patch_multimode_no_compatible_candidates"
             if normalized_path == "telecom_optical_cross_resolver" and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_optical_cross_no_compatible_candidates"
+            if normalized_path == "telecom_optical_cross_populated_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_optical_cross_populated_no_compatible_candidates"
             if normalized_path == "telecom_optical_resolver" and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_optical_no_compatible_candidates"
             if normalized_reason in no_compatible_reasons:
@@ -1260,6 +1269,8 @@ class ReMoMatcher:
         entity_family = self._clean_text_value(query_features.get("entity_type")).lower()
         if not entity_family:
             entity_family = str(self._entity_family(query_features.get("entity_type", "")) or "").strip()
+        query_markers = query_features.get("markers", {}) or {}
+        fiber_mode = self._clean_text_value(query_markers.get("fiber_mode")).lower()
         normalized_query = self._normalize_text(
             query_features.get("original_text")
             or query_features.get("original_query")
@@ -1279,8 +1290,14 @@ class ReMoMatcher:
                 return "telecom_airflow_panel_resolver"
             return "telecom_airflow_resolver"
         if entity_family == "optical_patch_cord":
+            if fiber_mode == "os2":
+                return "telecom_optical_patch_singlemode_resolver"
+            if fiber_mode in {"om1", "om2", "om3", "om4", "om5"}:
+                return "telecom_optical_patch_multimode_resolver"
             return "telecom_optical_patch_resolver"
         if entity_family == "optical_cross":
+            if "укомплект" in normalized_query or "комплект" in normalized_query:
+                return "telecom_optical_cross_populated_resolver"
             return "telecom_optical_cross_resolver"
         if entity_family in {"optical_patch_cord", "optical_cross"}:
             return "telecom_optical_resolver"

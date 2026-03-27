@@ -923,6 +923,25 @@ class NormalizedMatchTests(unittest.TestCase):
         self.assertEqual(result["verifier_decision"], "reject")
         self.assertEqual(result["verifier_reason"], "reject_telecom_optical_patch_no_compatible_candidates")
 
+    def test_verifier_policy_marks_optical_patch_singlemode_no_compatible_reject_reason(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+        matcher._runtime_taxonomy_rules = lambda: matcher.taxonomy_rules
+
+        result = matcher._apply_verifier_decision(
+            {
+                "success": True,
+                "resolution_source": "unresolved",
+                "compatibility_status": "unresolved_no_compatible_candidates",
+                "incompatibility_reason": "no_compatible_candidates",
+                "resolver_path": "telecom_optical_patch_singlemode_resolver",
+            },
+            query_features={"row_type": "item"},
+        )
+
+        self.assertEqual(result["verifier_decision"], "reject")
+        self.assertEqual(result["verifier_reason"], "reject_telecom_optical_patch_singlemode_no_compatible_candidates")
+
     def test_verifier_policy_marks_optical_cross_no_compatible_reject_reason(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
         matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
@@ -941,6 +960,25 @@ class NormalizedMatchTests(unittest.TestCase):
 
         self.assertEqual(result["verifier_decision"], "reject")
         self.assertEqual(result["verifier_reason"], "reject_telecom_optical_cross_no_compatible_candidates")
+
+    def test_verifier_policy_marks_optical_cross_populated_no_compatible_reject_reason(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+        matcher._runtime_taxonomy_rules = lambda: matcher.taxonomy_rules
+
+        result = matcher._apply_verifier_decision(
+            {
+                "success": True,
+                "resolution_source": "unresolved",
+                "compatibility_status": "unresolved_no_compatible_candidates",
+                "incompatibility_reason": "no_compatible_candidates",
+                "resolver_path": "telecom_optical_cross_populated_resolver",
+            },
+            query_features={"row_type": "item"},
+        )
+
+        self.assertEqual(result["verifier_decision"], "reject")
+        self.assertEqual(result["verifier_reason"], "reject_telecom_optical_cross_populated_no_compatible_candidates")
 
     def test_verifier_policy_marks_section_reject_as_non_item_row(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
@@ -1417,6 +1455,21 @@ class NormalizedMatchTests(unittest.TestCase):
 
         self.assertEqual(resolver_path, "telecom_optical_patch_resolver")
 
+    def test_cached_result_resolver_path_uses_optical_patch_singlemode_resolver_for_os2_query(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "optical_patch_cord",
+                "query_text": "Оптический патч-корд LC-LC duplex OS2 3м",
+                "markers": {"fiber_mode": "os2", "duplex": "yes"},
+            }
+        )
+
+        self.assertEqual(resolver_path, "telecom_optical_patch_singlemode_resolver")
+
     def test_cached_result_resolver_path_uses_telecom_optical_cross_resolver_for_cross_family(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
         matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
@@ -1429,6 +1482,20 @@ class NormalizedMatchTests(unittest.TestCase):
         )
 
         self.assertEqual(resolver_path, "telecom_optical_cross_resolver")
+
+    def test_cached_result_resolver_path_uses_optical_cross_populated_resolver_for_populated_query(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "optical_cross",
+                "query_text": "Оптический кросс на 24 волокна 1U укомплектованный",
+            }
+        )
+
+        self.assertEqual(resolver_path, "telecom_optical_cross_populated_resolver")
 
     def test_cached_result_resolver_path_uses_telecom_panel_resolver_for_patch_panel_family(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
