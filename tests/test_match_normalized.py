@@ -773,6 +773,44 @@ class NormalizedMatchTests(unittest.TestCase):
         self.assertEqual(result["verifier_decision"], "reject")
         self.assertEqual(result["verifier_reason"], "reject_telecom_pdu_no_compatible_candidates")
 
+    def test_verifier_policy_marks_airflow_panel_no_compatible_reject_reason(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+        matcher._runtime_taxonomy_rules = lambda: matcher.taxonomy_rules
+
+        result = matcher._apply_verifier_decision(
+            {
+                "success": True,
+                "resolution_source": "unresolved",
+                "compatibility_status": "unresolved_no_compatible_candidates",
+                "incompatibility_reason": "no_compatible_candidates",
+                "resolver_path": "telecom_airflow_panel_resolver",
+            },
+            query_features={"row_type": "item"},
+        )
+
+        self.assertEqual(result["verifier_decision"], "reject")
+        self.assertEqual(result["verifier_reason"], "reject_telecom_airflow_panel_no_compatible_candidates")
+
+    def test_verifier_policy_marks_airflow_blanking_no_compatible_reject_reason(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+        matcher._runtime_taxonomy_rules = lambda: matcher.taxonomy_rules
+
+        result = matcher._apply_verifier_decision(
+            {
+                "success": True,
+                "resolution_source": "unresolved",
+                "compatibility_status": "unresolved_no_compatible_candidates",
+                "incompatibility_reason": "no_compatible_candidates",
+                "resolver_path": "telecom_airflow_blanking_resolver",
+            },
+            query_features={"row_type": "item"},
+        )
+
+        self.assertEqual(result["verifier_decision"], "reject")
+        self.assertEqual(result["verifier_reason"], "reject_telecom_airflow_blanking_no_compatible_candidates")
+
     def test_verifier_policy_marks_optical_no_compatible_reject_reason(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
         matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
@@ -1137,6 +1175,34 @@ class NormalizedMatchTests(unittest.TestCase):
         )
 
         self.assertEqual(resolver_path, "telecom_airflow_resolver")
+
+    def test_cached_result_resolver_path_uses_airflow_panel_resolver_for_panel_query(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "airflow_blanking_panel",
+                "query_text": "Панель для управления потоком воздуха 1U 8U",
+            }
+        )
+
+        self.assertEqual(resolver_path, "telecom_airflow_panel_resolver")
+
+    def test_cached_result_resolver_path_uses_airflow_blanking_resolver_for_blank_query(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "airflow_blanking_panel",
+                "query_text": "Заглушка для управления потоком воздуха",
+            }
+        )
+
+        self.assertEqual(resolver_path, "telecom_airflow_blanking_resolver")
 
     def test_cached_result_resolver_path_uses_telecom_optical_resolver_for_optical_family(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)

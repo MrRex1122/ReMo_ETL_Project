@@ -929,6 +929,8 @@ class ReMoMatcher:
             "telecom_outlet_resolver",
             "telecom_pdu_resolver",
             "telecom_airflow_resolver",
+            "telecom_airflow_panel_resolver",
+            "telecom_airflow_blanking_resolver",
             "telecom_optical_patch_resolver",
             "telecom_optical_cross_resolver",
             "telecom_optical_resolver",
@@ -970,6 +972,10 @@ class ReMoMatcher:
                 return "reject_telecom_floorbox_construct_no_compatible_candidates"
             if normalized_path == "telecom_pdu_resolver" and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_pdu_no_compatible_candidates"
+            if normalized_path == "telecom_airflow_panel_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_airflow_panel_no_compatible_candidates"
+            if normalized_path == "telecom_airflow_blanking_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_airflow_blanking_no_compatible_candidates"
             if normalized_path == "telecom_airflow_resolver" and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_airflow_no_compatible_candidates"
             if normalized_path == "telecom_optical_patch_resolver" and normalized_reason in no_compatible_reasons:
@@ -1144,9 +1150,19 @@ class ReMoMatcher:
         entity_family = self._clean_text_value(query_features.get("entity_type")).lower()
         if not entity_family:
             entity_family = str(self._entity_family(query_features.get("entity_type", "")) or "").strip()
+        normalized_query = self._normalize_text(
+            query_features.get("original_text")
+            or query_features.get("original_query")
+            or query_features.get("query_text")
+            or ""
+        )
         if entity_family == "pdu":
             return "telecom_pdu_resolver"
         if entity_family in {"airflow_blanking_panel"}:
+            if "заглуш" in normalized_query:
+                return "telecom_airflow_blanking_resolver"
+            if "панел" in normalized_query or "поток" in normalized_query:
+                return "telecom_airflow_panel_resolver"
             return "telecom_airflow_resolver"
         if entity_family == "optical_patch_cord":
             return "telecom_optical_patch_resolver"

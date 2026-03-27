@@ -947,6 +947,26 @@ DEFAULT_VERIFIER_POLICY: Dict[str, Dict[str, Any]] = {
         "compatible_default_decision": "review",
         "default_review_reason": "review_telecom_airflow_match",
     },
+    "telecom_airflow_panel_resolver": {
+        "auto_accept_sources": [],
+        "review_sources": [
+            "compatible_local_fallback",
+            "local_tree+gemini",
+            "candidate_tiebreaker_gemini",
+        ],
+        "compatible_default_decision": "review",
+        "default_review_reason": "review_telecom_airflow_panel_match",
+    },
+    "telecom_airflow_blanking_resolver": {
+        "auto_accept_sources": [],
+        "review_sources": [
+            "compatible_local_fallback",
+            "local_tree+gemini",
+            "candidate_tiebreaker_gemini",
+        ],
+        "compatible_default_decision": "review",
+        "default_review_reason": "review_telecom_airflow_blanking_match",
+    },
     "telecom_optical_patch_resolver": {
         "auto_accept_sources": [],
         "review_sources": [
