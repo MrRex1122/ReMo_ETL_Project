@@ -919,6 +919,8 @@ class ReMoMatcher:
             "telecom_outlet_resolver",
             "telecom_pdu_resolver",
             "telecom_airflow_resolver",
+            "telecom_optical_patch_resolver",
+            "telecom_optical_cross_resolver",
             "telecom_optical_resolver",
             "telecom_infra_resolver",
         }:
@@ -940,6 +942,10 @@ class ReMoMatcher:
                 return "reject_telecom_pdu_no_compatible_candidates"
             if normalized_path == "telecom_airflow_resolver" and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_airflow_no_compatible_candidates"
+            if normalized_path == "telecom_optical_patch_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_optical_patch_no_compatible_candidates"
+            if normalized_path == "telecom_optical_cross_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_optical_cross_no_compatible_candidates"
             if normalized_path == "telecom_optical_resolver" and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_optical_no_compatible_candidates"
             if normalized_reason in no_compatible_reasons:
@@ -1089,6 +1095,10 @@ class ReMoMatcher:
             return "telecom_pdu_resolver"
         if entity_family in {"airflow_blanking_panel"}:
             return "telecom_airflow_resolver"
+        if entity_family == "optical_patch_cord":
+            return "telecom_optical_patch_resolver"
+        if entity_family == "optical_cross":
+            return "telecom_optical_cross_resolver"
         if entity_family in {"optical_patch_cord", "optical_cross"}:
             return "telecom_optical_resolver"
         return "telecom_infra_resolver"
