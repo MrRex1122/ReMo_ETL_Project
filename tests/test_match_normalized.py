@@ -640,6 +640,25 @@ class NormalizedMatchTests(unittest.TestCase):
         self.assertEqual(result["verifier_decision"], "reject")
         self.assertEqual(result["verifier_reason"], "reject_telecom_connector_shielded_no_compatible_candidates")
 
+    def test_verifier_policy_marks_shielded_connector_cat6a_no_compatible_reject_reason(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+        matcher._runtime_taxonomy_rules = lambda: matcher.taxonomy_rules
+
+        result = matcher._apply_verifier_decision(
+            {
+                "success": True,
+                "resolution_source": "unresolved",
+                "compatibility_status": "unresolved_no_compatible_candidates",
+                "incompatibility_reason": "no_compatible_candidates",
+                "resolver_path": "telecom_connector_shielded_cat6a_resolver",
+            },
+            query_features={"row_type": "item"},
+        )
+
+        self.assertEqual(result["verifier_decision"], "reject")
+        self.assertEqual(result["verifier_reason"], "reject_telecom_connector_shielded_cat6a_no_compatible_candidates")
+
     def test_verifier_policy_marks_unshielded_keystone_no_compatible_reject_reason(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
         matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
@@ -677,6 +696,25 @@ class NormalizedMatchTests(unittest.TestCase):
 
         self.assertEqual(result["verifier_decision"], "reject")
         self.assertEqual(result["verifier_reason"], "reject_telecom_keystone_shielded_no_compatible_candidates")
+
+    def test_verifier_policy_marks_shielded_keystone_cat6a_no_compatible_reject_reason(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+        matcher._runtime_taxonomy_rules = lambda: matcher.taxonomy_rules
+
+        result = matcher._apply_verifier_decision(
+            {
+                "success": True,
+                "resolution_source": "unresolved",
+                "compatibility_status": "unresolved_no_compatible_candidates",
+                "incompatibility_reason": "no_compatible_candidates",
+                "resolver_path": "telecom_keystone_shielded_cat6a_resolver",
+            },
+            query_features={"row_type": "item"},
+        )
+
+        self.assertEqual(result["verifier_decision"], "reject")
+        self.assertEqual(result["verifier_reason"], "reject_telecom_keystone_shielded_cat6a_no_compatible_candidates")
 
     def test_verifier_policy_marks_construct_no_compatible_reject_reason(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
@@ -1371,11 +1409,11 @@ class NormalizedMatchTests(unittest.TestCase):
                 "row_type": "item",
                 "entity_type": "keystone",
                 "query_text": "Модуль Keystone экранированный категория 6a",
-                "markers": {"shielding": "ftp"},
+                "markers": {"shielding": "ftp", "category": "cat6a"},
             }
         )
 
-        self.assertEqual(resolver_path, "telecom_keystone_shielded_resolver")
+        self.assertEqual(resolver_path, "telecom_keystone_shielded_cat6a_resolver")
 
     def test_cached_result_resolver_path_uses_telecom_construct_resolver_for_outlet_assembly(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
@@ -1701,11 +1739,11 @@ class NormalizedMatchTests(unittest.TestCase):
                 "row_type": "item",
                 "entity_type": "rj45_connector",
                 "query_text": "Коннектор RJ-45 экранированный категория 6a",
-                "markers": {"shielding": "ftp"},
+                "markers": {"shielding": "ftp", "category": "cat6a"},
             }
         )
 
-        self.assertEqual(resolver_path, "telecom_connector_shielded_resolver")
+        self.assertEqual(resolver_path, "telecom_connector_shielded_cat6a_resolver")
 
     def test_cached_result_resolver_path_uses_software_review_for_software_family(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)

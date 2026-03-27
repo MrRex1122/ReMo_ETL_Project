@@ -993,10 +993,14 @@ class ReMoMatcher:
             "telecom_modular_panel_shielded_resolver",
             "telecom_connector_resolver",
             "telecom_connector_unshielded_resolver",
+            "telecom_connector_unshielded_cat6a_resolver",
             "telecom_connector_shielded_resolver",
+            "telecom_connector_shielded_cat6a_resolver",
             "telecom_keystone_resolver",
             "telecom_keystone_unshielded_resolver",
+            "telecom_keystone_unshielded_cat6a_resolver",
             "telecom_keystone_shielded_resolver",
+            "telecom_keystone_shielded_cat6a_resolver",
             "telecom_construct_resolver",
             "telecom_channel_construct_resolver",
             "telecom_channel_single_port_construct_resolver",
@@ -1043,12 +1047,20 @@ class ReMoMatcher:
                 return "reject_telecom_panel_no_compatible_candidates"
             if normalized_path == "telecom_connector_unshielded_resolver" and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_connector_unshielded_no_compatible_candidates"
+            if normalized_path == "telecom_connector_unshielded_cat6a_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_connector_unshielded_cat6a_no_compatible_candidates"
             if normalized_path == "telecom_connector_shielded_resolver" and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_connector_shielded_no_compatible_candidates"
+            if normalized_path == "telecom_connector_shielded_cat6a_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_connector_shielded_cat6a_no_compatible_candidates"
             if normalized_path == "telecom_keystone_unshielded_resolver" and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_keystone_unshielded_no_compatible_candidates"
+            if normalized_path == "telecom_keystone_unshielded_cat6a_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_keystone_unshielded_cat6a_no_compatible_candidates"
             if normalized_path == "telecom_keystone_shielded_resolver" and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_keystone_shielded_no_compatible_candidates"
+            if normalized_path == "telecom_keystone_shielded_cat6a_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_keystone_shielded_cat6a_no_compatible_candidates"
             if normalized_path == "telecom_keystone_resolver" and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_keystone_no_compatible_candidates"
             if normalized_path == "telecom_construct_resolver" and normalized_reason in no_compatible_reasons:
@@ -1235,6 +1247,7 @@ class ReMoMatcher:
         query_component = self._clean_text_value(query_markers.get("component_kind"))
         query_installation = self._clean_text_value(query_markers.get("installation_kind"))
         query_shielding = self._clean_text_value(query_markers.get("shielding")).lower()
+        query_category = self._clean_text_value(query_markers.get("category")).lower()
         query_port_count = self._clean_text_value(query_markers.get("port_count"))
         normalized_query = self._normalize_text(
             query_features.get("original_text")
@@ -1243,6 +1256,7 @@ class ReMoMatcher:
             or ""
         )
         is_dual_port = query_port_count == "2" or "двух порт" in normalized_query or "2 порт" in normalized_query
+        is_cat6a = query_category in {"cat6a", "category_6a", "6a"} or "cat6a" in normalized_query or " 6a" in normalized_query
         if normalized == "patch_panel":
             is_unshielded = "неэкранир" in normalized_query or query_shielding in {"utp", "u/utp", "u_utp", "unshielded"}
             is_shielded = (
@@ -1264,20 +1278,28 @@ class ReMoMatcher:
             return "telecom_panel_resolver"
         if normalized == "rj45_connector":
             if "неэкранир" in normalized_query or query_shielding in {"utp", "u/utp", "u_utp", "unshielded"}:
+                if is_cat6a:
+                    return "telecom_connector_unshielded_cat6a_resolver"
                 return "telecom_connector_unshielded_resolver"
             if (
                 "экранир" in normalized_query
                 or query_shielding in {"ftp", "f/utp", "stp", "s/ftp", "sftp", "shielded"}
             ):
+                if is_cat6a:
+                    return "telecom_connector_shielded_cat6a_resolver"
                 return "telecom_connector_shielded_resolver"
             return "telecom_connector_resolver"
         if normalized == "keystone":
             if "неэкранир" in normalized_query or query_shielding in {"utp", "u/utp", "u_utp", "unshielded"}:
+                if is_cat6a:
+                    return "telecom_keystone_unshielded_cat6a_resolver"
                 return "telecom_keystone_unshielded_resolver"
             if (
                 "экранир" in normalized_query
                 or query_shielding in {"ftp", "f/utp", "stp", "s/ftp", "sftp", "shielded"}
             ):
+                if is_cat6a:
+                    return "telecom_keystone_shielded_cat6a_resolver"
                 return "telecom_keystone_shielded_resolver"
             return "telecom_keystone_resolver"
         if normalized == "rj45_outlet":
