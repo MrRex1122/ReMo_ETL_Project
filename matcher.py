@@ -842,6 +842,7 @@ class ReMoMatcher:
             "rack_tray_corner_series_resolver",
             "rack_tray_branch_series_resolver",
             "rack_tray_tee_series_resolver",
+            "rack_tray_dl_tee_series_resolver",
             "rack_tray_fastener_series_resolver",
             "rack_tray_channel_series_resolver",
             "rack_tray_semantic_resolver",
@@ -920,6 +921,7 @@ class ReMoMatcher:
             "rack_tray_corner_series_resolver",
             "rack_tray_branch_series_resolver",
             "rack_tray_tee_series_resolver",
+            "rack_tray_dl_tee_series_resolver",
             "rack_tray_fastener_series_resolver",
             "rack_tray_channel_series_resolver",
             "rack_tray_semantic_resolver",
@@ -941,6 +943,8 @@ class ReMoMatcher:
                     return "reject_rack_tray_branch_family_gate"
                 if normalized_path == "rack_tray_tee_series_resolver":
                     return "reject_rack_tray_tee_family_gate"
+                if normalized_path == "rack_tray_dl_tee_series_resolver":
+                    return "reject_rack_tray_dl_tee_family_gate"
                 if normalized_path == "rack_tray_fastener_series_resolver":
                     return "reject_rack_tray_fastener_family_gate"
                 if normalized_path == "rack_tray_brush_resolver":
@@ -965,6 +969,8 @@ class ReMoMatcher:
                     return "reject_rack_tray_branch_no_compatible_candidates"
                 if normalized_path == "rack_tray_tee_series_resolver":
                     return "reject_rack_tray_tee_no_compatible_candidates"
+                if normalized_path == "rack_tray_dl_tee_series_resolver":
+                    return "reject_rack_tray_dl_tee_no_compatible_candidates"
                 if normalized_path == "rack_tray_fastener_series_resolver":
                     return "reject_rack_tray_fastener_no_compatible_candidates"
                 if normalized_path == "rack_tray_brush_resolver":
@@ -1020,6 +1026,7 @@ class ReMoMatcher:
             "telecom_airflow_blanking_resolver",
             "telecom_optical_patch_resolver",
             "telecom_optical_patch_singlemode_resolver",
+            "telecom_optical_patch_singlemode_duplex_resolver",
             "telecom_optical_patch_multimode_resolver",
             "telecom_optical_cross_resolver",
             "telecom_optical_cross_populated_resolver",
@@ -1099,6 +1106,8 @@ class ReMoMatcher:
                 return "reject_telecom_optical_patch_no_compatible_candidates"
             if normalized_path == "telecom_optical_patch_singlemode_resolver" and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_optical_patch_singlemode_no_compatible_candidates"
+            if normalized_path == "telecom_optical_patch_singlemode_duplex_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_optical_patch_singlemode_duplex_no_compatible_candidates"
             if normalized_path == "telecom_optical_patch_multimode_resolver" and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_optical_patch_multimode_no_compatible_candidates"
             if normalized_path == "telecom_optical_cross_resolver" and normalized_reason in no_compatible_reasons:
@@ -1195,6 +1204,8 @@ class ReMoMatcher:
             if accessory_kind == "corner":
                 return "rack_tray_corner_series_resolver"
             if accessory_kind == "tee":
+                if re.search(r"\bdl\b", normalized_query, flags=re.IGNORECASE):
+                    return "rack_tray_dl_tee_series_resolver"
                 return "rack_tray_tee_series_resolver"
             if accessory_kind == "fastener":
                 return "rack_tray_fastener_series_resolver"
@@ -1364,7 +1375,16 @@ class ReMoMatcher:
                 return "telecom_airflow_panel_resolver"
             return "telecom_airflow_resolver"
         if entity_family == "optical_patch_cord":
+            query_connector_pair = self._clean_text_value(query_markers.get("connector_pair")).lower()
+            query_duplex = self._clean_text_value(query_markers.get("duplex")).lower()
+            is_duplex = query_duplex in {"yes", "true", "1", "duplex"} or "duplex" in normalized_query
             if fiber_mode == "os2":
+                if is_duplex and (
+                    query_connector_pair in {"lc-lc", "lc_lc", "lclc"}
+                    or "lc-lc" in normalized_query
+                    or "lc lc" in normalized_query
+                ):
+                    return "telecom_optical_patch_singlemode_duplex_resolver"
                 return "telecom_optical_patch_singlemode_resolver"
             if fiber_mode in {"om1", "om2", "om3", "om4", "om5"}:
                 return "telecom_optical_patch_multimode_resolver"

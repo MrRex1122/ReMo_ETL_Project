@@ -470,6 +470,25 @@ class NormalizedMatchTests(unittest.TestCase):
         self.assertEqual(result["verifier_decision"], "reject")
         self.assertEqual(result["verifier_reason"], "reject_rack_tray_branch_no_compatible_candidates")
 
+    def test_verifier_policy_marks_rack_tray_dl_tee_no_compatible_reject_reason(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+        matcher._runtime_taxonomy_rules = lambda: matcher.taxonomy_rules
+
+        result = matcher._apply_verifier_decision(
+            {
+                "success": True,
+                "resolution_source": "unresolved",
+                "compatibility_status": "unresolved_no_compatible_candidates",
+                "incompatibility_reason": "no_compatible_candidates",
+                "resolver_path": "rack_tray_dl_tee_series_resolver",
+            },
+            query_features={"row_type": "item"},
+        )
+
+        self.assertEqual(result["verifier_decision"], "reject")
+        self.assertEqual(result["verifier_reason"], "reject_rack_tray_dl_tee_no_compatible_candidates")
+
     def test_verifier_policy_marks_rack_tray_fastener_no_compatible_reject_reason(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
         matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
@@ -1019,7 +1038,7 @@ class NormalizedMatchTests(unittest.TestCase):
         self.assertEqual(result["verifier_decision"], "reject")
         self.assertEqual(result["verifier_reason"], "reject_telecom_optical_patch_no_compatible_candidates")
 
-    def test_verifier_policy_marks_optical_patch_singlemode_no_compatible_reject_reason(self):
+    def test_verifier_policy_marks_optical_patch_singlemode_duplex_no_compatible_reject_reason(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
         matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
         matcher._runtime_taxonomy_rules = lambda: matcher.taxonomy_rules
@@ -1030,13 +1049,13 @@ class NormalizedMatchTests(unittest.TestCase):
                 "resolution_source": "unresolved",
                 "compatibility_status": "unresolved_no_compatible_candidates",
                 "incompatibility_reason": "no_compatible_candidates",
-                "resolver_path": "telecom_optical_patch_singlemode_resolver",
+                "resolver_path": "telecom_optical_patch_singlemode_duplex_resolver",
             },
             query_features={"row_type": "item"},
         )
 
         self.assertEqual(result["verifier_decision"], "reject")
-        self.assertEqual(result["verifier_reason"], "reject_telecom_optical_patch_singlemode_no_compatible_candidates")
+        self.assertEqual(result["verifier_reason"], "reject_telecom_optical_patch_singlemode_duplex_no_compatible_candidates")
 
     def test_verifier_policy_marks_optical_cross_no_compatible_reject_reason(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
@@ -1306,7 +1325,7 @@ class NormalizedMatchTests(unittest.TestCase):
 
         self.assertEqual(resolver_path, "rack_tray_profile_series_resolver")
 
-    def test_cached_result_resolver_path_uses_rack_tray_tee_series_resolver_for_tee_article(self):
+    def test_cached_result_resolver_path_uses_rack_tray_dl_tee_series_resolver_for_dl_tee_article(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
         matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
 
@@ -1318,6 +1337,23 @@ class NormalizedMatchTests(unittest.TestCase):
                 "dimension_pairs": ["200x50"],
                 "markers": {"accessory_kind": "tee"},
                 "original_query": "Ответвитель DL 200x50 артикул 36238K",
+            }
+        )
+
+        self.assertEqual(resolver_path, "rack_tray_dl_tee_series_resolver")
+
+    def test_cached_result_resolver_path_keeps_generic_rack_tray_tee_series_resolver_for_non_dl_tee_article(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "rack_accessory_strict",
+                "query_article": "CPO10050",
+                "dimension_pairs": ["100x50"],
+                "markers": {"accessory_kind": "tee"},
+                "original_query": "Ответвитель CPO 100x50 артикул CPO10050",
             }
         )
 
@@ -1619,7 +1655,7 @@ class NormalizedMatchTests(unittest.TestCase):
 
         self.assertEqual(resolver_path, "telecom_optical_patch_resolver")
 
-    def test_cached_result_resolver_path_uses_optical_patch_singlemode_resolver_for_os2_query(self):
+    def test_cached_result_resolver_path_uses_optical_patch_singlemode_duplex_resolver_for_os2_query(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
         matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
 
@@ -1632,7 +1668,7 @@ class NormalizedMatchTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(resolver_path, "telecom_optical_patch_singlemode_resolver")
+        self.assertEqual(resolver_path, "telecom_optical_patch_singlemode_duplex_resolver")
 
     def test_cached_result_resolver_path_uses_telecom_optical_cross_resolver_for_cross_family(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)

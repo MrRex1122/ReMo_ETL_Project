@@ -747,6 +747,16 @@ DEFAULT_VERIFIER_POLICY: Dict[str, Dict[str, Any]] = {
         "compatible_default_decision": "review",
         "default_review_reason": "review_rack_tray_tee_series_match",
     },
+    "rack_tray_dl_tee_series_resolver": {
+        "auto_accept_sources": [],
+        "review_sources": [
+            "compatible_local_fallback",
+            "local_tree+gemini",
+            "candidate_tiebreaker_gemini",
+        ],
+        "compatible_default_decision": "review",
+        "default_review_reason": "review_rack_tray_dl_tee_series_match",
+    },
     "rack_tray_fastener_series_resolver": {
         "auto_accept_sources": [],
         "review_sources": [
@@ -1206,6 +1216,16 @@ DEFAULT_VERIFIER_POLICY: Dict[str, Dict[str, Any]] = {
         ],
         "compatible_default_decision": "review",
         "default_review_reason": "review_telecom_optical_patch_singlemode_match",
+    },
+    "telecom_optical_patch_singlemode_duplex_resolver": {
+        "auto_accept_sources": [],
+        "review_sources": [
+            "compatible_local_fallback",
+            "local_tree+gemini",
+            "candidate_tiebreaker_gemini",
+        ],
+        "compatible_default_decision": "review",
+        "default_review_reason": "review_telecom_optical_patch_singlemode_duplex_match",
     },
     "telecom_optical_patch_multimode_resolver": {
         "auto_accept_sources": [],
