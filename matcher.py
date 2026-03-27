@@ -912,6 +912,8 @@ class ReMoMatcher:
             "telecom_modular_panel_resolver",
             "telecom_connector_resolver",
             "telecom_keystone_resolver",
+            "telecom_keystone_unshielded_resolver",
+            "telecom_keystone_shielded_resolver",
             "telecom_construct_resolver",
             "telecom_channel_construct_resolver",
             "telecom_wallbox_construct_resolver",
@@ -928,6 +930,10 @@ class ReMoMatcher:
                 return "reject_telecom_non_target_family"
             if normalized_path in {"telecom_block_panel_resolver", "telecom_modular_panel_resolver"} and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_panel_no_compatible_candidates"
+            if normalized_path == "telecom_keystone_unshielded_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_keystone_unshielded_no_compatible_candidates"
+            if normalized_path == "telecom_keystone_shielded_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_keystone_shielded_no_compatible_candidates"
             if normalized_path == "telecom_keystone_resolver" and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_keystone_no_compatible_candidates"
             if normalized_path == "telecom_construct_resolver" and normalized_reason in no_compatible_reasons:
@@ -1040,6 +1046,7 @@ class ReMoMatcher:
         query_markers = query_features.get("markers", {}) or {}
         query_component = self._clean_text_value(query_markers.get("component_kind"))
         query_installation = self._clean_text_value(query_markers.get("installation_kind"))
+        query_shielding = self._clean_text_value(query_markers.get("shielding")).lower()
         normalized_query = self._normalize_text(
             query_features.get("original_text")
             or query_features.get("original_query")
@@ -1055,6 +1062,13 @@ class ReMoMatcher:
         if normalized == "rj45_connector":
             return "telecom_connector_resolver"
         if normalized == "keystone":
+            if "неэкранир" in normalized_query or query_shielding in {"utp", "u/utp", "u_utp", "unshielded"}:
+                return "telecom_keystone_unshielded_resolver"
+            if (
+                "экранир" in normalized_query
+                or query_shielding in {"ftp", "f/utp", "stp", "s/ftp", "sftp", "shielded"}
+            ):
+                return "telecom_keystone_shielded_resolver"
             return "telecom_keystone_resolver"
         if normalized == "rj45_outlet":
             if (
