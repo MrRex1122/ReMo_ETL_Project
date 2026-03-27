@@ -911,6 +911,9 @@ class ReMoMatcher:
             "telecom_connector_resolver",
             "telecom_keystone_resolver",
             "telecom_construct_resolver",
+            "telecom_channel_construct_resolver",
+            "telecom_wallbox_construct_resolver",
+            "telecom_floorbox_construct_resolver",
             "telecom_outlet_resolver",
             "telecom_pdu_resolver",
             "telecom_airflow_resolver",
@@ -923,6 +926,12 @@ class ReMoMatcher:
                 return "reject_telecom_keystone_no_compatible_candidates"
             if normalized_path == "telecom_construct_resolver" and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_construct_no_compatible_candidates"
+            if normalized_path == "telecom_channel_construct_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_channel_construct_no_compatible_candidates"
+            if normalized_path == "telecom_wallbox_construct_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_wallbox_construct_no_compatible_candidates"
+            if normalized_path == "telecom_floorbox_construct_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_floorbox_construct_no_compatible_candidates"
             if normalized_path == "telecom_pdu_resolver" and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_pdu_no_compatible_candidates"
             if normalized_path == "telecom_airflow_resolver" and normalized_reason in no_compatible_reasons:
@@ -1039,6 +1048,12 @@ class ReMoMatcher:
                 or query_installation in {"cable_channel", "floor_box"}
                 or ("конструктив" in normalized_query and "розет" in normalized_query)
             ):
+                if query_installation == "cable_channel" or "кабель канал" in normalized_query.replace("-", " "):
+                    return "telecom_channel_construct_resolver"
+                if query_installation == "floor_box" or "лючок" in normalized_query or "напольн" in normalized_query:
+                    return "telecom_floorbox_construct_resolver"
+                if "настенн" in normalized_query and "короб" in normalized_query:
+                    return "telecom_wallbox_construct_resolver"
                 return "telecom_construct_resolver"
             return "telecom_outlet_resolver"
         return "telecom_component_resolver"
