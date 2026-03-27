@@ -908,6 +908,8 @@ class ReMoMatcher:
             "telecom_semantic_resolver",
             "telecom_component_resolver",
             "telecom_panel_resolver",
+            "telecom_block_panel_resolver",
+            "telecom_modular_panel_resolver",
             "telecom_connector_resolver",
             "telecom_keystone_resolver",
             "telecom_construct_resolver",
@@ -922,6 +924,8 @@ class ReMoMatcher:
         }:
             if normalized_reason == "non_target_family":
                 return "reject_telecom_non_target_family"
+            if normalized_path in {"telecom_block_panel_resolver", "telecom_modular_panel_resolver"} and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_panel_no_compatible_candidates"
             if normalized_path == "telecom_keystone_resolver" and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_keystone_no_compatible_candidates"
             if normalized_path == "telecom_construct_resolver" and normalized_reason in no_compatible_reasons:
@@ -1037,6 +1041,10 @@ class ReMoMatcher:
             or ""
         )
         if normalized == "patch_panel":
+            if "блоч" in normalized_query:
+                return "telecom_block_panel_resolver"
+            if "наборн" in normalized_query:
+                return "telecom_modular_panel_resolver"
             return "telecom_panel_resolver"
         if normalized == "rj45_connector":
             return "telecom_connector_resolver"
