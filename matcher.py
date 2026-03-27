@@ -837,9 +837,12 @@ class ReMoMatcher:
             "rack_tray_support_series_resolver",
             "rack_tray_holder_series_resolver",
             "rack_tray_console_series_resolver",
+            "rack_tray_profile_series_resolver",
             "rack_tray_fitting_series_resolver",
             "rack_tray_corner_series_resolver",
             "rack_tray_branch_series_resolver",
+            "rack_tray_tee_series_resolver",
+            "rack_tray_fastener_series_resolver",
             "rack_tray_channel_series_resolver",
             "rack_tray_semantic_resolver",
             "rack_tray_brush_resolver",
@@ -912,9 +915,12 @@ class ReMoMatcher:
             "rack_tray_support_series_resolver",
             "rack_tray_holder_series_resolver",
             "rack_tray_console_series_resolver",
+            "rack_tray_profile_series_resolver",
             "rack_tray_fitting_series_resolver",
             "rack_tray_corner_series_resolver",
             "rack_tray_branch_series_resolver",
+            "rack_tray_tee_series_resolver",
+            "rack_tray_fastener_series_resolver",
             "rack_tray_channel_series_resolver",
             "rack_tray_semantic_resolver",
             "rack_tray_brush_resolver",
@@ -927,10 +933,16 @@ class ReMoMatcher:
                     return "reject_rack_tray_holder_family_gate"
                 if normalized_path == "rack_tray_console_series_resolver":
                     return "reject_rack_tray_console_family_gate"
+                if normalized_path == "rack_tray_profile_series_resolver":
+                    return "reject_rack_tray_profile_family_gate"
                 if normalized_path == "rack_tray_corner_series_resolver":
                     return "reject_rack_tray_corner_family_gate"
                 if normalized_path == "rack_tray_branch_series_resolver":
                     return "reject_rack_tray_branch_family_gate"
+                if normalized_path == "rack_tray_tee_series_resolver":
+                    return "reject_rack_tray_tee_family_gate"
+                if normalized_path == "rack_tray_fastener_series_resolver":
+                    return "reject_rack_tray_fastener_family_gate"
                 if normalized_path == "rack_tray_brush_resolver":
                     return "reject_rack_tray_brush_family_gate"
                 if normalized_path == "rack_tray_organizer_resolver":
@@ -945,10 +957,16 @@ class ReMoMatcher:
                     return "reject_rack_tray_holder_no_compatible_candidates"
                 if normalized_path == "rack_tray_console_series_resolver":
                     return "reject_rack_tray_console_no_compatible_candidates"
+                if normalized_path == "rack_tray_profile_series_resolver":
+                    return "reject_rack_tray_profile_no_compatible_candidates"
                 if normalized_path == "rack_tray_corner_series_resolver":
                     return "reject_rack_tray_corner_no_compatible_candidates"
                 if normalized_path == "rack_tray_branch_series_resolver":
                     return "reject_rack_tray_branch_no_compatible_candidates"
+                if normalized_path == "rack_tray_tee_series_resolver":
+                    return "reject_rack_tray_tee_no_compatible_candidates"
+                if normalized_path == "rack_tray_fastener_series_resolver":
+                    return "reject_rack_tray_fastener_no_compatible_candidates"
                 if normalized_path == "rack_tray_brush_resolver":
                     return "reject_rack_tray_brush_no_compatible_candidates"
                 if normalized_path == "rack_tray_organizer_resolver":
@@ -1158,12 +1176,16 @@ class ReMoMatcher:
         if query_article and has_dimensions:
             if accessory_kind == "holder":
                 return "rack_tray_holder_series_resolver"
-            if accessory_kind in {"console", "profile"}:
+            if accessory_kind == "console":
                 return "rack_tray_console_series_resolver"
+            if accessory_kind == "profile":
+                return "rack_tray_profile_series_resolver"
             if accessory_kind == "corner":
                 return "rack_tray_corner_series_resolver"
-            if accessory_kind in {"tee", "fastener"}:
-                return "rack_tray_branch_series_resolver"
+            if accessory_kind == "tee":
+                return "rack_tray_tee_series_resolver"
+            if accessory_kind == "fastener":
+                return "rack_tray_fastener_series_resolver"
             if accessory_kind in {"plate", "connector_plate", "grounding_plate"}:
                 return "rack_tray_fitting_series_resolver"
             if accessory_kind == "cover":

@@ -697,6 +697,16 @@ DEFAULT_VERIFIER_POLICY: Dict[str, Dict[str, Any]] = {
         "compatible_default_decision": "review",
         "default_review_reason": "review_rack_tray_console_series_match",
     },
+    "rack_tray_profile_series_resolver": {
+        "auto_accept_sources": [],
+        "review_sources": [
+            "compatible_local_fallback",
+            "local_tree+gemini",
+            "candidate_tiebreaker_gemini",
+        ],
+        "compatible_default_decision": "review",
+        "default_review_reason": "review_rack_tray_profile_series_match",
+    },
     "rack_tray_fitting_series_resolver": {
         "auto_accept_sources": [],
         "review_sources": [
@@ -726,6 +736,26 @@ DEFAULT_VERIFIER_POLICY: Dict[str, Dict[str, Any]] = {
         ],
         "compatible_default_decision": "review",
         "default_review_reason": "review_rack_tray_branch_series_match",
+    },
+    "rack_tray_tee_series_resolver": {
+        "auto_accept_sources": [],
+        "review_sources": [
+            "compatible_local_fallback",
+            "local_tree+gemini",
+            "candidate_tiebreaker_gemini",
+        ],
+        "compatible_default_decision": "review",
+        "default_review_reason": "review_rack_tray_tee_series_match",
+    },
+    "rack_tray_fastener_series_resolver": {
+        "auto_accept_sources": [],
+        "review_sources": [
+            "compatible_local_fallback",
+            "local_tree+gemini",
+            "candidate_tiebreaker_gemini",
+        ],
+        "compatible_default_decision": "review",
+        "default_review_reason": "review_rack_tray_fastener_series_match",
     },
     "rack_tray_channel_series_resolver": {
         "auto_accept_sources": [],
