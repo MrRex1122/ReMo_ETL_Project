@@ -223,13 +223,13 @@ class NormalizedMatchTests(unittest.TestCase):
                 "resolution_source": "unresolved",
                 "compatibility_status": "unresolved_no_compatible_candidates",
                 "incompatibility_reason": "no_compatible_candidates",
-                "resolver_path": "telecom_block_panel_resolver",
+                "resolver_path": "telecom_block_panel_unshielded_resolver",
             },
             query_features={"row_type": "item"},
         )
 
         self.assertEqual(result["verifier_decision"], "reject")
-        self.assertEqual(result["verifier_reason"], "reject_telecom_panel_no_compatible_candidates")
+        self.assertEqual(result["verifier_reason"], "reject_telecom_block_panel_unshielded_no_compatible_candidates")
 
     def test_verifier_policy_marks_modular_panel_no_compatible_reject_reason(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
@@ -242,13 +242,13 @@ class NormalizedMatchTests(unittest.TestCase):
                 "resolution_source": "unresolved",
                 "compatibility_status": "unresolved_no_compatible_candidates",
                 "incompatibility_reason": "no_compatible_candidates",
-                "resolver_path": "telecom_modular_panel_resolver",
+                "resolver_path": "telecom_modular_panel_shielded_resolver",
             },
             query_features={"row_type": "item"},
         )
 
         self.assertEqual(result["verifier_decision"], "reject")
-        self.assertEqual(result["verifier_reason"], "reject_telecom_panel_no_compatible_candidates")
+        self.assertEqual(result["verifier_reason"], "reject_telecom_modular_panel_shielded_no_compatible_candidates")
 
     def test_verifier_policy_uses_keystone_resolver_review_reason(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
@@ -1372,7 +1372,7 @@ class NormalizedMatchTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(resolver_path, "telecom_block_panel_resolver")
+        self.assertEqual(resolver_path, "telecom_block_panel_unshielded_resolver")
 
     def test_cached_result_resolver_path_uses_modular_panel_resolver_for_modular_patch_panel(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
@@ -1386,7 +1386,7 @@ class NormalizedMatchTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(resolver_path, "telecom_modular_panel_resolver")
+        self.assertEqual(resolver_path, "telecom_modular_panel_shielded_resolver")
 
     def test_cached_result_resolver_path_uses_telecom_connector_resolver_for_rj45_connector_family(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)

@@ -920,7 +920,11 @@ class ReMoMatcher:
             "telecom_component_resolver",
             "telecom_panel_resolver",
             "telecom_block_panel_resolver",
+            "telecom_block_panel_unshielded_resolver",
+            "telecom_block_panel_shielded_resolver",
             "telecom_modular_panel_resolver",
+            "telecom_modular_panel_unshielded_resolver",
+            "telecom_modular_panel_shielded_resolver",
             "telecom_connector_resolver",
             "telecom_connector_unshielded_resolver",
             "telecom_connector_shielded_resolver",
@@ -951,7 +955,22 @@ class ReMoMatcher:
         }:
             if normalized_reason == "non_target_family":
                 return "reject_telecom_non_target_family"
-            if normalized_path in {"telecom_block_panel_resolver", "telecom_modular_panel_resolver"} and normalized_reason in no_compatible_reasons:
+            if normalized_path in {
+                "telecom_block_panel_resolver",
+                "telecom_modular_panel_resolver",
+                "telecom_block_panel_unshielded_resolver",
+                "telecom_block_panel_shielded_resolver",
+                "telecom_modular_panel_unshielded_resolver",
+                "telecom_modular_panel_shielded_resolver",
+            } and normalized_reason in no_compatible_reasons:
+                if normalized_path == "telecom_block_panel_unshielded_resolver":
+                    return "reject_telecom_block_panel_unshielded_no_compatible_candidates"
+                if normalized_path == "telecom_block_panel_shielded_resolver":
+                    return "reject_telecom_block_panel_shielded_no_compatible_candidates"
+                if normalized_path == "telecom_modular_panel_unshielded_resolver":
+                    return "reject_telecom_modular_panel_unshielded_no_compatible_candidates"
+                if normalized_path == "telecom_modular_panel_shielded_resolver":
+                    return "reject_telecom_modular_panel_shielded_no_compatible_candidates"
                 return "reject_telecom_panel_no_compatible_candidates"
             if normalized_path == "telecom_connector_unshielded_resolver" and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_connector_unshielded_no_compatible_candidates"
@@ -1121,9 +1140,22 @@ class ReMoMatcher:
         )
         is_dual_port = query_port_count == "2" or "двух порт" in normalized_query or "2 порт" in normalized_query
         if normalized == "patch_panel":
+            is_unshielded = "неэкранир" in normalized_query or query_shielding in {"utp", "u/utp", "u_utp", "unshielded"}
+            is_shielded = (
+                "экранир" in normalized_query
+                or query_shielding in {"ftp", "f/utp", "stp", "s/ftp", "sftp", "shielded"}
+            )
             if "блоч" in normalized_query:
+                if is_unshielded:
+                    return "telecom_block_panel_unshielded_resolver"
+                if is_shielded:
+                    return "telecom_block_panel_shielded_resolver"
                 return "telecom_block_panel_resolver"
             if "наборн" in normalized_query:
+                if is_unshielded:
+                    return "telecom_modular_panel_unshielded_resolver"
+                if is_shielded:
+                    return "telecom_modular_panel_shielded_resolver"
                 return "telecom_modular_panel_resolver"
             return "telecom_panel_resolver"
         if normalized == "rj45_connector":
