@@ -1392,7 +1392,7 @@ class ReMoMatcher:
         ):
             return "monitoring_review_resolver"
         if (query_article or "артикул" in normalized_query) and has_dimensions and domain_label in {"tray", ""}:
-            return "series_review_resolver"
+            return "rack_tray_short_article_resolver"
         return "fallback_resolver"
 
     def _cached_result_resolver_path(self, query_features: Dict[str, Any]) -> str:

@@ -1235,6 +1235,15 @@ DEFAULT_VERIFIER_POLICY: Dict[str, Dict[str, Any]] = {
         "compatible_default_decision": "review",
         "default_review_reason": "review_series_or_short_article_match",
     },
+    "rack_tray_short_article_resolver": {
+        "auto_accept_sources": [],
+        "review_sources": [
+            "compatible_local_fallback",
+            "assembly_possible_local_fallback",
+        ],
+        "compatible_default_decision": "review",
+        "default_review_reason": "review_rack_tray_short_article_match",
+    },
     "software_review_resolver": {
         "auto_accept_sources": [],
         "review_sources": [

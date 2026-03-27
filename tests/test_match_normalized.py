@@ -1166,7 +1166,7 @@ class NormalizedMatchTests(unittest.TestCase):
 
         self.assertEqual(resolver_path, "fallback_resolver")
 
-    def test_cached_result_resolver_path_uses_series_review_for_short_article_dimensions(self):
+    def test_cached_result_resolver_path_uses_rack_tray_short_article_for_short_article_dimensions(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
         matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
 
@@ -1181,7 +1181,7 @@ class NormalizedMatchTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(resolver_path, "series_review_resolver")
+        self.assertEqual(resolver_path, "rack_tray_short_article_resolver")
 
     def test_cached_result_resolver_path_uses_rack_tray_series_resolver_for_short_article_dimensions(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
