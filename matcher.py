@@ -911,6 +911,8 @@ class ReMoMatcher:
             "telecom_block_panel_resolver",
             "telecom_modular_panel_resolver",
             "telecom_connector_resolver",
+            "telecom_connector_unshielded_resolver",
+            "telecom_connector_shielded_resolver",
             "telecom_keystone_resolver",
             "telecom_keystone_unshielded_resolver",
             "telecom_keystone_shielded_resolver",
@@ -930,6 +932,10 @@ class ReMoMatcher:
                 return "reject_telecom_non_target_family"
             if normalized_path in {"telecom_block_panel_resolver", "telecom_modular_panel_resolver"} and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_panel_no_compatible_candidates"
+            if normalized_path == "telecom_connector_unshielded_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_connector_unshielded_no_compatible_candidates"
+            if normalized_path == "telecom_connector_shielded_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_connector_shielded_no_compatible_candidates"
             if normalized_path == "telecom_keystone_unshielded_resolver" and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_keystone_unshielded_no_compatible_candidates"
             if normalized_path == "telecom_keystone_shielded_resolver" and normalized_reason in no_compatible_reasons:
@@ -1060,6 +1066,13 @@ class ReMoMatcher:
                 return "telecom_modular_panel_resolver"
             return "telecom_panel_resolver"
         if normalized == "rj45_connector":
+            if "неэкранир" in normalized_query or query_shielding in {"utp", "u/utp", "u_utp", "unshielded"}:
+                return "telecom_connector_unshielded_resolver"
+            if (
+                "экранир" in normalized_query
+                or query_shielding in {"ftp", "f/utp", "stp", "s/ftp", "sftp", "shielded"}
+            ):
+                return "telecom_connector_shielded_resolver"
             return "telecom_connector_resolver"
         if normalized == "keystone":
             if "неэкранир" in normalized_query or query_shielding in {"utp", "u/utp", "u_utp", "unshielded"}:

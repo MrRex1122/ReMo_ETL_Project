@@ -269,6 +269,25 @@ class NormalizedMatchTests(unittest.TestCase):
         self.assertEqual(result["verifier_reason"], "review_only_source:local_tree+gemini")
         self.assertFalse(result["auto_accept"])
 
+    def test_verifier_policy_uses_unshielded_connector_review_reason(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        result = matcher._apply_verifier_decision(
+            {
+                "success": True,
+                "resolution_source": "compatible_local_fallback",
+                "compatibility_status": "compatible",
+                "requires_review": "нет",
+                "resolver_path": "telecom_connector_unshielded_resolver",
+            }
+        )
+
+        self.assertEqual(result["resolver_path"], "telecom_connector_unshielded_resolver")
+        self.assertEqual(result["verifier_decision"], "review")
+        self.assertEqual(result["verifier_reason"], "review_only_source:compatible_local_fallback")
+        self.assertFalse(result["auto_accept"])
+
     def test_verifier_policy_uses_construct_resolver_review_reason(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
         matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
@@ -487,6 +506,44 @@ class NormalizedMatchTests(unittest.TestCase):
 
         self.assertEqual(result["verifier_decision"], "reject")
         self.assertEqual(result["verifier_reason"], "reject_telecom_keystone_no_compatible_candidates")
+
+    def test_verifier_policy_marks_unshielded_connector_no_compatible_reject_reason(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+        matcher._runtime_taxonomy_rules = lambda: matcher.taxonomy_rules
+
+        result = matcher._apply_verifier_decision(
+            {
+                "success": True,
+                "resolution_source": "unresolved",
+                "compatibility_status": "unresolved_no_compatible_candidates",
+                "incompatibility_reason": "no_compatible_candidates",
+                "resolver_path": "telecom_connector_unshielded_resolver",
+            },
+            query_features={"row_type": "item"},
+        )
+
+        self.assertEqual(result["verifier_decision"], "reject")
+        self.assertEqual(result["verifier_reason"], "reject_telecom_connector_unshielded_no_compatible_candidates")
+
+    def test_verifier_policy_marks_shielded_connector_no_compatible_reject_reason(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+        matcher._runtime_taxonomy_rules = lambda: matcher.taxonomy_rules
+
+        result = matcher._apply_verifier_decision(
+            {
+                "success": True,
+                "resolution_source": "unresolved",
+                "compatibility_status": "unresolved_no_compatible_candidates",
+                "incompatibility_reason": "no_compatible_candidates",
+                "resolver_path": "telecom_connector_shielded_resolver",
+            },
+            query_features={"row_type": "item"},
+        )
+
+        self.assertEqual(result["verifier_decision"], "reject")
+        self.assertEqual(result["verifier_reason"], "reject_telecom_connector_shielded_no_compatible_candidates")
 
     def test_verifier_policy_marks_unshielded_keystone_no_compatible_reject_reason(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
@@ -990,6 +1047,36 @@ class NormalizedMatchTests(unittest.TestCase):
         )
 
         self.assertEqual(resolver_path, "telecom_connector_resolver")
+
+    def test_cached_result_resolver_path_uses_unshielded_connector_resolver_for_unshielded_connector(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "rj45_connector",
+                "query_text": "Коннектор RJ-45 неэкранированный категория 6",
+                "markers": {"shielding": "utp"},
+            }
+        )
+
+        self.assertEqual(resolver_path, "telecom_connector_unshielded_resolver")
+
+    def test_cached_result_resolver_path_uses_shielded_connector_resolver_for_shielded_connector(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "rj45_connector",
+                "query_text": "Коннектор RJ-45 экранированный категория 6a",
+                "markers": {"shielding": "ftp"},
+            }
+        )
+
+        self.assertEqual(resolver_path, "telecom_connector_shielded_resolver")
 
     def test_cached_result_resolver_path_uses_software_review_for_software_family(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
