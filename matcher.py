@@ -850,6 +850,12 @@ class ReMoMatcher:
                 normalized_path,
                 default="review_rack_tray_semantic_match",
             )
+        if normalized_path == "grounding_review_resolver":
+            return registry_verifier_default_review_reason(
+                taxonomy_rules,
+                normalized_path,
+                default="review_grounding_match",
+            )
         return registry_verifier_default_review_reason(
             taxonomy_rules,
             normalized_path,
@@ -904,6 +910,11 @@ class ReMoMatcher:
                 return "reject_rack_tray_family_gate"
             if normalized_reason in no_compatible_reasons:
                 return "reject_rack_tray_no_compatible_candidates"
+        if normalized_path == "grounding_review_resolver":
+            if normalized_reason == "strict_fallback_family_mismatch":
+                return "reject_grounding_family_gate"
+            if normalized_reason in no_compatible_reasons:
+                return "reject_grounding_no_compatible_candidates"
         if normalized_path in {
             "telecom_semantic_resolver",
             "telecom_component_resolver",
@@ -1025,7 +1036,25 @@ class ReMoMatcher:
             return False
         return self._is_rack_tray_family(self._entity_family(query_features.get("entity_type", "")))
 
+    def _is_grounding_query(self, query_features: Dict[str, Any]) -> bool:
+        entity_family = self._entity_family(query_features.get("entity_type", ""))
+        if entity_family == "grounding":
+            return True
+        query_markers = query_features.get("markers", {}) or {}
+        accessory_kind = self._clean_text_value(query_markers.get("accessory_kind"))
+        if accessory_kind == "grounding_plate":
+            return True
+        normalized_query = self._normalize_text(
+            query_features.get("original_text")
+            or query_features.get("original_query")
+            or query_features.get("query_text")
+            or ""
+        )
+        return "заземл" in normalized_query or "ptce" in normalized_query
+
     def _rack_tray_semantic_resolver_path_for_query(self, query_features: Dict[str, Any]) -> str:
+        if self._is_grounding_query(query_features):
+            return "grounding_review_resolver"
         query_article = self._normalize_article_lookup_value(query_features.get("query_article"))
         has_dimensions = bool(
             query_features.get("dimension_pairs")
@@ -1199,6 +1228,8 @@ class ReMoMatcher:
             return "software_review_resolver"
         if query_family == "sensor" or (domain_label == "monitoring_hw" and "датчик" in normalized_query and domain_confidence >= 0.5):
             return "sensor_review_resolver"
+        if self._is_grounding_query(query_features) or query_family == "grounding" or (domain_label == "grounding" and domain_confidence >= 0.5):
+            return "grounding_review_resolver"
         if query_family == "monitoring_hw" or (
             any(token in normalized_query for token in {"арм", "индикац", "контрол"})
             or (

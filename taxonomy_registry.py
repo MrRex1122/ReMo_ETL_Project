@@ -707,6 +707,16 @@ DEFAULT_VERIFIER_POLICY: Dict[str, Dict[str, Any]] = {
         "compatible_default_decision": "review",
         "default_review_reason": "review_rack_tray_semantic_match",
     },
+    "grounding_review_resolver": {
+        "auto_accept_sources": [],
+        "review_sources": [
+            "compatible_local_fallback",
+            "local_tree+gemini",
+            "candidate_tiebreaker_gemini",
+        ],
+        "compatible_default_decision": "review",
+        "default_review_reason": "review_grounding_match",
+    },
     "telecom_semantic_resolver": {
         "auto_accept_sources": [],
         "review_sources": [
