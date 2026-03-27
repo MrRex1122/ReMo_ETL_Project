@@ -972,7 +972,90 @@ class NormalizedMatchTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(resolver_path, "rack_tray_semantic_resolver")
+        self.assertEqual(resolver_path, "rack_tray_brush_resolver")
+
+    def test_cached_result_resolver_path_uses_rack_tray_organizer_resolver(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "rack_accessory_strict",
+                "original_query": "Вертикальный кабельный органайзер Zero U",
+                "markers": {"mount_kind": "organizer"},
+            }
+        )
+
+        self.assertEqual(resolver_path, "rack_tray_organizer_resolver")
+
+    def test_cached_result_resolver_path_uses_rack_tray_shelf_resolver(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "rack_shelf",
+                "original_query": "Полка консольная 1U 19",
+                "markers": {"mount_kind": "shelf"},
+            }
+        )
+
+        self.assertEqual(resolver_path, "rack_tray_shelf_resolver")
+
+    def test_cached_result_resolver_path_uses_rack_tray_plate_semantic_resolver(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "rack_accessory_strict",
+                "original_query": "Соединительная пластина GTO артикул 37301",
+                "markers": {"accessory_kind": "plate"},
+            }
+        )
+
+        self.assertEqual(resolver_path, "rack_tray_plate_semantic_resolver")
+
+    def test_verifier_policy_marks_rack_tray_brush_review_reason(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+        matcher._runtime_taxonomy_rules = lambda: matcher.taxonomy_rules
+
+        result = matcher._apply_verifier_decision(
+            {
+                "success": True,
+                "resolution_source": "",
+                "compatibility_status": "compatible",
+                "requires_review": "нет",
+                "resolver_path": "rack_tray_brush_resolver",
+            },
+            query_features={"row_type": "item"},
+        )
+
+        self.assertEqual(result["verifier_decision"], "review")
+        self.assertEqual(result["verifier_reason"], "review_rack_tray_brush_match")
+
+    def test_verifier_policy_marks_rack_tray_shelf_no_compatible_reject_reason(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+        matcher._runtime_taxonomy_rules = lambda: matcher.taxonomy_rules
+
+        result = matcher._apply_verifier_decision(
+            {
+                "success": True,
+                "resolution_source": "unresolved",
+                "compatibility_status": "unresolved_no_compatible_candidates",
+                "incompatibility_reason": "no_compatible_candidates",
+                "resolver_path": "rack_tray_shelf_resolver",
+            },
+            query_features={"row_type": "item"},
+        )
+
+        self.assertEqual(result["verifier_decision"], "reject")
+        self.assertEqual(result["verifier_reason"], "reject_rack_tray_shelf_no_compatible_candidates")
 
     def test_cached_result_resolver_path_uses_fallback_for_other_family(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)

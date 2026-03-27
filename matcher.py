@@ -838,6 +838,10 @@ class ReMoMatcher:
             "rack_tray_fitting_series_resolver",
             "rack_tray_channel_series_resolver",
             "rack_tray_semantic_resolver",
+            "rack_tray_brush_resolver",
+            "rack_tray_organizer_resolver",
+            "rack_tray_shelf_resolver",
+            "rack_tray_plate_semantic_resolver",
         }:
             if query_article and found_article and query_article != found_article:
                 return registry_verifier_default_review_reason(
@@ -905,10 +909,30 @@ class ReMoMatcher:
             "rack_tray_fitting_series_resolver",
             "rack_tray_channel_series_resolver",
             "rack_tray_semantic_resolver",
+            "rack_tray_brush_resolver",
+            "rack_tray_organizer_resolver",
+            "rack_tray_shelf_resolver",
+            "rack_tray_plate_semantic_resolver",
         }:
             if normalized_reason == "strict_fallback_family_mismatch":
+                if normalized_path == "rack_tray_brush_resolver":
+                    return "reject_rack_tray_brush_family_gate"
+                if normalized_path == "rack_tray_organizer_resolver":
+                    return "reject_rack_tray_organizer_family_gate"
+                if normalized_path == "rack_tray_shelf_resolver":
+                    return "reject_rack_tray_shelf_family_gate"
+                if normalized_path == "rack_tray_plate_semantic_resolver":
+                    return "reject_rack_tray_plate_family_gate"
                 return "reject_rack_tray_family_gate"
             if normalized_reason in no_compatible_reasons:
+                if normalized_path == "rack_tray_brush_resolver":
+                    return "reject_rack_tray_brush_no_compatible_candidates"
+                if normalized_path == "rack_tray_organizer_resolver":
+                    return "reject_rack_tray_organizer_no_compatible_candidates"
+                if normalized_path == "rack_tray_shelf_resolver":
+                    return "reject_rack_tray_shelf_no_compatible_candidates"
+                if normalized_path == "rack_tray_plate_semantic_resolver":
+                    return "reject_rack_tray_plate_no_compatible_candidates"
                 return "reject_rack_tray_no_compatible_candidates"
         if normalized_path == "grounding_review_resolver":
             if normalized_reason == "strict_fallback_family_mismatch":
@@ -1080,6 +1104,8 @@ class ReMoMatcher:
     def _rack_tray_semantic_resolver_path_for_query(self, query_features: Dict[str, Any]) -> str:
         if self._is_grounding_query(query_features):
             return "grounding_review_resolver"
+        raw_entity_type = self._clean_text_value(query_features.get("entity_type")).lower()
+        entity_family = self._entity_family(query_features.get("entity_type", ""))
         query_article = self._normalize_article_lookup_value(query_features.get("query_article"))
         has_dimensions = bool(
             query_features.get("dimension_pairs")
@@ -1087,9 +1113,16 @@ class ReMoMatcher:
             or query_features.get("dimension_lengths")
             or query_features.get("dimension_diameters")
         )
+        query_markers = query_features.get("markers", {}) or {}
+        mount_kind = self._clean_text_value(query_markers.get("mount_kind"))
+        accessory_kind = self._clean_text_value(query_markers.get("accessory_kind"))
+        normalized_query = self._normalize_text(
+            query_features.get("original_text")
+            or query_features.get("original_query")
+            or query_features.get("query_text")
+            or ""
+        )
         if query_article and has_dimensions:
-            query_markers = query_features.get("markers", {}) or {}
-            accessory_kind = self._clean_text_value(query_markers.get("accessory_kind"))
             if accessory_kind in {"holder", "console", "profile"}:
                 return "rack_tray_support_series_resolver"
             if accessory_kind in {"tee", "corner", "plate", "connector_plate", "grounding_plate", "fastener"}:
@@ -1097,6 +1130,16 @@ class ReMoMatcher:
             if accessory_kind == "cover":
                 return "rack_tray_channel_series_resolver"
             return "rack_tray_series_resolver"
+        if raw_entity_type == "rack_brush_panel":
+            return "rack_tray_brush_resolver"
+        if mount_kind == "brush_panel":
+            return "rack_tray_brush_resolver"
+        if "органайз" in normalized_query:
+            return "rack_tray_organizer_resolver"
+        if mount_kind == "shelf" or entity_family in {"rack_shelf", "rack_rail"} or "полк" in normalized_query or "shelf" in normalized_query:
+            return "rack_tray_shelf_resolver"
+        if accessory_kind in {"plate", "connector_plate"}:
+            return "rack_tray_plate_semantic_resolver"
         return "rack_tray_semantic_resolver"
 
     def _is_telecom_family(self, entity_family: str) -> bool:
