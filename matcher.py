@@ -918,8 +918,14 @@ class ReMoMatcher:
             "telecom_keystone_shielded_resolver",
             "telecom_construct_resolver",
             "telecom_channel_construct_resolver",
+            "telecom_channel_single_port_construct_resolver",
+            "telecom_channel_dual_port_construct_resolver",
             "telecom_wallbox_construct_resolver",
+            "telecom_wallbox_single_port_construct_resolver",
+            "telecom_wallbox_dual_port_construct_resolver",
             "telecom_floorbox_construct_resolver",
+            "telecom_floorbox_single_port_construct_resolver",
+            "telecom_floorbox_dual_port_construct_resolver",
             "telecom_outlet_resolver",
             "telecom_pdu_resolver",
             "telecom_airflow_resolver",
@@ -944,10 +950,22 @@ class ReMoMatcher:
                 return "reject_telecom_keystone_no_compatible_candidates"
             if normalized_path == "telecom_construct_resolver" and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_construct_no_compatible_candidates"
+            if normalized_path == "telecom_channel_single_port_construct_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_channel_single_port_construct_no_compatible_candidates"
+            if normalized_path == "telecom_channel_dual_port_construct_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_channel_dual_port_construct_no_compatible_candidates"
             if normalized_path == "telecom_channel_construct_resolver" and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_channel_construct_no_compatible_candidates"
+            if normalized_path == "telecom_wallbox_single_port_construct_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_wallbox_single_port_construct_no_compatible_candidates"
+            if normalized_path == "telecom_wallbox_dual_port_construct_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_wallbox_dual_port_construct_no_compatible_candidates"
             if normalized_path == "telecom_wallbox_construct_resolver" and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_wallbox_construct_no_compatible_candidates"
+            if normalized_path == "telecom_floorbox_single_port_construct_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_floorbox_single_port_construct_no_compatible_candidates"
+            if normalized_path == "telecom_floorbox_dual_port_construct_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_floorbox_dual_port_construct_no_compatible_candidates"
             if normalized_path == "telecom_floorbox_construct_resolver" and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_floorbox_construct_no_compatible_candidates"
             if normalized_path == "telecom_pdu_resolver" and normalized_reason in no_compatible_reasons:
@@ -1053,12 +1071,14 @@ class ReMoMatcher:
         query_component = self._clean_text_value(query_markers.get("component_kind"))
         query_installation = self._clean_text_value(query_markers.get("installation_kind"))
         query_shielding = self._clean_text_value(query_markers.get("shielding")).lower()
+        query_port_count = self._clean_text_value(query_markers.get("port_count"))
         normalized_query = self._normalize_text(
             query_features.get("original_text")
             or query_features.get("original_query")
             or query_features.get("query_text")
             or ""
         )
+        is_dual_port = query_port_count == "2" or "двух порт" in normalized_query or "2 порт" in normalized_query
         if normalized == "patch_panel":
             if "блоч" in normalized_query:
                 return "telecom_block_panel_resolver"
@@ -1090,11 +1110,17 @@ class ReMoMatcher:
                 or ("конструктив" in normalized_query and "розет" in normalized_query)
             ):
                 if query_installation == "cable_channel" or "кабель канал" in normalized_query.replace("-", " "):
-                    return "telecom_channel_construct_resolver"
+                    if is_dual_port:
+                        return "telecom_channel_dual_port_construct_resolver"
+                    return "telecom_channel_single_port_construct_resolver"
                 if query_installation == "floor_box" or "лючок" in normalized_query or "напольн" in normalized_query:
-                    return "telecom_floorbox_construct_resolver"
+                    if is_dual_port:
+                        return "telecom_floorbox_dual_port_construct_resolver"
+                    return "telecom_floorbox_single_port_construct_resolver"
                 if "настенн" in normalized_query and "короб" in normalized_query:
-                    return "telecom_wallbox_construct_resolver"
+                    if is_dual_port:
+                        return "telecom_wallbox_dual_port_construct_resolver"
+                    return "telecom_wallbox_single_port_construct_resolver"
                 return "telecom_construct_resolver"
             return "telecom_outlet_resolver"
         return "telecom_component_resolver"
