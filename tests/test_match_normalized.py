@@ -1280,7 +1280,7 @@ class NormalizedMatchTests(unittest.TestCase):
 
         self.assertEqual(resolver_path, "fallback_resolver")
 
-    def test_cached_result_resolver_path_uses_rack_tray_short_article_for_short_article_dimensions(self):
+    def test_cached_result_resolver_path_uses_rack_tray_short_article_tray_for_short_article_dimensions(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
         matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
 
@@ -1292,6 +1292,23 @@ class NormalizedMatchTests(unittest.TestCase):
                 "dimension_pairs": ["50x100"],
                 "dimension_lengths": ["3000"],
                 "original_query": "Лоток 50х100 L3000 артикул 35262",
+            }
+        )
+
+        self.assertEqual(resolver_path, "rack_tray_short_article_tray_resolver")
+
+    def test_cached_result_resolver_path_uses_generic_short_article_when_not_tray_specific(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "other",
+                "query_article": "35262",
+                "dimension_pairs": ["50x100"],
+                "dimension_lengths": ["3000"],
+                "original_query": "Item 50x100 L3000 article 35262",
             }
         )
 

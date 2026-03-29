@@ -1489,6 +1489,8 @@ class ReMoMatcher:
                 return "monitoring_control_review_resolver"
             return "monitoring_review_resolver"
         if (query_article or "\u0430\u0440\u0442\u0438\u043a\u0443\u043b" in normalized_query) and has_dimensions and domain_label in {"tray", ""}:
+            if any(token in normalized_query for token in {"\u043b\u043e\u0442\u043e\u043a", "tray"}):
+                return "rack_tray_short_article_tray_resolver"
             return "rack_tray_short_article_resolver"
         return "fallback_resolver"
 
