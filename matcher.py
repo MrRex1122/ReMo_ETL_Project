@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import hashlib
 import json
@@ -1465,20 +1465,30 @@ class ReMoMatcher:
             or query_features.get("dimension_lengths")
             or query_features.get("dimension_diameters")
         )
-        if query_family == "software" or normalized_query.startswith("по ") or (domain_label == "software" and domain_confidence >= 0.5):
+        if query_family == "software" or normalized_query.startswith("\u043f\u043e ") or (domain_label == "software" and domain_confidence >= 0.5):
+            if any(token in normalized_query for token in {"\u043c\u043e\u043d\u0438\u0442\u043e\u0440\u0438\u043d\u0433", "monitoring"}):
+                return "software_monitoring_review_resolver"
+            if any(token in normalized_query for token in {"\u0441\u0435\u0440\u0432\u0435\u0440", "server"}):
+                return "software_server_review_resolver"
             return "software_review_resolver"
-        if query_family == "sensor" or (domain_label == "monitoring_hw" and "датчик" in normalized_query and domain_confidence >= 0.5):
+        if query_family == "sensor" or (domain_label == "monitoring_hw" and "\u0434\u0430\u0442\u0447\u0438\u043a" in normalized_query and domain_confidence >= 0.5):
             return "sensor_review_resolver"
         if self._is_grounding_query(query_features) or query_family == "grounding" or (domain_label == "grounding" and domain_confidence >= 0.5):
             return "grounding_review_resolver"
         if query_family == "monitoring_hw" or (
-            any(token in normalized_query for token in {"арм", "индикац", "контрол"})
+            any(token in normalized_query for token in {"\u0430\u0440\u043c", "\u0438\u043d\u0434\u0438\u043a\u0430\u0446", "\u043a\u043e\u043d\u0442\u0440\u043e\u043b"})
             or (
             domain_label in {"monitoring_hw", "monitor_display"} and domain_confidence >= 0.5
             )
         ):
+            if any(token in normalized_query for token in {"\u0430\u0440\u043c", "arm"}):
+                return "monitoring_arm_review_resolver"
+            if any(token in normalized_query for token in {"\u043c\u043e\u043d\u0438\u0442\u043e\u0440", "monitor"}):
+                return "monitoring_display_review_resolver"
+            if any(token in normalized_query for token in {"\u0438\u043d\u0434\u0438\u043a\u0430\u0446", "\u043a\u043e\u043d\u0442\u0440\u043e\u043b", "control"}):
+                return "monitoring_control_review_resolver"
             return "monitoring_review_resolver"
-        if (query_article or "артикул" in normalized_query) and has_dimensions and domain_label in {"tray", ""}:
+        if (query_article or "\u0430\u0440\u0442\u0438\u043a\u0443\u043b" in normalized_query) and has_dimensions and domain_label in {"tray", ""}:
             return "rack_tray_short_article_resolver"
         return "fallback_resolver"
 

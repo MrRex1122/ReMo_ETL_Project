@@ -1913,7 +1913,7 @@ class NormalizedMatchTests(unittest.TestCase):
 
         self.assertEqual(resolver_path, "software_review_resolver")
 
-    def test_cached_result_resolver_path_uses_software_review_for_software_domain(self):
+    def test_cached_result_resolver_path_uses_software_server_review_for_software_domain(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
         matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
 
@@ -1925,7 +1925,21 @@ class NormalizedMatchTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(resolver_path, "software_review_resolver")
+        self.assertEqual(resolver_path, "software_server_review_resolver")
+
+    def test_cached_result_resolver_path_uses_software_monitoring_review_for_monitoring_software_domain(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "other",
+                "original_query": "ПО Мониторинга Орион Про",
+            }
+        )
+
+        self.assertEqual(resolver_path, "software_monitoring_review_resolver")
 
     def test_cached_result_resolver_path_uses_monitoring_review_for_monitoring_family(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
@@ -1940,7 +1954,7 @@ class NormalizedMatchTests(unittest.TestCase):
 
         self.assertEqual(resolver_path, "monitoring_review_resolver")
 
-    def test_cached_result_resolver_path_uses_monitoring_review_for_monitor_domain(self):
+    def test_cached_result_resolver_path_uses_monitoring_display_review_for_monitor_domain(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
         matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
 
@@ -1952,9 +1966,9 @@ class NormalizedMatchTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(resolver_path, "monitoring_review_resolver")
+        self.assertEqual(resolver_path, "monitoring_display_review_resolver")
 
-    def test_cached_result_resolver_path_uses_monitoring_review_for_monitoring_keywords(self):
+    def test_cached_result_resolver_path_uses_monitoring_control_review_for_monitoring_keywords(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
         matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
 
@@ -1966,7 +1980,21 @@ class NormalizedMatchTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(resolver_path, "monitoring_review_resolver")
+        self.assertEqual(resolver_path, "monitoring_control_review_resolver")
+
+    def test_cached_result_resolver_path_uses_monitoring_arm_review_for_arm_keywords(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "other",
+                "original_query": "АРМ СПЗ",
+            }
+        )
+
+        self.assertEqual(resolver_path, "monitoring_arm_review_resolver")
 
     def test_cached_result_resolver_path_uses_sensor_review_for_sensor_family(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)

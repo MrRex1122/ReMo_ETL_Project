@@ -1393,6 +1393,24 @@ DEFAULT_VERIFIER_POLICY: Dict[str, Dict[str, Any]] = {
         "compatible_default_decision": "review",
         "default_review_reason": "review_software_or_license_match",
     },
+    "software_server_review_resolver": {
+        "auto_accept_sources": [],
+        "review_sources": [
+            "compatible_local_fallback",
+            "assembly_possible_local_fallback",
+        ],
+        "compatible_default_decision": "review",
+        "default_review_reason": "review_software_server_match",
+    },
+    "software_monitoring_review_resolver": {
+        "auto_accept_sources": [],
+        "review_sources": [
+            "compatible_local_fallback",
+            "assembly_possible_local_fallback",
+        ],
+        "compatible_default_decision": "review",
+        "default_review_reason": "review_software_monitoring_match",
+    },
     "monitoring_review_resolver": {
         "auto_accept_sources": [],
         "review_sources": [
@@ -1401,6 +1419,33 @@ DEFAULT_VERIFIER_POLICY: Dict[str, Dict[str, Any]] = {
         ],
         "compatible_default_decision": "review",
         "default_review_reason": "review_monitoring_hw_match",
+    },
+    "monitoring_arm_review_resolver": {
+        "auto_accept_sources": [],
+        "review_sources": [
+            "compatible_local_fallback",
+            "assembly_possible_local_fallback",
+        ],
+        "compatible_default_decision": "review",
+        "default_review_reason": "review_monitoring_arm_match",
+    },
+    "monitoring_display_review_resolver": {
+        "auto_accept_sources": [],
+        "review_sources": [
+            "compatible_local_fallback",
+            "assembly_possible_local_fallback",
+        ],
+        "compatible_default_decision": "review",
+        "default_review_reason": "review_monitoring_display_match",
+    },
+    "monitoring_control_review_resolver": {
+        "auto_accept_sources": [],
+        "review_sources": [
+            "compatible_local_fallback",
+            "assembly_possible_local_fallback",
+        ],
+        "compatible_default_decision": "review",
+        "default_review_reason": "review_monitoring_control_match",
     },
     "sensor_review_resolver": {
         "auto_accept_sources": [],
