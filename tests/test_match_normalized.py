@@ -773,7 +773,7 @@ class NormalizedMatchTests(unittest.TestCase):
         self.assertEqual(result["verifier_decision"], "reject")
         self.assertEqual(result["verifier_reason"], "reject_telecom_channel_construct_no_compatible_candidates")
 
-    def test_verifier_policy_marks_channel_single_port_construct_no_compatible_reject_reason(self):
+    def test_verifier_policy_marks_channel_single_port_assembly_no_compatible_reject_reason(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
         matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
         matcher._runtime_taxonomy_rules = lambda: matcher.taxonomy_rules
@@ -784,13 +784,32 @@ class NormalizedMatchTests(unittest.TestCase):
                 "resolution_source": "unresolved",
                 "compatibility_status": "unresolved_no_compatible_candidates",
                 "incompatibility_reason": "no_compatible_candidates",
-                "resolver_path": "telecom_channel_single_port_construct_resolver",
+                "resolver_path": "telecom_channel_single_port_assembly_resolver",
             },
             query_features={"row_type": "item"},
         )
 
         self.assertEqual(result["verifier_decision"], "reject")
-        self.assertEqual(result["verifier_reason"], "reject_telecom_channel_single_port_construct_no_compatible_candidates")
+        self.assertEqual(result["verifier_reason"], "reject_telecom_channel_single_port_assembly_no_compatible_candidates")
+
+    def test_verifier_policy_marks_channel_single_port_mount_no_compatible_reject_reason(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+        matcher._runtime_taxonomy_rules = lambda: matcher.taxonomy_rules
+
+        result = matcher._apply_verifier_decision(
+            {
+                "success": True,
+                "resolution_source": "unresolved",
+                "compatibility_status": "unresolved_no_compatible_candidates",
+                "incompatibility_reason": "no_compatible_candidates",
+                "resolver_path": "telecom_channel_single_port_mount_resolver",
+            },
+            query_features={"row_type": "item"},
+        )
+
+        self.assertEqual(result["verifier_decision"], "reject")
+        self.assertEqual(result["verifier_reason"], "reject_telecom_channel_single_port_mount_no_compatible_candidates")
 
     def test_verifier_policy_marks_channel_dual_port_construct_no_compatible_reject_reason(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
@@ -999,6 +1018,44 @@ class NormalizedMatchTests(unittest.TestCase):
 
         self.assertEqual(result["verifier_decision"], "reject")
         self.assertEqual(result["verifier_reason"], "reject_telecom_airflow_blanking_no_compatible_candidates")
+
+    def test_verifier_policy_marks_airflow_free_units_no_compatible_reject_reason(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+        matcher._runtime_taxonomy_rules = lambda: matcher.taxonomy_rules
+
+        result = matcher._apply_verifier_decision(
+            {
+                "success": True,
+                "resolution_source": "unresolved",
+                "compatibility_status": "unresolved_no_compatible_candidates",
+                "incompatibility_reason": "no_compatible_candidates",
+                "resolver_path": "telecom_airflow_free_units_resolver",
+            },
+            query_features={"row_type": "item"},
+        )
+
+        self.assertEqual(result["verifier_decision"], "reject")
+        self.assertEqual(result["verifier_reason"], "reject_telecom_airflow_free_units_no_compatible_candidates")
+
+    def test_verifier_policy_marks_airflow_flow_control_no_compatible_reject_reason(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+        matcher._runtime_taxonomy_rules = lambda: matcher.taxonomy_rules
+
+        result = matcher._apply_verifier_decision(
+            {
+                "success": True,
+                "resolution_source": "unresolved",
+                "compatibility_status": "unresolved_no_compatible_candidates",
+                "incompatibility_reason": "no_compatible_candidates",
+                "resolver_path": "telecom_airflow_flow_control_resolver",
+            },
+            query_features={"row_type": "item"},
+        )
+
+        self.assertEqual(result["verifier_decision"], "reject")
+        self.assertEqual(result["verifier_reason"], "reject_telecom_airflow_flow_control_no_compatible_candidates")
 
     def test_verifier_policy_marks_optical_no_compatible_reject_reason(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
@@ -1468,7 +1525,7 @@ class NormalizedMatchTests(unittest.TestCase):
 
         self.assertEqual(resolver_path, "telecom_keystone_shielded_cat6a_resolver")
 
-    def test_cached_result_resolver_path_uses_telecom_construct_resolver_for_outlet_assembly(self):
+    def test_cached_result_resolver_path_uses_channel_single_port_assembly_resolver_for_outlet_assembly(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
         matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
 
@@ -1484,7 +1541,24 @@ class NormalizedMatchTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(resolver_path, "telecom_channel_single_port_construct_resolver")
+        self.assertEqual(resolver_path, "telecom_channel_single_port_assembly_resolver")
+
+    def test_cached_result_resolver_path_uses_channel_single_port_mount_resolver_for_channel_outlet(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "rj45_outlet",
+                "query_text": "Розетка RJ-45 для кабель-канала",
+                "markers": {
+                    "installation_kind": "cable_channel",
+                },
+            }
+        )
+
+        self.assertEqual(resolver_path, "telecom_channel_single_port_mount_resolver")
 
     def test_cached_result_resolver_path_uses_channel_dual_port_construct_resolver_for_dual_port_channel_outlet(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
@@ -1645,7 +1719,21 @@ class NormalizedMatchTests(unittest.TestCase):
 
         self.assertEqual(resolver_path, "telecom_airflow_panel_resolver")
 
-    def test_cached_result_resolver_path_uses_airflow_blanking_resolver_for_blank_query(self):
+    def test_cached_result_resolver_path_uses_airflow_free_units_resolver_for_free_units_query(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "airflow_blanking_panel",
+                "query_text": "Панель-заглушка свободных юнитов 1U-8U",
+            }
+        )
+
+        self.assertEqual(resolver_path, "telecom_airflow_free_units_resolver")
+
+    def test_cached_result_resolver_path_uses_airflow_flow_control_resolver_for_flow_control_blank_query(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
         matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
 
@@ -1657,7 +1745,7 @@ class NormalizedMatchTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(resolver_path, "telecom_airflow_blanking_resolver")
+        self.assertEqual(resolver_path, "telecom_airflow_flow_control_resolver")
 
     def test_cached_result_resolver_path_uses_telecom_optical_resolver_for_optical_family(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)

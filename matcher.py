@@ -1022,6 +1022,8 @@ class ReMoMatcher:
             "telecom_construct_resolver",
             "telecom_channel_construct_resolver",
             "telecom_channel_single_port_construct_resolver",
+            "telecom_channel_single_port_assembly_resolver",
+            "telecom_channel_single_port_mount_resolver",
             "telecom_channel_dual_port_construct_resolver",
             "telecom_wallbox_construct_resolver",
             "telecom_wallbox_single_port_construct_resolver",
@@ -1036,6 +1038,8 @@ class ReMoMatcher:
             "telecom_airflow_resolver",
             "telecom_airflow_panel_resolver",
             "telecom_airflow_blanking_resolver",
+            "telecom_airflow_free_units_resolver",
+            "telecom_airflow_flow_control_resolver",
             "telecom_optical_patch_resolver",
             "telecom_optical_patch_singlemode_resolver",
             "telecom_optical_patch_singlemode_duplex_resolver",
@@ -1088,6 +1092,10 @@ class ReMoMatcher:
                 return "reject_telecom_construct_no_compatible_candidates"
             if normalized_path == "telecom_channel_single_port_construct_resolver" and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_channel_single_port_construct_no_compatible_candidates"
+            if normalized_path == "telecom_channel_single_port_assembly_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_channel_single_port_assembly_no_compatible_candidates"
+            if normalized_path == "telecom_channel_single_port_mount_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_channel_single_port_mount_no_compatible_candidates"
             if normalized_path == "telecom_channel_dual_port_construct_resolver" and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_channel_dual_port_construct_no_compatible_candidates"
             if normalized_path == "telecom_channel_construct_resolver" and normalized_reason in no_compatible_reasons:
@@ -1114,6 +1122,10 @@ class ReMoMatcher:
                 return "reject_telecom_airflow_panel_no_compatible_candidates"
             if normalized_path == "telecom_airflow_blanking_resolver" and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_airflow_blanking_no_compatible_candidates"
+            if normalized_path == "telecom_airflow_free_units_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_airflow_free_units_no_compatible_candidates"
+            if normalized_path == "telecom_airflow_flow_control_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_airflow_flow_control_no_compatible_candidates"
             if normalized_path == "telecom_airflow_resolver" and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_airflow_no_compatible_candidates"
             if normalized_path == "telecom_optical_patch_resolver" and normalized_reason in no_compatible_reasons:
@@ -1336,6 +1348,7 @@ class ReMoMatcher:
                 return "telecom_keystone_shielded_resolver"
             return "telecom_keystone_resolver"
         if normalized == "rj45_outlet":
+            explicit_construct = query_component == "assembly" or "в сборе" in normalized_query
             if (
                 query_component == "assembly"
                 or query_installation in {"cable_channel", "floor_box"}
@@ -1344,7 +1357,9 @@ class ReMoMatcher:
                 if query_installation == "cable_channel" or "кабель канал" in normalized_query.replace("-", " "):
                     if is_dual_port:
                         return "telecom_channel_dual_port_construct_resolver"
-                    return "telecom_channel_single_port_construct_resolver"
+                    if explicit_construct:
+                        return "telecom_channel_single_port_assembly_resolver"
+                    return "telecom_channel_single_port_mount_resolver"
                 if query_installation == "floor_box" or "лючок" in normalized_query or "напольн" in normalized_query:
                     if is_dual_port:
                         return "telecom_floorbox_dual_port_construct_resolver"
@@ -1391,6 +1406,10 @@ class ReMoMatcher:
                 return "telecom_pdu_vertical_resolver"
             return "telecom_pdu_resolver"
         if entity_family in {"airflow_blanking_panel"}:
+            if "свободн" in normalized_query or "юнит" in normalized_query:
+                return "telecom_airflow_free_units_resolver"
+            if "заглуш" in normalized_query and "поток" in normalized_query:
+                return "telecom_airflow_flow_control_resolver"
             if "заглуш" in normalized_query:
                 return "telecom_airflow_blanking_resolver"
             if "панел" in normalized_query or "поток" in normalized_query:

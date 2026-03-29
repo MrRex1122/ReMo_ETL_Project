@@ -1077,6 +1077,26 @@ DEFAULT_VERIFIER_POLICY: Dict[str, Dict[str, Any]] = {
         "compatible_default_decision": "review",
         "default_review_reason": "review_telecom_channel_single_port_construct_match",
     },
+    "telecom_channel_single_port_assembly_resolver": {
+        "auto_accept_sources": [],
+        "review_sources": [
+            "compatible_local_fallback",
+            "local_tree+gemini",
+            "candidate_tiebreaker_gemini",
+        ],
+        "compatible_default_decision": "review",
+        "default_review_reason": "review_telecom_channel_single_port_assembly_match",
+    },
+    "telecom_channel_single_port_mount_resolver": {
+        "auto_accept_sources": [],
+        "review_sources": [
+            "compatible_local_fallback",
+            "local_tree+gemini",
+            "candidate_tiebreaker_gemini",
+        ],
+        "compatible_default_decision": "review",
+        "default_review_reason": "review_telecom_channel_single_port_mount_match",
+    },
     "telecom_channel_dual_port_construct_resolver": {
         "auto_accept_sources": [],
         "review_sources": [
@@ -1216,6 +1236,26 @@ DEFAULT_VERIFIER_POLICY: Dict[str, Dict[str, Any]] = {
         ],
         "compatible_default_decision": "review",
         "default_review_reason": "review_telecom_airflow_blanking_match",
+    },
+    "telecom_airflow_free_units_resolver": {
+        "auto_accept_sources": [],
+        "review_sources": [
+            "compatible_local_fallback",
+            "local_tree+gemini",
+            "candidate_tiebreaker_gemini",
+        ],
+        "compatible_default_decision": "review",
+        "default_review_reason": "review_telecom_airflow_free_units_match",
+    },
+    "telecom_airflow_flow_control_resolver": {
+        "auto_accept_sources": [],
+        "review_sources": [
+            "compatible_local_fallback",
+            "local_tree+gemini",
+            "candidate_tiebreaker_gemini",
+        ],
+        "compatible_default_decision": "review",
+        "default_review_reason": "review_telecom_airflow_flow_control_match",
     },
     "telecom_optical_patch_resolver": {
         "auto_accept_sources": [],
