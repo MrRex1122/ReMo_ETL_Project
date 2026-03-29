@@ -845,6 +845,8 @@ class ReMoMatcher:
             "rack_tray_branch_series_resolver",
             "rack_tray_tee_series_resolver",
             "rack_tray_dl_tee_series_resolver",
+            "rack_tray_dl_tee_100_series_resolver",
+            "rack_tray_dl_tee_200_series_resolver",
             "rack_tray_fastener_series_resolver",
             "rack_tray_channel_series_resolver",
             "rack_tray_semantic_resolver",
@@ -926,6 +928,8 @@ class ReMoMatcher:
             "rack_tray_branch_series_resolver",
             "rack_tray_tee_series_resolver",
             "rack_tray_dl_tee_series_resolver",
+            "rack_tray_dl_tee_100_series_resolver",
+            "rack_tray_dl_tee_200_series_resolver",
             "rack_tray_fastener_series_resolver",
             "rack_tray_channel_series_resolver",
             "rack_tray_semantic_resolver",
@@ -953,6 +957,10 @@ class ReMoMatcher:
                     return "reject_rack_tray_tee_family_gate"
                 if normalized_path == "rack_tray_dl_tee_series_resolver":
                     return "reject_rack_tray_dl_tee_family_gate"
+                if normalized_path == "rack_tray_dl_tee_100_series_resolver":
+                    return "reject_rack_tray_dl_tee_100_family_gate"
+                if normalized_path == "rack_tray_dl_tee_200_series_resolver":
+                    return "reject_rack_tray_dl_tee_200_family_gate"
                 if normalized_path == "rack_tray_fastener_series_resolver":
                     return "reject_rack_tray_fastener_family_gate"
                 if normalized_path == "rack_tray_brush_resolver":
@@ -983,6 +991,10 @@ class ReMoMatcher:
                     return "reject_rack_tray_tee_no_compatible_candidates"
                 if normalized_path == "rack_tray_dl_tee_series_resolver":
                     return "reject_rack_tray_dl_tee_no_compatible_candidates"
+                if normalized_path == "rack_tray_dl_tee_100_series_resolver":
+                    return "reject_rack_tray_dl_tee_100_no_compatible_candidates"
+                if normalized_path == "rack_tray_dl_tee_200_series_resolver":
+                    return "reject_rack_tray_dl_tee_200_no_compatible_candidates"
                 if normalized_path == "rack_tray_fastener_series_resolver":
                     return "reject_rack_tray_fastener_no_compatible_candidates"
                 if normalized_path == "rack_tray_brush_resolver":
@@ -1227,6 +1239,11 @@ class ReMoMatcher:
             or query_features.get("dimension_lengths")
             or query_features.get("dimension_diameters")
         )
+        dimension_pairs = {
+            self._clean_text_value(value).replace(" ", "").lower()
+            for value in (query_features.get("dimension_pairs") or [])
+            if self._clean_text_value(value)
+        }
         query_markers = query_features.get("markers", {}) or {}
         mount_kind = self._clean_text_value(query_markers.get("mount_kind"))
         accessory_kind = self._clean_text_value(query_markers.get("accessory_kind"))
@@ -1251,6 +1268,10 @@ class ReMoMatcher:
                 return "rack_tray_corner_series_resolver"
             if accessory_kind == "tee":
                 if re.search(r"\bdl\b", normalized_query, flags=re.IGNORECASE):
+                    if dimension_pairs & {"100x50", "50x100"}:
+                        return "rack_tray_dl_tee_100_series_resolver"
+                    if dimension_pairs & {"200x50", "50x200"}:
+                        return "rack_tray_dl_tee_200_series_resolver"
                     return "rack_tray_dl_tee_series_resolver"
                 return "rack_tray_tee_series_resolver"
             if accessory_kind == "fastener":
