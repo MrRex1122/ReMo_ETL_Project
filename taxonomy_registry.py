@@ -1387,6 +1387,26 @@ DEFAULT_VERIFIER_POLICY: Dict[str, Dict[str, Any]] = {
         "compatible_default_decision": "review",
         "default_review_reason": "review_telecom_optical_cross_populated_1u_match",
     },
+    "telecom_optical_cross_populated_1u_24_resolver": {
+        "auto_accept_sources": [],
+        "review_sources": [
+            "compatible_local_fallback",
+            "local_tree+gemini",
+            "candidate_tiebreaker_gemini",
+        ],
+        "compatible_default_decision": "review",
+        "default_review_reason": "review_telecom_optical_cross_populated_1u_24_match",
+    },
+    "telecom_optical_cross_populated_1u_36_resolver": {
+        "auto_accept_sources": [],
+        "review_sources": [
+            "compatible_local_fallback",
+            "local_tree+gemini",
+            "candidate_tiebreaker_gemini",
+        ],
+        "compatible_default_decision": "review",
+        "default_review_reason": "review_telecom_optical_cross_populated_1u_36_match",
+    },
     "telecom_optical_cross_populated_2u_resolver": {
         "auto_accept_sources": [],
         "review_sources": [

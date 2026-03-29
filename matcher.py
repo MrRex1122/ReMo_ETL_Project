@@ -1081,6 +1081,8 @@ class ReMoMatcher:
             "telecom_optical_cross_resolver",
             "telecom_optical_cross_populated_resolver",
             "telecom_optical_cross_populated_1u_resolver",
+            "telecom_optical_cross_populated_1u_24_resolver",
+            "telecom_optical_cross_populated_1u_36_resolver",
             "telecom_optical_cross_populated_2u_resolver",
             "telecom_optical_resolver",
             "telecom_infra_resolver",
@@ -1176,6 +1178,10 @@ class ReMoMatcher:
                 return "reject_telecom_optical_cross_populated_no_compatible_candidates"
             if normalized_path == "telecom_optical_cross_populated_1u_resolver" and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_optical_cross_populated_1u_no_compatible_candidates"
+            if normalized_path == "telecom_optical_cross_populated_1u_24_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_optical_cross_populated_1u_24_no_compatible_candidates"
+            if normalized_path == "telecom_optical_cross_populated_1u_36_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_optical_cross_populated_1u_36_no_compatible_candidates"
             if normalized_path == "telecom_optical_cross_populated_2u_resolver" and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_optical_cross_populated_2u_no_compatible_candidates"
             if normalized_path == "telecom_optical_resolver" and normalized_reason in no_compatible_reasons:
@@ -1492,6 +1498,10 @@ class ReMoMatcher:
                 if "2u" in normalized_query or "2 u" in normalized_query:
                     return "telecom_optical_cross_populated_2u_resolver"
                 if "1u" in normalized_query or "1 u" in normalized_query:
+                    if "24" in normalized_query and "волок" in normalized_query:
+                        return "telecom_optical_cross_populated_1u_24_resolver"
+                    if "36" in normalized_query and "волок" in normalized_query:
+                        return "telecom_optical_cross_populated_1u_36_resolver"
                     return "telecom_optical_cross_populated_1u_resolver"
                 return "telecom_optical_cross_populated_resolver"
             return "telecom_optical_cross_resolver"
