@@ -727,6 +727,26 @@ DEFAULT_VERIFIER_POLICY: Dict[str, Dict[str, Any]] = {
         "compatible_default_decision": "review",
         "default_review_reason": "review_rack_tray_corner_series_match",
     },
+    "rack_tray_cpo_corner_series_resolver": {
+        "auto_accept_sources": [],
+        "review_sources": [
+            "compatible_local_fallback",
+            "local_tree+gemini",
+            "candidate_tiebreaker_gemini",
+        ],
+        "compatible_default_decision": "review",
+        "default_review_reason": "review_rack_tray_cpo_corner_series_match",
+    },
+    "rack_tray_cd_corner_series_resolver": {
+        "auto_accept_sources": [],
+        "review_sources": [
+            "compatible_local_fallback",
+            "local_tree+gemini",
+            "candidate_tiebreaker_gemini",
+        ],
+        "compatible_default_decision": "review",
+        "default_review_reason": "review_rack_tray_cd_corner_series_match",
+    },
     "rack_tray_branch_series_resolver": {
         "auto_accept_sources": [],
         "review_sources": [
@@ -1256,6 +1276,26 @@ DEFAULT_VERIFIER_POLICY: Dict[str, Dict[str, Any]] = {
         ],
         "compatible_default_decision": "review",
         "default_review_reason": "review_telecom_optical_cross_populated_match",
+    },
+    "telecom_optical_cross_populated_1u_resolver": {
+        "auto_accept_sources": [],
+        "review_sources": [
+            "compatible_local_fallback",
+            "local_tree+gemini",
+            "candidate_tiebreaker_gemini",
+        ],
+        "compatible_default_decision": "review",
+        "default_review_reason": "review_telecom_optical_cross_populated_1u_match",
+    },
+    "telecom_optical_cross_populated_2u_resolver": {
+        "auto_accept_sources": [],
+        "review_sources": [
+            "compatible_local_fallback",
+            "local_tree+gemini",
+            "candidate_tiebreaker_gemini",
+        ],
+        "compatible_default_decision": "review",
+        "default_review_reason": "review_telecom_optical_cross_populated_2u_match",
     },
     "telecom_optical_resolver": {
         "auto_accept_sources": [],

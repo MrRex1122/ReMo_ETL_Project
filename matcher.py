@@ -840,6 +840,8 @@ class ReMoMatcher:
             "rack_tray_profile_series_resolver",
             "rack_tray_fitting_series_resolver",
             "rack_tray_corner_series_resolver",
+            "rack_tray_cpo_corner_series_resolver",
+            "rack_tray_cd_corner_series_resolver",
             "rack_tray_branch_series_resolver",
             "rack_tray_tee_series_resolver",
             "rack_tray_dl_tee_series_resolver",
@@ -919,6 +921,8 @@ class ReMoMatcher:
             "rack_tray_profile_series_resolver",
             "rack_tray_fitting_series_resolver",
             "rack_tray_corner_series_resolver",
+            "rack_tray_cpo_corner_series_resolver",
+            "rack_tray_cd_corner_series_resolver",
             "rack_tray_branch_series_resolver",
             "rack_tray_tee_series_resolver",
             "rack_tray_dl_tee_series_resolver",
@@ -939,6 +943,10 @@ class ReMoMatcher:
                     return "reject_rack_tray_profile_family_gate"
                 if normalized_path == "rack_tray_corner_series_resolver":
                     return "reject_rack_tray_corner_family_gate"
+                if normalized_path == "rack_tray_cpo_corner_series_resolver":
+                    return "reject_rack_tray_cpo_corner_family_gate"
+                if normalized_path == "rack_tray_cd_corner_series_resolver":
+                    return "reject_rack_tray_cd_corner_family_gate"
                 if normalized_path == "rack_tray_branch_series_resolver":
                     return "reject_rack_tray_branch_family_gate"
                 if normalized_path == "rack_tray_tee_series_resolver":
@@ -965,6 +973,10 @@ class ReMoMatcher:
                     return "reject_rack_tray_profile_no_compatible_candidates"
                 if normalized_path == "rack_tray_corner_series_resolver":
                     return "reject_rack_tray_corner_no_compatible_candidates"
+                if normalized_path == "rack_tray_cpo_corner_series_resolver":
+                    return "reject_rack_tray_cpo_corner_no_compatible_candidates"
+                if normalized_path == "rack_tray_cd_corner_series_resolver":
+                    return "reject_rack_tray_cd_corner_no_compatible_candidates"
                 if normalized_path == "rack_tray_branch_series_resolver":
                     return "reject_rack_tray_branch_no_compatible_candidates"
                 if normalized_path == "rack_tray_tee_series_resolver":
@@ -1030,6 +1042,8 @@ class ReMoMatcher:
             "telecom_optical_patch_multimode_resolver",
             "telecom_optical_cross_resolver",
             "telecom_optical_cross_populated_resolver",
+            "telecom_optical_cross_populated_1u_resolver",
+            "telecom_optical_cross_populated_2u_resolver",
             "telecom_optical_resolver",
             "telecom_infra_resolver",
         }:
@@ -1114,6 +1128,10 @@ class ReMoMatcher:
                 return "reject_telecom_optical_cross_no_compatible_candidates"
             if normalized_path == "telecom_optical_cross_populated_resolver" and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_optical_cross_populated_no_compatible_candidates"
+            if normalized_path == "telecom_optical_cross_populated_1u_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_optical_cross_populated_1u_no_compatible_candidates"
+            if normalized_path == "telecom_optical_cross_populated_2u_resolver" and normalized_reason in no_compatible_reasons:
+                return "reject_telecom_optical_cross_populated_2u_no_compatible_candidates"
             if normalized_path == "telecom_optical_resolver" and normalized_reason in no_compatible_reasons:
                 return "reject_telecom_optical_no_compatible_candidates"
             if normalized_reason in no_compatible_reasons:
@@ -1202,6 +1220,10 @@ class ReMoMatcher:
             if accessory_kind == "profile":
                 return "rack_tray_profile_series_resolver"
             if accessory_kind == "corner":
+                if re.search(r"\bcpo\b", normalized_query, flags=re.IGNORECASE):
+                    return "rack_tray_cpo_corner_series_resolver"
+                if re.search(r"\bcd\b", normalized_query, flags=re.IGNORECASE):
+                    return "rack_tray_cd_corner_series_resolver"
                 return "rack_tray_corner_series_resolver"
             if accessory_kind == "tee":
                 if re.search(r"\bdl\b", normalized_query, flags=re.IGNORECASE):
@@ -1391,6 +1413,10 @@ class ReMoMatcher:
             return "telecom_optical_patch_resolver"
         if entity_family == "optical_cross":
             if "укомплект" in normalized_query or "комплект" in normalized_query:
+                if "2u" in normalized_query or "2 u" in normalized_query:
+                    return "telecom_optical_cross_populated_2u_resolver"
+                if "1u" in normalized_query or "1 u" in normalized_query:
+                    return "telecom_optical_cross_populated_1u_resolver"
                 return "telecom_optical_cross_populated_resolver"
             return "telecom_optical_cross_resolver"
         if entity_family in {"optical_patch_cord", "optical_cross"}:
