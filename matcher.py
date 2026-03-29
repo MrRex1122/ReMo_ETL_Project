@@ -837,6 +837,8 @@ class ReMoMatcher:
             "rack_tray_support_series_resolver",
             "rack_tray_holder_series_resolver",
             "rack_tray_console_series_resolver",
+            "rack_tray_console_universal_resolver",
+            "rack_tray_console_short_article_resolver",
             "rack_tray_profile_series_resolver",
             "rack_tray_fitting_series_resolver",
             "rack_tray_corner_series_resolver",
@@ -920,6 +922,8 @@ class ReMoMatcher:
             "rack_tray_support_series_resolver",
             "rack_tray_holder_series_resolver",
             "rack_tray_console_series_resolver",
+            "rack_tray_console_universal_resolver",
+            "rack_tray_console_short_article_resolver",
             "rack_tray_profile_series_resolver",
             "rack_tray_fitting_series_resolver",
             "rack_tray_corner_series_resolver",
@@ -943,6 +947,10 @@ class ReMoMatcher:
                     return "reject_rack_tray_holder_family_gate"
                 if normalized_path == "rack_tray_console_series_resolver":
                     return "reject_rack_tray_console_family_gate"
+                if normalized_path == "rack_tray_console_universal_resolver":
+                    return "reject_rack_tray_console_universal_family_gate"
+                if normalized_path == "rack_tray_console_short_article_resolver":
+                    return "reject_rack_tray_console_short_article_family_gate"
                 if normalized_path == "rack_tray_profile_series_resolver":
                     return "reject_rack_tray_profile_family_gate"
                 if normalized_path == "rack_tray_corner_series_resolver":
@@ -977,6 +985,10 @@ class ReMoMatcher:
                     return "reject_rack_tray_holder_no_compatible_candidates"
                 if normalized_path == "rack_tray_console_series_resolver":
                     return "reject_rack_tray_console_no_compatible_candidates"
+                if normalized_path == "rack_tray_console_universal_resolver":
+                    return "reject_rack_tray_console_universal_no_compatible_candidates"
+                if normalized_path == "rack_tray_console_short_article_resolver":
+                    return "reject_rack_tray_console_short_article_no_compatible_candidates"
                 if normalized_path == "rack_tray_profile_series_resolver":
                     return "reject_rack_tray_profile_no_compatible_candidates"
                 if normalized_path == "rack_tray_corner_series_resolver":
@@ -1257,6 +1269,10 @@ class ReMoMatcher:
             if accessory_kind == "holder":
                 return "rack_tray_holder_series_resolver"
             if accessory_kind == "console":
+                if re.search(r"\bуниверс\w*", normalized_query, flags=re.IGNORECASE):
+                    return "rack_tray_console_universal_resolver"
+                if re.fullmatch(r"\d{4,5}", query_article):
+                    return "rack_tray_console_short_article_resolver"
                 return "rack_tray_console_series_resolver"
             if accessory_kind == "profile":
                 return "rack_tray_profile_series_resolver"

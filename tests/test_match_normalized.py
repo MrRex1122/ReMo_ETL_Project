@@ -1438,7 +1438,7 @@ class NormalizedMatchTests(unittest.TestCase):
 
         self.assertEqual(resolver_path, "rack_tray_cd_corner_series_resolver")
 
-    def test_cached_result_resolver_path_uses_rack_tray_console_series_resolver_for_console_article(self):
+    def test_cached_result_resolver_path_uses_rack_tray_console_universal_resolver_for_console_article(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
         matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
 
@@ -1453,7 +1453,24 @@ class NormalizedMatchTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(resolver_path, "rack_tray_console_series_resolver")
+        self.assertEqual(resolver_path, "rack_tray_console_universal_resolver")
+
+    def test_cached_result_resolver_path_uses_rack_tray_console_short_article_resolver_for_numeric_console_article(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "rack_accessory_strict",
+                "query_article": "35262",
+                "dimension_lengths": ["200"],
+                "markers": {"accessory_kind": "console"},
+                "original_query": "ÐšÐ¾Ð½ÑÐ¾Ð»ÑŒ 200 Ð¼Ð¼ Ð°Ñ€Ñ‚Ð¸ÐºÑƒÐ» 35262",
+            }
+        )
+
+        self.assertEqual(resolver_path, "rack_tray_console_short_article_resolver")
 
     def test_cached_result_resolver_path_uses_rack_tray_profile_series_resolver_for_profile_article(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
