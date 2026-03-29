@@ -1549,6 +1549,15 @@ class ReMoMatcher:
             return "monitoring_review_resolver"
         if (query_article or "\u0430\u0440\u0442\u0438\u043a\u0443\u043b" in normalized_query) and has_dimensions and domain_label in {"tray", ""}:
             if any(token in normalized_query for token in {"\u043b\u043e\u0442\u043e\u043a", "tray"}):
+                dimension_pairs = {
+                    self._clean_text_value(value).replace(" ", "").lower()
+                    for value in (query_features.get("dimension_pairs") or [])
+                    if self._clean_text_value(value)
+                }
+                if dimension_pairs & {"100x50", "50x100"}:
+                    return "rack_tray_short_article_tray_100_resolver"
+                if dimension_pairs & {"200x50", "50x200"}:
+                    return "rack_tray_short_article_tray_200_resolver"
                 return "rack_tray_short_article_tray_resolver"
             return "rack_tray_short_article_resolver"
         return "fallback_resolver"

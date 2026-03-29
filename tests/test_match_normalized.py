@@ -1336,7 +1336,7 @@ class NormalizedMatchTests(unittest.TestCase):
 
         self.assertEqual(resolver_path, "fallback_resolver")
 
-    def test_cached_result_resolver_path_uses_rack_tray_short_article_tray_for_short_article_dimensions(self):
+    def test_cached_result_resolver_path_uses_rack_tray_short_article_tray_100_for_short_article_dimensions(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
         matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
 
@@ -1351,7 +1351,24 @@ class NormalizedMatchTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(resolver_path, "rack_tray_short_article_tray_resolver")
+        self.assertEqual(resolver_path, "rack_tray_short_article_tray_100_resolver")
+
+    def test_cached_result_resolver_path_uses_rack_tray_short_article_tray_200_for_short_article_dimensions(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "other",
+                "query_article": "35264",
+                "dimension_pairs": ["50x200"],
+                "dimension_lengths": ["3000"],
+                "original_query": "Ð›Ð¾Ñ‚Ð¾Ðº 50Ñ…200 L3000 Ð°Ñ€Ñ‚Ð¸ÐºÑƒÐ» 35264",
+            }
+        )
+
+        self.assertEqual(resolver_path, "rack_tray_short_article_tray_200_resolver")
 
     def test_cached_result_resolver_path_uses_generic_short_article_when_not_tray_specific(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
@@ -1369,6 +1386,23 @@ class NormalizedMatchTests(unittest.TestCase):
         )
 
         self.assertEqual(resolver_path, "rack_tray_short_article_resolver")
+
+    def test_cached_result_resolver_path_uses_rack_tray_short_article_tray_200_for_short_article_dimensions(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "other",
+                "query_article": "35264",
+                "dimension_pairs": ["50x200"],
+                "dimension_lengths": ["3000"],
+                "original_query": "Лоток 50х200 L3000 артикул 35264",
+            }
+        )
+
+        self.assertEqual(resolver_path, "rack_tray_short_article_tray_200_resolver")
 
     def test_cached_result_resolver_path_uses_rack_tray_series_resolver_for_short_article_dimensions(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
