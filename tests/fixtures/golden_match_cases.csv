@@ -1,7 +1,7 @@
 case_id,suite,tier,input_mode,query_text,query_article,expected_family,expected_outcome,expected_articles_json,forbidden_articles_json,allowed_resolvers_json,notes,source_ref
-electrical_exact_001,electrical_article,smoke,article_in_text,Кабель артикул ВВГнг(A)-LS 4x6,,cable,exact,"[""00000055926""]","[]","[""article_designation_exact""]",cable designation exact,result_20260322_054148#8
-electrical_exact_002,electrical_article,smoke,article_in_text,Кабель артикул ВВГнг(A)-LS 4x10,,cable,exact,"[""4582""]","[]","[""article_designation_exact""]",cable designation exact,result_20260322_054148#9
-electrical_exact_003,electrical_article,full,article_in_text,Кабель артикул ВВГнг(A)-LS 4x25,,cable,exact,"[""4594""]","[]","[""article_designation_exact""]",cable designation exact,result_20260322_054148#10
+electrical_exact_001,electrical_article,smoke,article_in_text,Кабель артикул ВВГнг(A)-LS 4x6,,cable,exact,"[""1504070101""]","[]","[""article_designation_exact""]",cable designation exact,price_clean_search_175386624#vvg_4x6
+electrical_exact_002,electrical_article,smoke,article_in_text,Кабель артикул ВВГнг(A)-LS 4x10,,cable,exact,"[""Х0000003913""]","[]","[""article_designation_exact""]",cable designation exact,price_clean_search_175386624#vvg_4x10
+electrical_exact_003,electrical_article,full,article_in_text,Кабель артикул ВВГнг(A)-LS 4x25,,cable,exact,"[""Х0000003915""]","[]","[""article_designation_exact""]",cable designation exact,price_clean_search_175386624#vvg_4x25
 electrical_exact_004,electrical_article,smoke,article_column,Крышка лотка прямая 50х100 L3000,35522,rack_accessory_strict,exact,"[""35522""]","[]","[""article_exact""]",tray cover exact,result_20260322_054148#14
 electrical_exact_005,electrical_article,full,article_column,Крышка лотка прямая 50х200 L3000,35524,rack_accessory_strict,exact,"[""35524""]","[]","[""article_exact""]",tray cover exact,result_20260322_054148#16
 electrical_exact_006,electrical_article,smoke,article_column,Перегородка SEP L3000 H50,36480,rack_accessory_strict,exact,"[""36480""]","[]","[""article_exact""]",partition exact,result_20260322_054148#19

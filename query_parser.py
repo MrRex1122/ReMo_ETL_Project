@@ -27,6 +27,27 @@ SECTION_ROW_DEFAULTS = {
 ARTICLE_PATTERNS = (
     r"(?:^|[\s,;/\(\)])(?:артикул|арт\.?|sku|part\s*number|partnumber|vendor\s*code)\s*[:№#-]?\s*(.+?)\s*$",
 )
+CABLE_DESIGNATION_BASE_STOPWORDS = {
+    "силовой",
+    "контрольный",
+    "монтажный",
+    "однопроволочный",
+    "многопроволочный",
+    "ок",
+    "n",
+    "pe",
+    "тртс",
+    "барабан",
+}
+GENERIC_CABLE_DESIGNATION_TOKENS = {
+    "a",
+    "а",
+    "кабель",
+    "провод",
+    "артикул",
+    "арт",
+    "sku",
+}
 
 
 @dataclass(frozen=True)
@@ -113,6 +134,17 @@ def _canonical_dimension_signature(values: Tuple[str, ...]) -> str:
     return "x".join(normalized_values)
 
 
+def _canonical_cable_designation_dimension(values: Tuple[str, ...]) -> str:
+    normalized_values = tuple(
+        _normalize_dimension_value(value)
+        for value in values
+        if _normalize_dimension_value(value)
+    )
+    if not normalized_values:
+        return ""
+    return "x".join(normalized_values)
+
+
 def extract_dimension_signatures(text: str) -> Dict[str, set[str]]:
     normalized = clean_text_value(text).lower().replace("ё", "е")
     normalized = re.sub(r"\s+", " ", normalized).strip()
@@ -173,16 +205,18 @@ def extract_cable_designation_signature(text: str, *, synonyms: Mapping[str, str
     if not dimension_match:
         return {}
     values = tuple(group for group in dimension_match.groups() if group)
-    dimension_signature = _canonical_dimension_signature(values)
+    dimension_signature = _canonical_cable_designation_dimension(values)
     if not dimension_signature:
         return {}
     base_part = normalized[: dimension_match.start()]
     base_part = re.sub(r"[\(\)\[\],;:]+", " ", base_part)
-    base_normalized = normalize_text(base_part, synonyms=synonyms)
     base_tokens = [
-        token
-        for token in tokenize(base_normalized)
-        if token not in {"кабель", "провод", "артикул", "арт", "sku"}
+        clean_text_value(token).lower()
+        for token in re.findall(r"\w+", base_part, flags=re.IGNORECASE)
+        if len(clean_text_value(token)) >= 2
+        and not clean_text_value(token).isdigit()
+        and clean_text_value(token).lower()
+        not in (GENERIC_CABLE_DESIGNATION_TOKENS | CABLE_DESIGNATION_BASE_STOPWORDS)
     ]
     if not base_tokens:
         return {}
@@ -191,6 +225,7 @@ def extract_cable_designation_signature(text: str, *, synonyms: Mapping[str, str
         "base": base_signature,
         "dimension": dimension_signature,
         "signature": f"{base_signature}|{dimension_signature}",
+        "base_tokens": base_tokens,
     }
 
 

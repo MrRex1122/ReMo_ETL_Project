@@ -23,6 +23,11 @@ class QueryParserTests(unittest.TestCase):
         self.assertTrue(spec.designation_signature)
         self.assertEqual(spec.markers.get("designation_family"), "ввгнг ls")
 
+    def test_parse_query_spec_preserves_cable_dimension_order(self):
+        spec = parse_query_spec("Кабель, артикул КГВЭВнг(A)-LS 4x1", taxonomy_rules=self.rules)
+
+        self.assertEqual(spec.designation_signature, "кгвэвнг ls|4x1")
+
     def test_parse_query_spec_extracts_accessory_markers_and_dimensions(self):
         spec = parse_query_spec("Угол CD 90 вертикальный внешний 100x50", taxonomy_rules=self.rules)
 

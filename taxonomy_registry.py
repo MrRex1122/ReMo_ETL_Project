@@ -688,7 +688,9 @@ DEFAULT_VERIFIER_POLICY: Dict[str, Dict[str, Any]] = {
         "default_review_reason": "review_rack_tray_holder_series_match",
     },
     "rack_tray_holder_short_article_resolver": {
-        "auto_accept_sources": [],
+        "auto_accept_sources": [
+            "article_series_local",
+        ],
         "review_sources": [
             "compatible_local_fallback",
             "local_tree+gemini",
@@ -888,7 +890,9 @@ DEFAULT_VERIFIER_POLICY: Dict[str, Dict[str, Any]] = {
         "default_review_reason": "review_rack_tray_shelf_match",
     },
     "rack_tray_plate_semantic_resolver": {
-        "auto_accept_sources": [],
+        "auto_accept_sources": [
+            "article_series_local",
+        ],
         "review_sources": [
             "compatible_local_fallback",
             "local_tree+gemini",

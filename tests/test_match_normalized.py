@@ -347,6 +347,245 @@ class NormalizedMatchTests(unittest.TestCase):
         self.assertEqual(result["verifier_reason"], "auto_accept_source:article_designation_exact")
         self.assertTrue(result["auto_accept"])
 
+    def test_cable_designation_dimension_preserves_order(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        self.assertEqual(matcher._canonical_cable_designation_dimension(("4", "1")), "4x1")
+        self.assertEqual(matcher._canonical_cable_designation_dimension(("4", "1,5")), "4x1.5")
+
+    def test_extract_cable_designation_signature_keeps_cable_code_tokens(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        signature = matcher._extract_cable_designation_signature("КГВВнг(A)-LS 4x1")
+
+        self.assertEqual(signature["base"], "кгввнг ls")
+        self.assertEqual(signature["dimension"], "4x1")
+        self.assertEqual(signature["base_tokens"], ["кгввнг", "ls"])
+
+    def test_cable_designation_base_tokens_do_not_match_prefixed_code(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        self.assertTrue(matcher._cable_designation_base_tokens_match(("ввгнг", "ls"), ("ввгнг", "ls")))
+        self.assertFalse(matcher._cable_designation_base_tokens_match(("ввгнг", "ls"), ("аввгнг", "ls")))
+
+    def test_designation_family_match_ignores_a_marker_variant(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        self.assertTrue(matcher._designation_family_matches("кгвэвнг ls", "кгвэвнг а ls"))
+
+    def test_compatibility_label_allows_designation_family_a_marker_variant(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        query_features = {
+            "original_text": "Кабель, артикул КГВЭВнг(A)-LS 4x1",
+            "entity_type": "cable",
+            "markers": {"designation_family": "кгвэвнг ls"},
+        }
+        item = {
+            "name": "Кабель силовой КГВЭВнг(А)-LS 4х1.0",
+            "entity_type": "cable",
+            "item_markers": {"designation_family": "кгвэвнг а ls"},
+        }
+
+        self.assertEqual(matcher._compatibility_label(query_features, item), "compatible")
+
+    def test_strict_fallback_allows_rack_holder_with_misclassified_candidate_family(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+        matcher.match_mode = "exact"
+
+        query_features = {
+            "entity_type": "rack_accessory_strict",
+            "row_type": "item",
+            "markers": {"accessory_kind": "holder"},
+        }
+        item = {
+            "entity_type": "other",
+            "item_markers": {"accessory_kind": "holder"},
+        }
+
+        self.assertTrue(matcher._is_strict_fallback_allowed(query_features, item))
+
+    def test_strict_fallback_keeps_dimension_mismatch_rejected_for_rack_tray(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+        matcher.match_mode = "exact"
+
+        query_features = {
+            "entity_type": "rack_accessory_strict",
+            "row_type": "item",
+            "original_text": "Ответвитель DL 200x50",
+            "markers": {"accessory_kind": "tee"},
+        }
+        item = {
+            "name": "Ответвитель DL 300x50",
+            "entity_type": "cable",
+            "item_markers": {"accessory_kind": "tee"},
+        }
+
+        self.assertFalse(matcher._is_strict_fallback_allowed(query_features, item))
+
+    def test_lookup_cable_designation_rejects_reordered_dimension_candidate(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+        matcher.retrieval_backend = "memory"
+        matcher.retrieval_mode = "legacy_limited"
+        matcher._typed_candidate_pool = lambda _query_text, _query_features, limit=320: []
+        matcher._duckdb_cable_designation_candidates = lambda _signature, limit=640: []
+        candidate = {
+            "name": "Кабель силовой КГВВнг(А)-LS 1х4(N) 220/380-3",
+            "article": "00-00024555",
+            "price": 100.0,
+            "row_idx": 1,
+            "branch_path": "электрика > кабели",
+            "entity_type": "cable",
+            "normalized_name": "кабель силовой кгввнг а ls 1х4 n 220 380 3",
+            "tokens": ["кабель", "силовой", "кгввнг", "ls", "1х4"],
+            "item_markers": {},
+        }
+        matcher._collect_branch_candidates = lambda _branches, limit=320, query_features=None: [candidate]
+        matcher._select_candidates = lambda _query_text, limit=320: [candidate]
+        matcher._score_candidates_locally = lambda _query_features, items: [{"item": items[0], "score": 0.95}]
+        matcher._compatibility_label = lambda _query_features, _item: "compatible"
+
+        result = matcher._lookup_catalog_item_by_cable_designation(
+            "Кабель, артикул КГВВнг(A)-LS 4x1",
+            "КГВВнг(A)-LS 4x1",
+        )
+
+        self.assertIsNone(result)
+
+    def test_lookup_cable_designation_accepts_exact_signature_with_weak_compatibility(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+        matcher.retrieval_backend = "memory"
+        matcher.retrieval_mode = "legacy_limited"
+        matcher._typed_candidate_pool = lambda _query_text, _query_features, limit=320: []
+        matcher._duckdb_cable_designation_candidates = lambda _signature, limit=640: []
+        candidate = {
+            "name": "Кабель контрольный КГВВнг(А)-LS 4х1",
+            "article": "KGVV-4X1",
+            "price": 100.0,
+            "row_idx": 1,
+            "branch_path": "электрика > кабели",
+            "entity_type": "cable",
+            "normalized_name": "кабель контрольный кгввнг а ls 4х1",
+            "tokens": ["кабель", "контрольный", "кгввнг", "ls", "4х1"],
+            "item_markers": {"designation_family": "кгввнг ls"},
+        }
+        matcher._collect_branch_candidates = lambda _branches, limit=320, query_features=None: [candidate]
+        matcher._select_candidates = lambda _query_text, limit=320: [candidate]
+        matcher._score_candidates_locally = lambda _query_features, items: [{"item": items[0], "score": 0.95}]
+        matcher._compatibility_label = lambda _query_features, _item: "weakly_compatible"
+
+        result = matcher._lookup_catalog_item_by_cable_designation(
+            "Кабель, артикул КГВВнг(A)-LS 4x1",
+            "КГВВнг(A)-LS 4x1",
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["article"], "KGVV-4X1")
+
+    def test_lookup_cable_designation_prefers_plain_exact_signature_candidate(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+        matcher.retrieval_backend = "memory"
+        matcher.retrieval_mode = "legacy_limited"
+        matcher._typed_candidate_pool = lambda _query_text, _query_features, limit=320: []
+        matcher._duckdb_cable_designation_candidates = lambda _signature, limit=640: []
+        candidates = [
+            {
+                "name": "Кабель силовой КГВВнг(А)-LS 4х1,5 ТРТС",
+                "article": "KGVV-4X1.5",
+                "price": 100.0,
+                "row_idx": 1,
+                "branch_path": "электрика > кабели",
+                "entity_type": "cable",
+                "normalized_name": "кабель силовой кгввнг а ls 4х1 5 тртс",
+                "tokens": ["кабель", "силовой", "кгввнг", "ls", "4х1", "5"],
+                "item_markers": {"designation_family": "кгввнг а ls"},
+            },
+            {
+                "name": "Кабель силовой КГВВнг(А)-LS 4х1(N) 380/660-3",
+                "article": "KGVV-4X1-N",
+                "price": 100.0,
+                "row_idx": 2,
+                "branch_path": "электрика > кабели",
+                "entity_type": "cable",
+                "normalized_name": "кабель силовой кгввнг а ls 4х1 n 380 660 3",
+                "tokens": ["кабель", "силовой", "кгввнг", "ls", "4х1"],
+                "item_markers": {"designation_family": "кгввнг а ls"},
+            },
+            {
+                "name": "Кабель силовой КГВВнг(А)-LS 4х1 ТРТС",
+                "article": "KGVV-4X1-PLAIN",
+                "price": 100.0,
+                "row_idx": 3,
+                "branch_path": "электрика > кабели",
+                "entity_type": "cable",
+                "normalized_name": "кабель силовой кгввнг а ls 4х1 тртс",
+                "tokens": ["кабель", "силовой", "кгввнг", "ls", "4х1"],
+                "item_markers": {"designation_family": "кгввнг а ls"},
+            },
+        ]
+        matcher._collect_branch_candidates = lambda _branches, limit=320, query_features=None: candidates
+        matcher._select_candidates = lambda _query_text, limit=320: candidates
+        matcher._score_candidates_locally = lambda _query_features, items: [{"item": item, "score": 0.0} for item in items]
+        matcher._compatibility_label = lambda _query_features, _item: "weakly_compatible"
+
+        result = matcher._lookup_catalog_item_by_cable_designation(
+            "Кабель, артикул КГВВнг(A)-LS 4x1",
+            "КГВВнг(A)-LS 4x1",
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["article"], "KGVV-4X1-PLAIN")
+
+    def test_lookup_cable_designation_rejects_prefixed_code_candidate(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+        matcher.retrieval_backend = "memory"
+        matcher.retrieval_mode = "legacy_limited"
+        matcher._typed_candidate_pool = lambda _query_text, _query_features, limit=320: []
+        matcher._duckdb_cable_designation_candidates = lambda _signature, limit=640: []
+        candidate = {
+            "name": "Кабель силовой АВВГнг(А)-LS 1х4",
+            "article": "AVV-4X1",
+            "price": 100.0,
+            "row_idx": 1,
+            "branch_path": "электрика > кабели",
+            "entity_type": "cable",
+            "normalized_name": "кабель силовой аввгнг а ls 1х4",
+            "tokens": ["кабель", "силовой", "аввгнг", "ls", "1х4"],
+            "item_markers": {},
+        }
+        matcher._collect_branch_candidates = lambda _branches, limit=320, query_features=None: [candidate]
+        matcher._select_candidates = lambda _query_text, limit=320: [candidate]
+        matcher._score_candidates_locally = lambda _query_features, items: [{"item": items[0], "score": 0.95}]
+        matcher._compatibility_label = lambda _query_features, _item: "compatible"
+
+        result = matcher._lookup_catalog_item_by_cable_designation(
+            "Кабель, артикул ВВГнг(A)-LS 4x1",
+            "ВВГнг(A)-LS 4x1",
+        )
+
+        self.assertIsNone(result)
+
+    def test_cable_dimension_search_terms_include_decimal_spacing_variant(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        terms = matcher._cable_dimension_search_terms({"dimension": "1.5x4"})
+
+        self.assertIn("1.5", terms)
+        self.assertIn("1 5", terms)
+        self.assertIn("4", terms)
+
     def test_verifier_policy_marks_telecom_semantic_sources_as_review_only(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
         matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
@@ -2411,6 +2650,188 @@ class NormalizedMatchTests(unittest.TestCase):
         self.assertEqual(result["article"], "37501R")
         self.assertEqual(result["resolution_source"], "article_series_local")
         self.assertEqual(result["compatibility_status"], "compatible")
+
+    def test_best_article_series_match_accepts_holder_short_article_with_matching_accessory_kind(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        query_features = {
+            "original_text": "Держатель оцинкованный односторонний D=25-26 (100 шт.), артикул 53344",
+            "entity_type": "rack_accessory_strict",
+            "markers": {"accessory_kind": "holder"},
+        }
+        series_item = {
+            "name": "Держатель оцинкованный односторонний 25-26мм",
+            "article": "53344R",
+            "row_idx": 1,
+            "branch_path": "кабельные лотки > аксессуары",
+            "entity_type": "other",
+            "item_markers": {"accessory_kind": "holder"},
+        }
+        matcher._score_candidates_locally = lambda _features, _candidates: [
+            {"item": series_item, "score": 0.4426605504587156, "lexical_score": 0.4426605504587156}
+        ]
+        matcher._compatibility_label = lambda _features, _item: "compatible"
+
+        best = ReMoMatcher._best_article_series_match(matcher, query_features, [series_item], article="53344")
+
+        self.assertIsNotNone(best)
+        self.assertEqual(best["article"], "53344R")
+
+    def test_best_article_series_match_accepts_plate_short_article_with_matching_accessory_kind(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        query_features = {
+            "original_text": "Соединительная пластина GTO, артикул 37301",
+            "entity_type": "rack_accessory_strict",
+            "markers": {"accessory_kind": "connector_plate"},
+        }
+        series_item = {
+            "name": "Пластина соединительная GTO H50",
+            "article": "37301R",
+            "row_idx": 1,
+            "branch_path": "кабельные лотки > аксессуары",
+            "entity_type": "cable",
+            "item_markers": {"accessory_kind": "connector_plate"},
+        }
+        alternate_item = {
+            "name": "Пластина GTO H50, цинк-ламельная",
+            "article": "37301RHDZL",
+            "row_idx": 2,
+            "branch_path": "кабельные лотки > аксессуары",
+            "entity_type": "cable",
+            "item_markers": {"accessory_kind": "connector_plate"},
+        }
+        matcher._score_candidates_locally = lambda _features, _candidates: [
+            {"item": series_item, "score": 0.2996031746031746, "lexical_score": 0.2996031746031746},
+            {"item": alternate_item, "score": 0.2113, "lexical_score": 0.2113},
+        ]
+        matcher._compatibility_label = lambda _features, _item: "compatible"
+
+        best = ReMoMatcher._best_article_series_match(
+            matcher,
+            query_features,
+            [series_item, alternate_item],
+            article="37301",
+        )
+
+        self.assertIsNotNone(best)
+        self.assertEqual(best["article"], "37301R")
+
+    def test_match_auto_accepts_holder_short_article_series(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.catalog_dict = {}
+        matcher.catalog_normalized_dict = {}
+        matcher.catalog_article_dict = {
+            "53344": {
+                "name": "Колесо поворотное 200мм",
+                "article": "53344",
+                "price": 100.0,
+                "row_idx": 1,
+                "branch_path": "метизы",
+                "entity_type": "other",
+                "item_markers": {},
+            }
+        }
+        matcher.catalog_items = []
+        matcher.parallel_requests = 1
+        matcher.retrieval_backend = "memory"
+        matcher.retrieval_mode = "legacy_limited"
+        matcher.taxonomy_rules = ReMoMatcher._load_taxonomy_rules(matcher)
+        matcher.match_mode = "exact"
+        matcher.branch_index = {}
+        matcher.branch_prefix_index = {}
+        matcher.branch_token_index = {}
+        matcher.branch_priority_scores = {}
+        matcher.token_idf = {}
+        matcher._match_context_local = threading.local()
+        matcher._match_context_local.payload = {
+            "input_article": "",
+            "extracted_article": "53344",
+            "query_article": "53344",
+        }
+        matcher._get_from_cache = lambda _query: None
+        matcher._save_to_cache = lambda *_args, **_kwargs: None
+        matcher._uses_duckdb_query_backend = lambda: False
+        series_item = {
+            "name": "Держатель оцинкованный односторонний 25-26мм",
+            "article": "53344R",
+            "price": 250.0,
+            "row_idx": 2,
+            "branch_path": "аксессуары вспомогательные",
+            "entity_type": "other",
+            "item_markers": {"accessory_kind": "holder"},
+            "normalized_name": "держатель оцинкованный односторонний 25-26мм",
+            "tokens": ["держатель", "оцинкованный", "односторонний", "25-26мм"],
+        }
+        matcher._lookup_catalog_items_by_article_series = lambda _article, _features: [series_item]
+        matcher._best_article_series_match = lambda _features, _candidates, article="": series_item
+
+        result = ReMoMatcher.match(
+            matcher,
+            "Держатель оцинкованный односторонний D=25-26 (100 шт.), артикул 53344",
+            use_cache=False,
+        )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["article"], "53344R")
+        self.assertEqual(result["resolution_source"], "article_series_local")
+        self.assertEqual(result["resolver_path"], "rack_tray_holder_short_article_resolver")
+        self.assertEqual(result["verifier_decision"], "auto_accept")
+
+    def test_match_auto_accepts_plate_short_article_series(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.catalog_dict = {}
+        matcher.catalog_normalized_dict = {}
+        matcher.catalog_article_dict = {
+            "37301": {
+                "name": "Светильник светодиодный",
+                "article": "37301",
+                "price": 100.0,
+                "row_idx": 1,
+                "branch_path": "свет > светильники",
+                "entity_type": "other",
+                "item_markers": {},
+            }
+        }
+        matcher.catalog_items = []
+        matcher.parallel_requests = 1
+        matcher.retrieval_backend = "memory"
+        matcher.retrieval_mode = "legacy_limited"
+        matcher.taxonomy_rules = ReMoMatcher._load_taxonomy_rules(matcher)
+        matcher.match_mode = "exact"
+        matcher.branch_index = {}
+        matcher.branch_prefix_index = {}
+        matcher.branch_token_index = {}
+        matcher.branch_priority_scores = {}
+        matcher.token_idf = {}
+        matcher._match_context_local = threading.local()
+        matcher._match_context_local.payload = {
+            "input_article": "",
+            "extracted_article": "37301",
+            "query_article": "37301",
+        }
+        matcher._get_from_cache = lambda _query: None
+        matcher._save_to_cache = lambda *_args, **_kwargs: None
+        matcher._uses_duckdb_query_backend = lambda: False
+        series_item = {
+            "name": "Пластина соединительная GTO H50",
+            "article": "37301R",
+            "price": 250.0,
+            "row_idx": 2,
+            "branch_path": "аксессуары вспомогательные",
+            "entity_type": "cable",
+            "item_markers": {"accessory_kind": "connector_plate"},
+            "normalized_name": "пластина соединительная gto h50",
+            "tokens": ["пластина", "соединительная", "gto", "h50"],
+        }
+        matcher._lookup_catalog_items_by_article_series = lambda _article, _features: [series_item]
+        matcher._best_article_series_match = lambda _features, _candidates, article="": series_item
+
+        result = ReMoMatcher.match(matcher, "Соединительная пластина GTO, артикул 37301", use_cache=False)
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["article"], "37301R")
+        self.assertEqual(result["resolution_source"], "article_series_local")
+        self.assertEqual(result["resolver_path"], "rack_tray_plate_semantic_resolver")
+        self.assertEqual(result["verifier_decision"], "auto_accept")
 
     def test_match_rejects_header_like_row_before_cache_hit(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)

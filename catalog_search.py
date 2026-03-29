@@ -430,6 +430,7 @@ def _detect_port_count_precise(normalized: str) -> str:
 
 _GENERIC_CABLE_DESIGNATION_TOKENS = {
     "a",
+    "а",
     "cat",
     "category",
     "cord",

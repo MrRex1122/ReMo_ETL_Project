@@ -790,9 +790,6 @@ class ReMoMatcher:
         compatibility_status = str(result.get("compatibility_status") or "").strip()
         if compatibility_status != "compatible":
             return "review", f"compatibility:{compatibility_status or 'unknown'}"
-        requires_review = self._clean_text_value(result.get("requires_review")).lower()
-        if requires_review == "да":
-            return "review", "requires_review_flag"
         resolution_source = str(result.get("resolution_source") or "").strip()
         auto_accept_sources = registry_verifier_auto_accept_sources(
             taxonomy_rules,
@@ -800,6 +797,9 @@ class ReMoMatcher:
         )
         if resolution_source in auto_accept_sources:
             return "auto_accept", f"auto_accept_source:{resolution_source}"
+        requires_review = self._clean_text_value(result.get("requires_review")).lower()
+        if requires_review == "да":
+            return "review", "requires_review_flag"
         review_sources = registry_verifier_review_sources(
             taxonomy_rules,
             active_resolver_path,
@@ -1584,6 +1584,11 @@ class ReMoMatcher:
             return self._telecom_infra_resolver_path_for_query(query_features)
         return "semantic_resolver"
 
+    def _article_series_resolver_path(self, query_features: Dict[str, Any]) -> str:
+        if self._should_use_rack_tray_resolver(query_features):
+            return self._cached_result_resolver_path(query_features)
+        return "article_resolver"
+
     def _typed_candidate_pool_for_rack_tray(
         self,
         query_text: str,
@@ -1801,7 +1806,7 @@ class ReMoMatcher:
                         "",
                         "Сопоставлено по расширенной серии артикула с проверкой на смысловую и размерную совместимость.",
                     )
-                    result["resolver_path"] = "article_resolver"
+                    result["resolver_path"] = self._article_series_resolver_path(query_features)
                     return {
                         "result": result,
                         "article_lookup_hit": article_lookup_hit,
@@ -2530,11 +2535,13 @@ class ReMoMatcher:
             return {}
         base_part = normalized[: dimension_match.start()]
         base_part = re.sub(r"[\(\)\[\],;:]+", " ", base_part)
-        base_normalized = self._normalize_text(base_part)
         base_tokens = [
-            token
-            for token in self._tokenize(base_normalized)
-            if token not in {"кабель", "провод", "артикул", "арт", "sku"}
+            self._clean_text_value(token).lower()
+            for token in re.findall(r"\w+", base_part, flags=re.IGNORECASE)
+            if len(self._clean_text_value(token)) >= 2
+            and not self._clean_text_value(token).isdigit()
+            and self._clean_text_value(token).lower()
+            not in ({"кабель", "провод", "артикул", "арт", "sku"} | CABLE_DESIGNATION_BASE_STOPWORDS)
         ]
         if not base_tokens:
             return {}
@@ -2547,10 +2554,31 @@ class ReMoMatcher:
         }
 
     def _canonical_cable_designation_dimension(self, values: Tuple[str, ...]) -> str:
-        normalized_values = [
+        normalized_values = tuple(
             self._normalize_dimension_value(value) for value in values if self._normalize_dimension_value(value)
-        ]
+        )
+        if not normalized_values:
+            return ""
+        # For cable designations the order is meaningful: "4x1" is not the same
+        # as "1x4". Preserve the original order and only normalize decimal format.
         return "x".join(normalized_values)
+
+    def _cable_dimension_search_terms(self, signature: Dict[str, Any]) -> Tuple[str, ...]:
+        raw_dimension = self._clean_text_value(signature.get("dimension")).lower()
+        if not raw_dimension:
+            return ()
+        variants: List[str] = []
+        for part in sorted({part.strip() for part in raw_dimension.split("x") if part.strip()}):
+            candidates = {
+                part,
+                part.replace(".", ","),
+                part.replace(".", " "),
+            }
+            for candidate in candidates:
+                cleaned = self._clean_text_value(candidate).lower()
+                if cleaned and cleaned not in variants:
+                    variants.append(cleaned)
+        return tuple(variants)
 
     def _is_likely_cable_designation(self, value: object) -> bool:
         signature = self._extract_cable_designation_signature(self._clean_text_value(value))
@@ -2570,6 +2598,24 @@ class ReMoMatcher:
             ]
         return tuple(tokens)
 
+    def _designation_family_tokens(self, value: object) -> Tuple[str, ...]:
+        cleaned = self._clean_text_value(value).lower().replace("ё", "е")
+        if not cleaned:
+            return ()
+        tokens = [
+            token
+            for token in re.findall(r"[a-zа-я0-9]+", cleaned, flags=re.IGNORECASE)
+            if token and token not in {"a", "а"}
+        ]
+        return tuple(tokens)
+
+    def _designation_family_matches(self, query_value: object, item_value: object) -> bool:
+        query_tokens = self._designation_family_tokens(query_value)
+        item_tokens = self._designation_family_tokens(item_value)
+        if query_tokens and item_tokens:
+            return self._cable_designation_base_tokens_match(query_tokens, item_tokens)
+        return self._clean_text_value(query_value) == self._clean_text_value(item_value)
+
     def _cable_designation_base_tokens_match(
         self,
         query_tokens: Tuple[str, ...],
@@ -2581,8 +2627,10 @@ class ReMoMatcher:
         for query_token in query_tokens:
             if query_token in item_token_set:
                 continue
-            if len(query_token) >= 4 and any(
-                len(item_token) >= 4 and (item_token.endswith(query_token) or query_token.endswith(item_token))
+            # Cable code tokens like "ввгнг" and "аввгнг" must not collapse into each
+            # other. Allow fuzzy suffix/prefix matching only for short technical tokens.
+            if len(query_token) <= 3 and any(
+                len(item_token) <= 3 and (item_token.endswith(query_token) or query_token.endswith(item_token))
                 for item_token in item_tokens
             ):
                 continue
@@ -2624,7 +2672,7 @@ class ReMoMatcher:
         for token in self._cable_designation_base_tokens(signature):
             where_parts.append(f"lower({normalized_column}) LIKE ?")
             params.append(f"%{token}%")
-        for part in sorted({part.strip() for part in str(signature.get('dimension') or '').split('x') if part.strip()}):
+        for part in self._cable_dimension_search_terms(signature):
             where_parts.append(f"lower({normalized_column}) LIKE ?")
             params.append(f"%{part.lower()}%")
         return self._duckdb_fetch_items(
@@ -2632,6 +2680,85 @@ class ReMoMatcher:
             params=params,
             limit=max(80, min(int(limit), 1600)),
         )
+
+    def _extract_item_cable_designation_signature(
+        self,
+        query_signature: Dict[str, Any],
+        item: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        item_name = self._clean_text_value(item.get("name"))
+        item_normalized_name = self._clean_text_value(item.get("normalized_name"))
+        item_signature = self._extract_cable_designation_signature(item_name or item_normalized_name)
+        if not item_signature and item_normalized_name and item_normalized_name != item_name:
+            normalized_signature = self._extract_cable_designation_signature(item_normalized_name)
+            if normalized_signature:
+                item_signature = normalized_signature
+        return item_signature
+
+    def _exact_cable_designation_candidates(
+        self,
+        query_signature: Dict[str, Any],
+        query_base_tokens: Tuple[str, ...],
+        items: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        ranked: List[Tuple[float, Dict[str, Any]]] = []
+        query_dimension = self._clean_text_value(query_signature.get("dimension")).lower()
+        query_dimension_variants = {
+            query_dimension,
+            query_dimension.replace("x", "х"),
+        }
+        for item in items:
+            item_signature = self._extract_item_cable_designation_signature(query_signature, item)
+            if not item_signature:
+                continue
+            if self._clean_text_value(item_signature.get("dimension")).lower() != query_dimension:
+                continue
+            item_base_tokens = self._cable_designation_base_tokens(item_signature)
+            if query_base_tokens and item_base_tokens:
+                if not self._cable_designation_base_tokens_match(query_base_tokens, item_base_tokens):
+                    continue
+            item_text = (
+                f"{self._clean_text_value(item.get('name'))} {self._clean_text_value(item.get('normalized_name'))}"
+            ).lower().replace("ё", "е")
+            item_markers = item.get("item_markers", {}) or {}
+            score = 0.0
+            if self._clean_text_value(item_signature.get("base")) == self._clean_text_value(query_signature.get("base")):
+                score += 3.0
+            if any(variant and variant in item_text for variant in query_dimension_variants):
+                score += 2.0
+            if not self._clean_text_value(item_markers.get("length_m")):
+                score += 0.4
+            if "(n)" in item_text or "(pe)" in item_text:
+                score -= 0.15
+            score -= len(item_text) * 0.0001
+            ranked.append((score, item))
+        ranked.sort(key=lambda pair: pair[0], reverse=True)
+        return [item for _, item in ranked]
+
+    def _lookup_exact_cable_designation_from_pool(
+        self,
+        query_signature: Dict[str, Any],
+        query_features: Dict[str, Any],
+        candidate_pool: List[Dict[str, Any]],
+        query_base_tokens: Tuple[str, ...],
+    ) -> Dict[str, Any] | None:
+        signature_candidates: List[Dict[str, Any]] = []
+        for item in candidate_pool:
+            item_signature = self._extract_item_cable_designation_signature(query_signature, item)
+            if not self._cable_designation_signatures_match(query_signature, item_signature):
+                continue
+            compatibility_label = self._compatibility_label(query_features, item)
+            if compatibility_label not in {"compatible", "weakly_compatible"}:
+                continue
+            signature_candidates.append(item)
+        exact_candidates = self._exact_cable_designation_candidates(
+            query_signature,
+            query_base_tokens,
+            signature_candidates,
+        )
+        if not exact_candidates:
+            return None
+        return exact_candidates[0]
 
     def _lookup_catalog_item_by_cable_designation(self, query_text: str, query_article: str = "") -> Dict[str, Any] | None:
         designation_source = self._clean_text_value(query_article) or self._clean_text_value(query_text)
@@ -2646,6 +2773,20 @@ class ReMoMatcher:
 
         branch_paths = [entry["path"] for entry in lookup_features.get("ranked_branches", []) if entry.get("path")]
         candidate_pool = self._duckdb_cable_designation_candidates(signature, limit=640)
+        query_dimension = self._clean_text_value(signature.get("dimension")).lower()
+        query_dimension_variants = {
+            query_dimension,
+            query_dimension.replace("x", "х"),
+        }
+        query_base_tokens = tuple(token for token in self._cable_designation_base_tokens(signature) if token)
+        exact_candidate = self._lookup_exact_cable_designation_from_pool(
+            signature,
+            lookup_features,
+            candidate_pool,
+            query_base_tokens,
+        )
+        if exact_candidate is not None:
+            return exact_candidate
         supplemental_pool = self._typed_candidate_pool(lookup_query, lookup_features, limit=320)
         if supplemental_pool:
             merged_pool: List[Dict[str, Any]] = []
@@ -2667,12 +2808,6 @@ class ReMoMatcher:
             return None
 
         direct_candidates: List[Dict[str, Any]] = []
-        query_dimension = self._clean_text_value(signature.get("dimension")).lower()
-        query_dimension_variants = {
-            query_dimension,
-            query_dimension.replace("x", "х"),
-        }
-        query_base_tokens = [token for token in self._cable_designation_base_tokens(signature) if token]
         seen_row_idx: set[int] = set()
         for item in candidate_pool:
             row_idx = int(item.get("row_idx", -1))
@@ -2683,13 +2818,22 @@ class ReMoMatcher:
             item_haystack = f"{item_name} {item_normalized_name}".lower().replace("ё", "е")
             if query_dimension and not any(variant and variant in item_haystack for variant in query_dimension_variants):
                 continue
-            item_tokens = {
-                self._clean_text_value(token).lower()
-                for token in (item.get("tokens") or [])
-                if self._clean_text_value(token)
-            }
-            if query_base_tokens and not all(token in item_tokens or token in item_haystack for token in query_base_tokens):
+            item_signature = self._extract_item_cable_designation_signature(signature, item)
+            if item_signature and not self._cable_designation_signatures_match(signature, item_signature):
                 continue
+            item_base_tokens = self._cable_designation_base_tokens(item_signature)
+            if query_base_tokens:
+                if item_base_tokens:
+                    if not self._cable_designation_base_tokens_match(query_base_tokens, item_base_tokens):
+                        continue
+                else:
+                    item_tokens = {
+                        self._clean_text_value(token).lower()
+                        for token in (item.get("tokens") or [])
+                        if self._clean_text_value(token)
+                    }
+                    if not all(token in item_tokens for token in query_base_tokens):
+                        continue
             if self._compatibility_label(lookup_features, item) != "compatible":
                 continue
             seen_row_idx.add(row_idx)
@@ -2709,22 +2853,15 @@ class ReMoMatcher:
         signature_candidates: List[Dict[str, Any]] = []
         seen_row_idx: set[int] = set()
         for item in candidate_pool:
-            item_name = self._clean_text_value(item.get("name"))
-            item_normalized_name = self._clean_text_value(item.get("normalized_name"))
-            item_signature = self._extract_cable_designation_signature(item_name or item_normalized_name)
-            if item_normalized_name and item_normalized_name != item_name:
-                normalized_signature = self._extract_cable_designation_signature(item_normalized_name)
-                if normalized_signature and (
-                    not item_signature or self._cable_designation_signatures_match(signature, normalized_signature)
-                ):
-                    item_signature = normalized_signature
+            item_signature = self._extract_item_cable_designation_signature(signature, item)
             if not self._cable_designation_signatures_match(signature, item_signature):
                 continue
             row_idx = int(item.get("row_idx", -1))
             if row_idx in seen_row_idx:
                 continue
             seen_row_idx.add(row_idx)
-            if self._compatibility_label(lookup_features, item) != "compatible":
+            compatibility_label = self._compatibility_label(lookup_features, item)
+            if compatibility_label not in {"compatible", "weakly_compatible"}:
                 continue
             signature_candidates.append(item)
 
@@ -2767,6 +2904,10 @@ class ReMoMatcher:
                     item_normalized_name = self._clean_text_value(item.get("normalized_name"))
                     item_text = f"{item_name} {item_normalized_name}".strip()
                     item_haystack = re.sub(r"[^a-zа-я0-9]+", " ", item_text.lower().replace("ё", "е"), flags=re.IGNORECASE)
+                    item_signature = self._extract_item_cable_designation_signature(signature, item)
+                    if item_signature and not self._cable_designation_signatures_match(signature, item_signature):
+                        continue
+                    item_base_tokens = self._cable_designation_base_tokens(item_signature)
                     raw_dimension_hint = self._clean_text_value(signature.get("dimension"))
                     has_raw_dimension_hint = bool(
                         raw_dimension_hint
@@ -2775,8 +2916,18 @@ class ReMoMatcher:
                             or raw_dimension_hint.replace("x", "х") in item_text.lower().replace("ё", "е")
                         )
                     )
-                    if fallback_tokens and not all(token in item_haystack for token in fallback_tokens):
-                        continue
+                    if query_base_tokens:
+                        if item_base_tokens:
+                            if not self._cable_designation_base_tokens_match(tuple(query_base_tokens), item_base_tokens):
+                                continue
+                        else:
+                            item_haystack_tokens = set(re.findall(r"[a-zа-я0-9]+", item_haystack, flags=re.IGNORECASE))
+                            if not all(token in item_haystack_tokens for token in query_base_tokens if token not in {"ls", "hf"}):
+                                continue
+                    elif fallback_tokens:
+                        item_haystack_tokens = set(re.findall(r"[a-zа-я0-9]+", item_haystack, flags=re.IGNORECASE))
+                        if not all(token in item_haystack_tokens for token in fallback_tokens):
+                            continue
                     item_dimensions = self._extract_dimension_signatures(item_text)
                     if query_dimensions["triples"] and item_dimensions["triples"]:
                         if not (query_dimensions["triples"] & item_dimensions["triples"]):
@@ -2803,6 +2954,13 @@ class ReMoMatcher:
                 item_name = self._clean_text_value(item.get("name"))
                 item_normalized_name = self._clean_text_value(item.get("normalized_name"))
                 item_text = f"{item_name} {item_normalized_name}".strip()
+                item_signature = self._extract_item_cable_designation_signature(signature, item)
+                if item_signature and not self._cable_designation_signatures_match(signature, item_signature):
+                    continue
+                item_base_tokens = self._cable_designation_base_tokens(item_signature)
+                if query_base_tokens and item_base_tokens:
+                    if not self._cable_designation_base_tokens_match(tuple(query_base_tokens), item_base_tokens):
+                        continue
                 item_dimensions = self._extract_dimension_signatures(item_text)
                 raw_dimension_hint = self._clean_text_value(signature.get("dimension"))
                 has_raw_dimension_hint = bool(
@@ -2832,6 +2990,14 @@ class ReMoMatcher:
 
         if not signature_candidates:
             return None
+
+        exact_signature_candidates = self._exact_cable_designation_candidates(
+            signature,
+            query_base_tokens,
+            signature_candidates,
+        )
+        if exact_signature_candidates:
+            return exact_signature_candidates[0]
 
         scored_entries = self._score_candidates_locally(lookup_features, signature_candidates)
         if not scored_entries:
@@ -2938,6 +3104,15 @@ class ReMoMatcher:
         ]
         for token in technical_tokens[:4]:
             if token in candidate_text:
+                bonus += 0.08
+
+        query_family = self._entity_family(query_features.get("entity_type", ""))
+        if query_family == "rack_accessory_strict":
+            query_markers = query_features.get("markers", {}) or {}
+            item_markers = item.get("item_markers", {}) or {}
+            query_accessory = self._clean_text_value(query_markers.get("accessory_kind"))
+            item_accessory = self._clean_text_value(item_markers.get("accessory_kind"))
+            if query_accessory and item_accessory and query_accessory == item_accessory:
                 bonus += 0.08
 
         query_article_compact = self._compact_article_series_key(article)
@@ -3339,7 +3514,7 @@ class ReMoMatcher:
         query_designation = self._clean_text_value(query_markers.get("designation_family"))
         item_designation = self._clean_text_value(item_markers.get("designation_family"))
         if query_type in {"bulk_twisted_pair", "cable", "wire"} and query_designation and item_designation:
-            if query_designation != item_designation:
+            if not self._designation_family_matches(query_designation, item_designation):
                 return "designation_family_mismatch"
         if query_type in {"bulk_twisted_pair", "cable", "wire"}:
             query_signature = self._extract_cable_designation_signature(query_text)
@@ -3660,6 +3835,9 @@ class ReMoMatcher:
         for key, weight in key_pairs:
             query_value = self._clean_text_value(query_markers.get(key))
             item_value = self._clean_text_value(item_markers.get(key))
+            if key == "designation_family" and query_value and item_value:
+                if self._designation_family_matches(query_value, item_value):
+                    continue
             if query_value and item_value and query_value != item_value:
                 penalty += weight
 
@@ -3716,7 +3894,7 @@ class ReMoMatcher:
             return True
 
         query_family = self._entity_family(query_features.get("entity_type", ""))
-        candidate_family = self._entity_family(item.get("entity_type", ""))
+        candidate_family = self._effective_candidate_family_for_query(query_features, item)
         allowed_pairs = registry_allowed_cross_family_pairs(getattr(self, "taxonomy_rules", {}))
         if registry_family_requires_same_family_gate(query_family, getattr(self, "taxonomy_rules", {})):
             return candidate_family == query_family
@@ -3726,13 +3904,42 @@ class ReMoMatcher:
 
     def _is_gemini_result_family_valid(self, query_features: Dict[str, Any], item: Dict[str, Any]) -> bool:
         query_family = self._entity_family(query_features.get("entity_type", ""))
-        candidate_family = self._entity_family(item.get("entity_type", ""))
+        candidate_family = self._effective_candidate_family_for_query(query_features, item)
         allowed_pairs = registry_allowed_cross_family_pairs(getattr(self, "taxonomy_rules", {}))
         if registry_family_requires_same_family_gate(query_family, getattr(self, "taxonomy_rules", {})):
             return candidate_family == query_family
         if (query_family, candidate_family) in allowed_pairs:
             return True
         return not self._is_hard_incompatible_match(query_features, item)
+
+    def _effective_candidate_family_for_query(self, query_features: Dict[str, Any], item: Dict[str, Any]) -> str:
+        query_family = self._entity_family(query_features.get("entity_type", ""))
+        candidate_family = self._entity_family(item.get("entity_type", ""))
+        if query_family != "rack_accessory_strict":
+            return candidate_family
+        if candidate_family not in {"", "other", "cable"}:
+            return candidate_family
+
+        item_markers = item.get("item_markers", {}) or {}
+        accessory_kind = self._clean_text_value(item_markers.get("accessory_kind"))
+        mount_kind = self._clean_text_value(item_markers.get("mount_kind"))
+        if accessory_kind in {
+            "holder",
+            "connector_plate",
+            "tee",
+            "corner",
+            "cover",
+            "organizer",
+            "brush_panel",
+            "partition",
+            "blank_panel",
+            "shelf",
+            "rail",
+        }:
+            return "rack_accessory_strict"
+        if mount_kind in {"holder", "organizer", "brush", "shelf", "rail"}:
+            return "rack_accessory_strict"
+        return candidate_family
 
     def _typed_candidate_pool(self, query_text: str, query_features: Dict[str, Any], limit: int) -> List[Dict[str, Any]]:
         strictness = self._match_strictness_for_query(query_features)
