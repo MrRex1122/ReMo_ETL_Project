@@ -864,7 +864,7 @@ class ReMoMatcher:
                 normalized_path,
                 default="review_rack_tray_semantic_match",
             )
-        if normalized_path == "grounding_review_resolver":
+        if normalized_path in {"grounding_review_resolver", "grounding_ptce_review_resolver"}:
             return registry_verifier_default_review_reason(
                 taxonomy_rules,
                 normalized_path,
@@ -994,10 +994,14 @@ class ReMoMatcher:
                 if normalized_path == "rack_tray_plate_semantic_resolver":
                     return "reject_rack_tray_plate_no_compatible_candidates"
                 return "reject_rack_tray_no_compatible_candidates"
-        if normalized_path == "grounding_review_resolver":
+        if normalized_path in {"grounding_review_resolver", "grounding_ptce_review_resolver"}:
             if normalized_reason == "strict_fallback_family_mismatch":
+                if normalized_path == "grounding_ptce_review_resolver":
+                    return "reject_grounding_ptce_family_gate"
                 return "reject_grounding_family_gate"
             if normalized_reason in no_compatible_reasons:
+                if normalized_path == "grounding_ptce_review_resolver":
+                    return "reject_grounding_ptce_no_compatible_candidates"
                 return "reject_grounding_no_compatible_candidates"
         if normalized_path in {
             "telecom_semantic_resolver",
@@ -1205,6 +1209,14 @@ class ReMoMatcher:
 
     def _rack_tray_semantic_resolver_path_for_query(self, query_features: Dict[str, Any]) -> str:
         if self._is_grounding_query(query_features):
+            normalized_query = self._normalize_text(
+                query_features.get("original_text")
+                or query_features.get("original_query")
+                or query_features.get("query_text")
+                or ""
+            )
+            if "ptce" in normalized_query or "\u0437\u0430\u0437\u0435\u043c\u043b" in normalized_query:
+                return "grounding_ptce_review_resolver"
             return "grounding_review_resolver"
         raw_entity_type = self._clean_text_value(query_features.get("entity_type")).lower()
         entity_family = self._entity_family(query_features.get("entity_type", ""))
@@ -1474,6 +1486,8 @@ class ReMoMatcher:
         if query_family == "sensor" or (domain_label == "monitoring_hw" and "\u0434\u0430\u0442\u0447\u0438\u043a" in normalized_query and domain_confidence >= 0.5):
             return "sensor_review_resolver"
         if self._is_grounding_query(query_features) or query_family == "grounding" or (domain_label == "grounding" and domain_confidence >= 0.5):
+            if any(token in normalized_query for token in {"ptce", "\u0437\u0430\u0437\u0435\u043c\u043b"}):
+                return "grounding_ptce_review_resolver"
             return "grounding_review_resolver"
         if query_family == "monitoring_hw" or (
             any(token in normalized_query for token in {"\u0430\u0440\u043c", "\u0438\u043d\u0434\u0438\u043a\u0430\u0446", "\u043a\u043e\u043d\u0442\u0440\u043e\u043b"})
