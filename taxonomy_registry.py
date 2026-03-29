@@ -687,6 +687,16 @@ DEFAULT_VERIFIER_POLICY: Dict[str, Dict[str, Any]] = {
         "compatible_default_decision": "review",
         "default_review_reason": "review_rack_tray_holder_series_match",
     },
+    "rack_tray_holder_short_article_resolver": {
+        "auto_accept_sources": [],
+        "review_sources": [
+            "compatible_local_fallback",
+            "local_tree+gemini",
+            "candidate_tiebreaker_gemini",
+        ],
+        "compatible_default_decision": "review",
+        "default_review_reason": "review_rack_tray_holder_short_article_match",
+    },
     "rack_tray_console_series_resolver": {
         "auto_accept_sources": [],
         "review_sources": [

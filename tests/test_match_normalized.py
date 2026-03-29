@@ -1402,6 +1402,23 @@ class NormalizedMatchTests(unittest.TestCase):
             }
         )
 
+        self.assertEqual(resolver_path, "rack_tray_holder_short_article_resolver")
+
+    def test_cached_result_resolver_path_uses_rack_tray_holder_series_resolver_for_series_holder_article(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        resolver_path = matcher._cached_result_resolver_path(
+            {
+                "row_type": "item",
+                "entity_type": "rack_accessory_strict",
+                "query_article": "CM401040",
+                "dimension_diameters": ["25-26"],
+                "markers": {"accessory_kind": "holder"},
+                "original_query": "Держатель D=25-26 артикул CM401040",
+            }
+        )
+
         self.assertEqual(resolver_path, "rack_tray_holder_series_resolver")
 
     def test_cached_result_resolver_path_uses_rack_tray_cpo_corner_series_resolver_for_cpo_corner_article(self):

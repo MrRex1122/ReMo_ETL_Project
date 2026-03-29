@@ -836,6 +836,7 @@ class ReMoMatcher:
             "rack_tray_series_resolver",
             "rack_tray_support_series_resolver",
             "rack_tray_holder_series_resolver",
+            "rack_tray_holder_short_article_resolver",
             "rack_tray_console_series_resolver",
             "rack_tray_console_universal_resolver",
             "rack_tray_console_short_article_resolver",
@@ -921,6 +922,7 @@ class ReMoMatcher:
             "rack_tray_series_resolver",
             "rack_tray_support_series_resolver",
             "rack_tray_holder_series_resolver",
+            "rack_tray_holder_short_article_resolver",
             "rack_tray_console_series_resolver",
             "rack_tray_console_universal_resolver",
             "rack_tray_console_short_article_resolver",
@@ -945,6 +947,8 @@ class ReMoMatcher:
             if normalized_reason == "strict_fallback_family_mismatch":
                 if normalized_path == "rack_tray_holder_series_resolver":
                     return "reject_rack_tray_holder_family_gate"
+                if normalized_path == "rack_tray_holder_short_article_resolver":
+                    return "reject_rack_tray_holder_short_article_family_gate"
                 if normalized_path == "rack_tray_console_series_resolver":
                     return "reject_rack_tray_console_family_gate"
                 if normalized_path == "rack_tray_console_universal_resolver":
@@ -983,6 +987,8 @@ class ReMoMatcher:
             if normalized_reason in no_compatible_reasons:
                 if normalized_path == "rack_tray_holder_series_resolver":
                     return "reject_rack_tray_holder_no_compatible_candidates"
+                if normalized_path == "rack_tray_holder_short_article_resolver":
+                    return "reject_rack_tray_holder_short_article_no_compatible_candidates"
                 if normalized_path == "rack_tray_console_series_resolver":
                     return "reject_rack_tray_console_no_compatible_candidates"
                 if normalized_path == "rack_tray_console_universal_resolver":
@@ -1267,6 +1273,8 @@ class ReMoMatcher:
         )
         if query_article and has_dimensions:
             if accessory_kind == "holder":
+                if re.fullmatch(r"\d{4,5}", query_article):
+                    return "rack_tray_holder_short_article_resolver"
                 return "rack_tray_holder_series_resolver"
             if accessory_kind == "console":
                 if re.search(r"\bуниверс\w*", normalized_query, flags=re.IGNORECASE):
