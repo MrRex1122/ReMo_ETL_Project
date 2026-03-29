@@ -8,7 +8,7 @@ import pandas as pd
 
 from taxonomy_registry import audited_families as registry_audited_families, load_registry_taxonomy_rules
 
-MATCH_DIAGNOSTICS_VERSION = 5
+MATCH_DIAGNOSTICS_VERSION = 6
 MISSING_POSITION_TEXT = "Позиция отсутствует"
 
 HEADER_QUERY_VALUES = {
@@ -35,6 +35,10 @@ FALLBACK_REASON_CODES = {
     "article_conflict_rejected",
     "series_match_ambiguous",
 }
+SEARCH_LAYER_REASON_CODES = {
+    "designation_not_indexed_in_search",
+    "article_series_not_indexed_in_search",
+}
 GENERIC_CATALOG_GAP_CODES = {
     "resolved",
     "no_compatible_candidates",
@@ -47,6 +51,7 @@ GENERIC_CATALOG_GAP_CODES = {
 
 REASON_CLASS_LABELS = {
     "catalog_gap": "catalog gap",
+    "search_layer_gap": "search-layer gap",
     "matcher_retrieval_or_ranking": "retrieval/ranking",
     "gemini_or_decision_policy": "Gemini/policy",
     "input_or_query_shape": "input/query shape",
@@ -93,6 +98,8 @@ def infer_reason_class(stage_of_failure: str, reason_code: str) -> str:
         return "resolved"
     if stage in {"query_input", "query_classification"} or code in INPUT_REASON_CODES:
         return "input_or_query_shape"
+    if code in SEARCH_LAYER_REASON_CODES:
+        return "search_layer_gap"
     if stage == "catalog_gap":
         return "catalog_gap"
     if stage in {"gemini_selection", "fallback_policy"} or code in GEMINI_REASON_CODES or code in FALLBACK_REASON_CODES:
@@ -240,6 +247,9 @@ def _enrich_row_with_coverage_audit(row: dict[str, Any], coverage_row: dict[str,
             pipeline_reason_code in GENERIC_CATALOG_GAP_CODES or compatible_count <= 0
         ):
             enriched["root_cause_code"] = _clean_text_value(coverage_row.get("gap_reason_code")) or "other_spec_mismatch"
+    elif pipeline_stage != "resolved" and pipeline_reason_code in SEARCH_LAYER_REASON_CODES:
+        enriched["root_cause_class"] = "search_layer_gap"
+        enriched["root_cause_code"] = pipeline_reason_code
     elif diagnosis == "catalog_has_compatible_candidates" and pipeline_stage in EARLY_FAILURE_STAGES:
         enriched["root_cause_class"] = "matcher_retrieval_or_ranking"
         if _normalize_reason_code(enriched.get("root_cause_code")) == "resolved":
@@ -397,6 +407,9 @@ def apply_match_diagnostics_to_result_dataframe(
     parser_source_column = "Parser source"
     parsed_article_column = "Parsed article"
     designation_signature_column = "Designation signature"
+    designation_candidates_column = "Designation candidates"
+    series_candidates_column = "Series candidates"
+    typed_pool_column = "Typed pool"
     gemini_route_column = "Gemini route"
     gemini_validation_column = "Gemini validation"
     secondary_filter_column = "Правила secondary filter"
@@ -415,6 +428,9 @@ def apply_match_diagnostics_to_result_dataframe(
         parser_source_column,
         parsed_article_column,
         designation_signature_column,
+        designation_candidates_column,
+        series_candidates_column,
+        typed_pool_column,
         gemini_route_column,
         gemini_validation_column,
         secondary_filter_column,
@@ -453,6 +469,16 @@ def apply_match_diagnostics_to_result_dataframe(
         df_result.at[dataframe_index, parser_source_column] = _clean_text_value(row.get("parser_source"))
         df_result.at[dataframe_index, parsed_article_column] = _clean_text_value(row.get("parsed_article_in_text"))
         df_result.at[dataframe_index, designation_signature_column] = _clean_text_value(row.get("designation_signature"))
+        pipeline_counts = dict(row.get("pipeline_counts") or {})
+        df_result.at[dataframe_index, designation_candidates_column] = _safe_int(
+            row.get("designation_candidate_count") or pipeline_counts.get("designation_candidate_count")
+        )
+        df_result.at[dataframe_index, series_candidates_column] = _safe_int(
+            row.get("series_candidate_count") or pipeline_counts.get("series_candidate_count")
+        )
+        df_result.at[dataframe_index, typed_pool_column] = _safe_int(
+            row.get("typed_pool_count") or pipeline_counts.get("typed_pool_count")
+        )
         df_result.at[dataframe_index, gemini_route_column] = bool(row.get("gemini_route_used"))
         df_result.at[dataframe_index, gemini_validation_column] = bool(row.get("gemini_validation_used"))
         df_result.at[dataframe_index, secondary_filter_column] = ", ".join(
@@ -663,6 +689,9 @@ def prepare_match_diagnostics_table(payload: dict[str, Any]) -> pd.DataFrame:
                 "Article hit": row.get("article_lookup_hit"),
                 "Article conflict": row.get("article_lookup_conflict"),
                 "Article validation": row.get("article_validation_status"),
+                "Designation candidates": row.get("designation_candidate_count") or pipeline_counts.get("designation_candidate_count"),
+                "Series candidates": row.get("series_candidate_count") or pipeline_counts.get("series_candidate_count"),
+                "Typed pool": row.get("typed_pool_count") or pipeline_counts.get("typed_pool_count"),
                 "Resolver": row.get("resolver_name") or row.get("resolution_source"),
                 "Resolver confidence": _safe_float(row.get("resolver_confidence")),
                 "Family confidence": _safe_float(row.get("family_confidence")),

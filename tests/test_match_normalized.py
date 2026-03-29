@@ -250,6 +250,48 @@ class NormalizedMatchTests(unittest.TestCase):
         self.assertEqual(result["verifier_decision"], "reject")
         self.assertEqual(result["verifier_reason"], "reject_telecom_modular_panel_shielded_no_compatible_candidates")
 
+    def test_diagnostic_reason_code_marks_designation_missing_in_search(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        reason_code = matcher._diagnostic_reason_code_for_result(
+            {
+                "compatibility_status": "unresolved_no_compatible_candidates",
+                "resolver_path": "cable_designation_resolver",
+            },
+            query_features={
+                "entity_type": "cable",
+                "designation_signature": "ввгнг ls|4x1.5",
+                "designation_candidate_count": 0,
+            },
+            query_article="ВВГнг(A)-LS 4x1,5",
+            stage_of_failure="local_recall",
+            reason_code="no_compatible_candidates",
+        )
+
+        self.assertEqual(reason_code, "designation_not_indexed_in_search")
+
+    def test_diagnostic_reason_code_marks_rack_tray_series_missing_in_search(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        reason_code = matcher._diagnostic_reason_code_for_result(
+            {
+                "compatibility_status": "unresolved_no_compatible_candidates",
+                "resolver_path": "rack_tray_dl_tee_200_series_resolver",
+            },
+            query_features={
+                "entity_type": "rack_accessory_strict",
+                "series_candidate_count": 0,
+                "typed_pool_count": 0,
+            },
+            query_article="36238K",
+            stage_of_failure="compatibility_filter",
+            reason_code="no_compatible_candidates",
+        )
+
+        self.assertEqual(reason_code, "article_series_not_indexed_in_search")
+
     def test_verifier_policy_uses_keystone_resolver_review_reason(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
         matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})

@@ -154,6 +154,82 @@ class MatchDiagnosticsTests(unittest.TestCase):
         self.assertEqual(row["coverage_scope"], "audited_family")
         self.assertEqual(row["catalog_audit_diagnosis"], "catalog_has_compatible_candidates")
 
+    def test_runtime_payload_marks_search_layer_gap_for_missing_designation_candidates(self):
+        payload = build_match_diagnostics_payload(
+            [
+                {
+                    "run_row_number": 11,
+                    "query_text": "Кабель, артикул ВВГнг(A)-LS 4x1,5",
+                    "row_type": "item",
+                    "entity_type": "cable",
+                    "query_family": "cable",
+                    "resolution_source": "unresolved",
+                    "compatibility_status": "unresolved_no_compatible_candidates",
+                    "incompatibility_reason": "designation_not_indexed_in_search",
+                    "stage_of_failure": "local_recall",
+                    "reason_code": "designation_not_indexed_in_search",
+                    "pipeline_counts": {
+                        "designation_candidate_count": 0,
+                        "same_family_count": 0,
+                        "compatible_count": 0,
+                    },
+                    "designation_signature": "ввгнг ls|4x1.5",
+                    "candidate_snapshots": {},
+                    "gemini": {"attempted": False},
+                    "trace_steps": [],
+                }
+            ],
+            run_id="run-1",
+        )
+
+        row = payload["rows"][0]
+        self.assertEqual(row["root_cause_class"], "search_layer_gap")
+        self.assertEqual(row["root_cause_code"], "designation_not_indexed_in_search")
+
+    def test_coverage_enrichment_preserves_search_layer_gap_reason(self):
+        diagnostics = build_match_diagnostics_payload(
+            [
+                {
+                    "run_row_number": 12,
+                    "query_text": "Ответвитель DL 200х50",
+                    "row_type": "item",
+                    "entity_type": "rack_accessory_strict",
+                    "query_family": "rack_accessory_strict",
+                    "resolution_source": "unresolved",
+                    "compatibility_status": "unresolved_no_compatible_candidates",
+                    "incompatibility_reason": "article_series_not_indexed_in_search",
+                    "stage_of_failure": "compatibility_filter",
+                    "reason_code": "article_series_not_indexed_in_search",
+                    "pipeline_counts": {
+                        "series_candidate_count": 0,
+                        "typed_pool_count": 0,
+                        "same_family_count": 6,
+                        "compatible_count": 0,
+                    },
+                    "candidate_snapshots": {},
+                    "gemini": {"attempted": False},
+                    "trace_steps": [],
+                }
+            ],
+            run_id="run-1",
+        )
+        coverage_audit = {
+            "rows": [
+                {
+                    "run_row_number": 12,
+                    "diagnosis": "catalog_has_compatible_candidates",
+                    "same_family_candidates_count": 6,
+                    "compatible_candidates_count": 2,
+                    "candidate_examples": [{"name": "Ответвитель DL 200х50", "article": "36238KX"}],
+                }
+            ]
+        }
+
+        enriched = enrich_match_diagnostics_payload(diagnostics, coverage_audit_payload=coverage_audit)
+        row = enriched["rows"][0]
+        self.assertEqual(row["root_cause_class"], "search_layer_gap")
+        self.assertEqual(row["root_cause_code"], "article_series_not_indexed_in_search")
+
     def test_reconstructed_unresolved_without_reason_defaults_to_no_compatible_candidates(self):
         df = pd.DataFrame(
             {
@@ -303,6 +379,9 @@ class MatchDiagnosticsTests(unittest.TestCase):
         self.assertIn("Secondary filter rules", detail.columns)
         self.assertIn("Root cause code", detail.columns)
         self.assertIn("Coverage scope", detail.columns)
+        self.assertIn("Designation candidates", detail.columns)
+        self.assertIn("Series candidates", detail.columns)
+        self.assertIn("Typed pool", detail.columns)
         self.assertIn("Pipeline stage", stages.columns)
         self.assertIn("Root cause class", root_causes.columns)
         self.assertIn("Root cause code", reasons.columns)
@@ -363,6 +442,9 @@ class MatchDiagnosticsTests(unittest.TestCase):
         self.assertEqual(updated.at[0, "Статус article validation"], "rejected")
         self.assertEqual(updated.at[0, "Gemini route"], True)
         self.assertEqual(updated.at[0, "Gemini validation"], True)
+        self.assertIn("Designation candidates", updated.columns)
+        self.assertIn("Series candidates", updated.columns)
+        self.assertIn("Typed pool", updated.columns)
 
     def test_apply_match_diagnostics_summary_to_stats_uses_enriched_summary(self):
         payload = {

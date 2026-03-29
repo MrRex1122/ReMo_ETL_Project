@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import logging
 import math
@@ -1756,13 +1757,20 @@ class ReMoMatcher:
                 "article_series_candidates": article_series_candidates,
             }
 
-        cable_designation_match = self._lookup_catalog_item_by_cable_designation(query_text, query_article)
+        designation_debug_stats: Dict[str, Any] = {}
+        cable_designation_match = self._lookup_catalog_item_by_cable_designation_with_debug(
+            query_text,
+            query_article,
+            debug_stats=designation_debug_stats,
+        )
+        query_features["designation_candidate_count"] = int(designation_debug_stats.get("designation_candidate_count") or 0)
         if cable_designation_match is not None:
             trace_steps.append(
                 {
                     "stage": "designation_lookup",
                     "status": "hit",
                     "designation_source": article_source if query_article else "query",
+                    "designation_candidate_count": int(designation_debug_stats.get("designation_candidate_count") or 0),
                 }
             )
             result = self._build_result_from_item(
@@ -1782,6 +1790,7 @@ class ReMoMatcher:
 
         if query_article:
             article_series_candidates = self._lookup_catalog_items_by_article_series(query_article, query_features)
+            query_features["series_candidate_count"] = len(article_series_candidates)
             if article_series_candidates:
                 trace_steps.append(
                     {
@@ -2760,11 +2769,25 @@ class ReMoMatcher:
             return None
         return exact_candidates[0]
 
-    def _lookup_catalog_item_by_cable_designation(self, query_text: str, query_article: str = "") -> Dict[str, Any] | None:
+    def _lookup_catalog_item_by_cable_designation(
+        self,
+        query_text: str,
+        query_article: str = "",
+        *,
+        debug_stats: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any] | None:
+        if debug_stats is not None:
+            debug_stats.clear()
+            debug_stats["attempted"] = False
+            debug_stats["signature_present"] = False
+            debug_stats["designation_candidate_count"] = 0
         designation_source = self._clean_text_value(query_article) or self._clean_text_value(query_text)
         signature = self._extract_cable_designation_signature(designation_source)
         if not signature:
             return None
+        if debug_stats is not None:
+            debug_stats["attempted"] = True
+            debug_stats["signature_present"] = True
         lookup_query = f"кабель {designation_source}".strip()
         lookup_features = self._extract_query_features(lookup_query)
         lookup_features["original_text"] = lookup_query
@@ -2773,6 +2796,8 @@ class ReMoMatcher:
 
         branch_paths = [entry["path"] for entry in lookup_features.get("ranked_branches", []) if entry.get("path")]
         candidate_pool = self._duckdb_cable_designation_candidates(signature, limit=640)
+        if debug_stats is not None:
+            debug_stats["designation_candidate_count"] = len(candidate_pool)
         query_dimension = self._clean_text_value(signature.get("dimension")).lower()
         query_dimension_variants = {
             query_dimension,
@@ -3016,6 +3041,74 @@ class ReMoMatcher:
             if best_score < threshold:
                 return None
         return best_entry["item"]
+
+    def _lookup_catalog_item_by_cable_designation_with_debug(
+        self,
+        query_text: str,
+        query_article: str = "",
+        *,
+        debug_stats: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any] | None:
+        lookup = self._lookup_catalog_item_by_cable_designation
+        try:
+            lookup_signature = inspect.signature(lookup)
+        except (TypeError, ValueError):
+            lookup_signature = None
+        if lookup_signature and "debug_stats" in lookup_signature.parameters:
+            return lookup(query_text, query_article, debug_stats=debug_stats)
+        return lookup(query_text, query_article)
+
+    def _diagnostic_reason_code_for_result(
+        self,
+        result: Dict[str, Any],
+        *,
+        query_features: Dict[str, Any] | None,
+        query_article: str = "",
+        stage_of_failure: str,
+        reason_code: str,
+    ) -> str:
+        normalized_reason = str(reason_code or "resolved").strip() or "resolved"
+        normalized_stage = self._clean_text_value(stage_of_failure) or "runtime_error"
+        if normalized_stage == "resolved":
+            return normalized_reason
+        if str(result.get("compatibility_status") or "") != "unresolved_no_compatible_candidates":
+            return normalized_reason
+        if normalized_stage not in {"catalog_gap", "local_recall", "compatibility_filter"}:
+            return normalized_reason
+        generic_reason_codes = {
+            "no_compatible_candidates",
+            "strict_class_no_compatible_candidate",
+            "strict_class_requires_compatible_match",
+            "no_confirmed_compatible_candidate",
+        }
+        if normalized_reason not in generic_reason_codes:
+            return normalized_reason
+
+        features = query_features or {}
+        query_family = self._entity_family(features.get("entity_type", ""))
+        designation_signature = self._clean_text_value(features.get("designation_signature"))
+        designation_candidate_count = int(features.get("designation_candidate_count") or 0)
+        if (
+            query_family in {"cable", "wire", "bulk_twisted_pair"}
+            and designation_signature
+            and designation_candidate_count <= 0
+        ):
+            return "designation_not_indexed_in_search"
+
+        series_candidate_count = int(features.get("series_candidate_count") or 0)
+        typed_pool_count = int(features.get("typed_pool_count") or 0)
+        resolver_path = self._clean_text_value(
+            result.get("resolver_path") or features.get("active_resolver_path")
+        )
+        if (
+            query_family == "rack_accessory_strict"
+            and self._clean_text_value(query_article)
+            and resolver_path.startswith("rack_tray_")
+            and series_candidate_count <= 0
+            and typed_pool_count <= 0
+        ):
+            return "article_series_not_indexed_in_search"
+        return normalized_reason
 
     def _lookup_catalog_items_by_article_series(self, article: str, query_features: Dict[str, Any]) -> List[Dict[str, Any]]:
         article_compact = self._compact_article_series_key(article)
@@ -5354,6 +5447,9 @@ class ReMoMatcher:
             "parser_source": self._clean_text_value((query_features or {}).get("parser_source")) or "legacy",
             "parsed_article_in_text": self._clean_text_value((query_features or {}).get("extracted_article")),
             "designation_signature": self._clean_text_value((query_features or {}).get("designation_signature")),
+            "designation_candidate_count": int((query_features or {}).get("designation_candidate_count") or 0),
+            "series_candidate_count": int((query_features or {}).get("series_candidate_count") or 0),
+            "typed_pool_count": int((query_features or {}).get("typed_pool_count") or 0),
             "row_type": row_type,
             "entity_type": entity_type,
             "query_family": query_family,
@@ -6163,6 +6259,9 @@ class ReMoMatcher:
                 "python_scoring_ms": round(float(python_scoring_ms), 2),
                 "compatibility_filter_ms": round(float(compatibility_filter_ms), 2),
                 "gemini_ms": round(float(gemini_total_ms), 2),
+                "designation_candidate_count": int(query_features.get("designation_candidate_count") or 0),
+                "series_candidate_count": int(query_features.get("series_candidate_count") or 0),
+                "typed_pool_count": int(query_features.get("typed_pool_count") or 0),
                 "secondary_filter_rule_set": list(query_features.get("secondary_filter_rule_set") or []),
                 "secondary_filter_before_count": int(query_features.get("secondary_filter_before_count") or 0),
                 "secondary_filter_after_count": int(query_features.get("secondary_filter_after_count") or 0),
@@ -6201,6 +6300,23 @@ class ReMoMatcher:
 
         def _finalize(result: Dict[str, Any], *, stage_of_failure: str, reason_code: str) -> Dict[str, Any]:
             result = self._apply_verifier_decision(dict(result), query_features=query_features)
+            effective_reason_code = self._diagnostic_reason_code_for_result(
+                result,
+                query_features=query_features,
+                query_article=query_article,
+                stage_of_failure=stage_of_failure,
+                reason_code=str(reason_code or "resolved"),
+            )
+            if str(result.get("compatibility_status") or "") == "unresolved_no_compatible_candidates":
+                generic_reasons = {
+                    "",
+                    "no_compatible_candidates",
+                    "strict_class_no_compatible_candidate",
+                    "strict_class_requires_compatible_match",
+                    "no_confirmed_compatible_candidate",
+                }
+                if str(result.get("incompatibility_reason") or "").strip() in generic_reasons:
+                    result["incompatibility_reason"] = effective_reason_code
             trace_steps_with_final = list(trace_steps)
             trace_steps_with_final.append(
                 {
@@ -6208,7 +6324,7 @@ class ReMoMatcher:
                     "status": "resolved" if stage_of_failure == "resolved" else "failed",
                     "resolution_source": str(result.get("resolution_source") or ""),
                     "compatibility_status": str(result.get("compatibility_status") or ""),
-                    "reason_code": str(reason_code or "resolved"),
+                    "reason_code": effective_reason_code,
                 }
             )
             return self._attach_diagnostic_trace(
@@ -6220,7 +6336,7 @@ class ReMoMatcher:
                 article_lookup_conflict=article_lookup_conflict,
                 query_features=query_features,
                 stage_of_failure=stage_of_failure,
-                reason_code=str(reason_code or "resolved"),
+                reason_code=effective_reason_code,
                 trace_steps=trace_steps_with_final,
                 pipeline_counts=_build_pipeline_counts(),
                 candidate_snapshots=_build_candidate_snapshots(),
@@ -6434,13 +6550,20 @@ class ReMoMatcher:
                 )
                 return _finalize(result, stage_of_failure="resolved", reason_code="resolved")
 
-            cable_designation_match = self._lookup_catalog_item_by_cable_designation(query_text, query_article)
+            designation_debug_stats: Dict[str, Any] = {}
+            cable_designation_match = self._lookup_catalog_item_by_cable_designation_with_debug(
+                query_text,
+                query_article,
+                debug_stats=designation_debug_stats,
+            )
+            query_features["designation_candidate_count"] = int(designation_debug_stats.get("designation_candidate_count") or 0)
             if cable_designation_match is not None:
                 trace_steps.append(
                     {
                         "stage": "designation_lookup",
                         "status": "hit",
                         "designation_source": article_source if query_article else "query",
+                        "designation_candidate_count": int(designation_debug_stats.get("designation_candidate_count") or 0),
                     }
                 )
                 result = self._build_result_from_item(
@@ -6455,6 +6578,7 @@ class ReMoMatcher:
 
             if query_article:
                 article_series_candidates = self._lookup_catalog_items_by_article_series(query_article, query_features)
+                query_features["series_candidate_count"] = len(article_series_candidates)
                 if article_series_candidates:
                     trace_steps.append(
                         {
@@ -6547,6 +6671,7 @@ class ReMoMatcher:
             retrieval_mode = "whole_category" if self._should_use_whole_category_retrieval(query_features) else "heuristic_fallback"
             retrieval_started_at = time.perf_counter()
             branch_candidates = self._typed_candidate_pool(query_text, query_features, local_recall_limit)
+            query_features["typed_pool_count"] = len(branch_candidates)
             query_category_key = self._clean_text_value(query_features.get("query_category_key"))
             if retrieval_mode == "whole_category":
                 if not branch_candidates:
