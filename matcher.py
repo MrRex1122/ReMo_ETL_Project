@@ -1677,6 +1677,7 @@ class ReMoMatcher:
     ) -> Dict[str, Any]:
         article_lookup_hit = False
         article_series_candidates: List[Dict[str, Any]] = []
+        article_affinity_candidates: List[Dict[str, Any]] = []
 
         article_match = self._lookup_catalog_item_by_article(query_article) if query_article else None
         article_sanity_reason = ""
@@ -1718,6 +1719,7 @@ class ReMoMatcher:
                             "result": validated_result,
                             "article_lookup_hit": article_lookup_hit,
                             "article_series_candidates": article_series_candidates,
+                            "article_affinity_candidates": article_affinity_candidates,
                         }
                     query_features["gemini_validation_used"] = True
                     query_features["article_validation_status"] = "rejected_by_gemini"
@@ -1755,6 +1757,7 @@ class ReMoMatcher:
                 "result": result,
                 "article_lookup_hit": article_lookup_hit,
                 "article_series_candidates": article_series_candidates,
+                "article_affinity_candidates": article_affinity_candidates,
             }
 
         designation_debug_stats: Dict[str, Any] = {}
@@ -1820,12 +1823,27 @@ class ReMoMatcher:
                         "result": result,
                         "article_lookup_hit": article_lookup_hit,
                         "article_series_candidates": article_series_candidates,
+                        "article_affinity_candidates": article_affinity_candidates,
                     }
+
+            article_affinity_candidates = self._lookup_catalog_items_by_article_affinity(query_article, query_features)
+            query_features["article_affinity_candidate_count"] = len(article_affinity_candidates)
+            if article_affinity_candidates:
+                trace_steps.append(
+                    {
+                        "stage": "article_lookup",
+                        "status": "affinity_candidates",
+                        "article_source": article_source,
+                        "query_article": query_article,
+                        "article_affinity_candidate_count": len(article_affinity_candidates),
+                    }
+                )
 
         return {
             "result": None,
             "article_lookup_hit": article_lookup_hit,
             "article_series_candidates": article_series_candidates,
+            "article_affinity_candidates": article_affinity_candidates,
         }
 
     def _resolve_direct_exact_stack(
@@ -3141,6 +3159,134 @@ class ReMoMatcher:
                 continue
             filtered.append(item)
         return filtered
+
+    def _article_affinity_search_terms(self, article: str) -> Tuple[str, ...]:
+        article_compact = self._compact_article_series_key(article)
+        if len(article_compact) < 4:
+            return ()
+        blocks = re.findall(r"[0-9]+|[a-zа-я]+", article_compact, flags=re.IGNORECASE)
+        digit_blocks = sorted({block for block in blocks if block.isdigit() and len(block) >= 4}, key=len, reverse=True)
+        terms: List[str] = [article_compact]
+        for block in digit_blocks[:2]:
+            if block not in terms:
+                terms.append(block)
+        return tuple(term for term in terms if len(term) >= 4)
+
+    def _article_affinity_score(self, article: str, item: Dict[str, Any]) -> float:
+        article_compact = self._compact_article_series_key(article)
+        item_compact = self._compact_article_series_key(item.get("article"))
+        if len(article_compact) < 4 or len(item_compact) < 4:
+            return 0.0
+        if article_compact == item_compact:
+            return 1.0
+
+        score = 0.0
+        if item_compact.startswith(article_compact):
+            score += 0.7
+        elif article_compact.startswith(item_compact):
+            score += 0.5
+
+        common_prefix = len(os.path.commonprefix([article_compact, item_compact]))
+        if common_prefix >= 4:
+            score += min(0.2, 0.2 * (common_prefix / max(len(article_compact), len(item_compact))))
+
+        article_blocks = re.findall(r"[0-9]+|[a-zа-я]+", article_compact, flags=re.IGNORECASE)
+        digit_blocks = [block for block in article_blocks if block.isdigit() and len(block) >= 3]
+        alpha_blocks = [block for block in article_blocks if not block.isdigit() and len(block) >= 1]
+
+        if digit_blocks:
+            matched_digits = sum(len(block) for block in digit_blocks if block in item_compact)
+            total_digits = sum(len(block) for block in digit_blocks)
+            if total_digits > 0:
+                score += 0.15 * (matched_digits / total_digits)
+        if alpha_blocks:
+            matched_alpha = sum(1 for block in alpha_blocks if block in item_compact)
+            score += 0.1 * (matched_alpha / max(1, len(alpha_blocks)))
+
+        return max(0.0, min(0.999, score))
+
+    def _lookup_catalog_items_by_article_affinity(self, article: str, query_features: Dict[str, Any]) -> List[Dict[str, Any]]:
+        article_compact = self._compact_article_series_key(article)
+        if len(article_compact) < 4 or self._is_likely_cable_designation(article):
+            return []
+
+        search_terms = self._article_affinity_search_terms(article)
+        if not search_terms:
+            return []
+
+        candidates: List[Dict[str, Any]] = []
+        if self._uses_duckdb_query_backend():
+            column = self._quote_sql_identifier(CANONICAL_ARTICLE_COLUMN)
+            compact_expr = f"regexp_replace(lower(trim({column})), '[^0-9a-zа-я]+', '', 'g')"
+            like_parts = [f"{compact_expr} LIKE ?" for _ in search_terms]
+            candidates = self._duckdb_fetch_items(
+                where_sql=" OR ".join(f"({part})" for part in like_parts),
+                params=[f"{term}%" for term in search_terms],
+                limit=60,
+            )
+        else:
+            for item in getattr(self, "catalog_items", []) or []:
+                item_compact = self._compact_article_series_key(item.get("article"))
+                if not item_compact:
+                    continue
+                if any(item_compact.startswith(term) for term in search_terms):
+                    candidates.append(item)
+
+        filtered_entries: List[Tuple[float, Dict[str, Any]]] = []
+        seen_row_idx: set[int] = set()
+        for item in candidates:
+            row_idx = int(item.get("row_idx", -1))
+            if row_idx in seen_row_idx:
+                continue
+            seen_row_idx.add(row_idx)
+            if self._article_match_sanity_reason(query_features, item):
+                continue
+            if self._is_hard_incompatible_match(query_features, item):
+                continue
+            affinity_score = self._article_affinity_score(article, item)
+            if affinity_score < 0.45:
+                continue
+            filtered_entries.append((affinity_score, item))
+
+        filtered_entries.sort(
+            key=lambda entry: (
+                entry[0],
+                len(self._compact_article_series_key(entry[1].get("article"))),
+                -int(entry[1].get("row_idx", 0)),
+            ),
+            reverse=True,
+        )
+        return [item for _score, item in filtered_entries[:20]]
+
+    def _prioritize_article_affinity_entries(
+        self,
+        query_features: Dict[str, Any],
+        scored_entries: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        query_article = self._clean_text_value(query_features.get("query_article"))
+        if not query_article or not scored_entries:
+            return scored_entries
+
+        prioritized_entries: List[Dict[str, Any]] = []
+        for entry in scored_entries:
+            affinity_score = self._article_affinity_score(query_article, entry["item"])
+            prioritized_entries.append(
+                {
+                    **entry,
+                    "article_affinity_score": affinity_score,
+                }
+            )
+
+        prioritized_entries.sort(
+            key=lambda entry: (
+                float(entry.get("article_affinity_score") or 0.0),
+                float(entry.get("score") or 0.0),
+                float(entry.get("lexical_score") or 0.0),
+                -int(entry["item"].get("row_idx", 0)),
+            ),
+            reverse=True,
+        )
+        return prioritized_entries
 
     def _extract_article_series_thickness_value(self, text: str) -> str:
         cleaned_text = self._clean_text_value(text).lower().replace("ё", "е")
@@ -5637,6 +5783,8 @@ class ReMoMatcher:
     def _should_use_article_validator_gemini(self, query_features: Dict[str, Any], reason_code: str) -> bool:
         if not hasattr(self, "backend"):
             return False
+        if bool(query_features.get("gemini_validation_used")):
+            return False
         if not bool(registry_gemini_policy_value(getattr(self, "taxonomy_rules", {}), "article_validator", "enabled", False)):
             return False
         allowed_reasons = {
@@ -5673,10 +5821,26 @@ class ReMoMatcher:
             registry_gemini_policy_value(getattr(self, "taxonomy_rules", {}), "article_validator", "max_alternatives", 2)
         )
         shortlist: List[Dict[str, Any]] = [article_match]
-        for item in self._lookup_catalog_items_by_article_series(query_article, query_features)[:max_alternatives]:
+        alternative_candidates: List[Dict[str, Any]] = []
+        alternative_candidates.extend(self._lookup_catalog_items_by_article_series(query_article, query_features))
+        alternative_candidates.extend(self._lookup_catalog_items_by_article_affinity(query_article, query_features))
+        deduped_alternatives: List[Tuple[float, Dict[str, Any]]] = []
+        seen_row_idx: set[int] = {int(article_match.get("row_idx", -2))}
+        for item in alternative_candidates:
             row_idx = int(item.get("row_idx", -1))
-            if row_idx == int(article_match.get("row_idx", -2)):
+            if row_idx in seen_row_idx:
                 continue
+            seen_row_idx.add(row_idx)
+            deduped_alternatives.append((self._article_affinity_score(query_article, item), item))
+        deduped_alternatives.sort(
+            key=lambda entry: (
+                entry[0],
+                len(self._compact_article_series_key(entry[1].get("article"))),
+                -int(entry[1].get("row_idx", 0)),
+            ),
+            reverse=True,
+        )
+        for _score, item in deduped_alternatives[:max_alternatives]:
             shortlist.append(item)
         result = self._match_with_gemini(
             query,
@@ -6149,9 +6313,10 @@ class ReMoMatcher:
         source_label: str = "candidate_tiebreaker_gemini",
     ) -> Optional[Dict[str, Any]]:
         strictness = self._match_strictness_for_query(query_features)
+        prioritized_entries = self._prioritize_article_affinity_entries(query_features, scored_entries)
         shortlist = [
             entry["item"]
-            for entry in scored_entries[: min(int(getattr(self, "gemini_shortlist_limit", 96)), len(scored_entries))]
+            for entry in prioritized_entries[: min(int(getattr(self, "gemini_shortlist_limit", 96)), len(prioritized_entries))]
         ]
         if not shortlist:
             return None
@@ -6288,6 +6453,7 @@ class ReMoMatcher:
         compatibility_filter_ms = 0.0
         gemini_total_ms = 0.0
         article_series_candidates: List[Dict[str, Any]] = []
+        article_affinity_candidates: List[Dict[str, Any]] = []
 
         def _build_pipeline_counts() -> Dict[str, Any]:
             return {
@@ -6306,6 +6472,7 @@ class ReMoMatcher:
                 "gemini_ms": round(float(gemini_total_ms), 2),
                 "designation_candidate_count": int(query_features.get("designation_candidate_count") or 0),
                 "series_candidate_count": int(query_features.get("series_candidate_count") or 0),
+                "article_affinity_candidate_count": int(query_features.get("article_affinity_candidate_count") or 0),
                 "typed_pool_count": int(query_features.get("typed_pool_count") or 0),
                 "secondary_filter_rule_set": list(query_features.get("secondary_filter_rule_set") or []),
                 "secondary_filter_before_count": int(query_features.get("secondary_filter_before_count") or 0),
@@ -6508,6 +6675,7 @@ class ReMoMatcher:
             )
             article_lookup_hit = bool(article_resolution.get("article_lookup_hit"))
             article_series_candidates = list(article_resolution.get("article_series_candidates") or [])
+            article_affinity_candidates = list(article_resolution.get("article_affinity_candidates") or [])
             if article_resolution.get("result") is not None:
                 return _finalize(article_resolution["result"], stage_of_failure="resolved", reason_code="resolved")
 
@@ -6748,10 +6916,10 @@ class ReMoMatcher:
                         limit=local_recall_limit,
                         query_features=query_features,
                     )
-            if article_series_candidates:
+            if article_series_candidates or article_affinity_candidates:
                 merged_candidates: List[Dict[str, Any]] = []
                 seen_row_idx: set[int] = set()
-                for item in article_series_candidates + branch_candidates:
+                for item in article_series_candidates + article_affinity_candidates + branch_candidates:
                     row_idx = int(item.get("row_idx", -1))
                     if row_idx in seen_row_idx:
                         continue

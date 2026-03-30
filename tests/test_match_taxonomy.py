@@ -1038,6 +1038,135 @@ class MatchTaxonomyTests(unittest.TestCase):
 
         self.assertEqual([item["article"] for item in items], ["3526210HDZ", "3526212HDZ"])
 
+    def test_lookup_catalog_items_by_article_affinity_returns_related_candidates_only(self):
+        self.matcher._uses_duckdb_query_backend = lambda: False
+        self.matcher.catalog_items = [
+            {
+                "name": "Колесо поворотное 200мм",
+                "normalized_name": "колесо поворотное 200мм",
+                "branch_path": "метизы",
+                "entity_type": "other",
+                "item_markers": {},
+                "row_idx": 1,
+                "article": "53344",
+            },
+            {
+                "name": "Держатель оцинкованный односторонний 25-26мм",
+                "normalized_name": "держатель оцинкованный односторонний 25 26мм",
+                "branch_path": "кабельные лотки > аксессуары",
+                "entity_type": "other",
+                "item_markers": {"accessory_kind": "holder"},
+                "row_idx": 2,
+                "article": "53344",
+            },
+            {
+                "name": "Держатель оцинкованный односторонний 25-26мм усиленный",
+                "normalized_name": "держатель оцинкованный односторонний 25 26мм усиленный",
+                "branch_path": "кабельные лотки > аксессуары",
+                "entity_type": "other",
+                "item_markers": {"accessory_kind": "holder"},
+                "row_idx": 3,
+                "article": "53344R",
+            },
+        ]
+        features = self.matcher._extract_query_features(
+            "Держатель оцинкованный односторонний D=25-26 (100 шт.), артикул 53344"
+        )
+
+        items = self.matcher._lookup_catalog_items_by_article_affinity("53344", features)
+
+        self.assertEqual([item["row_idx"] for item in items], [2, 3])
+        self.assertEqual([item["article"] for item in items], ["53344", "53344R"])
+
+    def test_validate_article_match_with_gemini_uses_article_affinity_shortlist(self):
+        self.matcher.catalog_items = [
+            {
+                "name": "Колесо поворотное 200мм",
+                "normalized_name": "колесо поворотное 200мм",
+                "branch_path": "метизы",
+                "entity_type": "other",
+                "item_markers": {},
+                "row_idx": 1,
+                "article": "53344",
+                "price": 10.0,
+            },
+            {
+                "name": "Держатель оцинкованный односторонний 25-26мм",
+                "normalized_name": "держатель оцинкованный односторонний 25 26мм",
+                "branch_path": "кабельные лотки > аксессуары",
+                "entity_type": "other",
+                "item_markers": {"accessory_kind": "holder"},
+                "row_idx": 2,
+                "article": "53344",
+                "price": 20.0,
+            },
+            {
+                "name": "Держатель оцинкованный односторонний 25-26мм усиленный",
+                "normalized_name": "держатель оцинкованный односторонний 25 26мм усиленный",
+                "branch_path": "кабельные лотки > аксессуары",
+                "entity_type": "other",
+                "item_markers": {"accessory_kind": "holder"},
+                "row_idx": 3,
+                "article": "53344R",
+                "price": 30.0,
+            },
+        ]
+        self.matcher._uses_duckdb_query_backend = lambda: False
+        self.matcher.backend = "google-genai"
+        self.matcher._lookup_catalog_items_by_article_series = lambda _article, _features: []
+        captured: dict[str, list[str]] = {}
+
+        def fake_match_with_gemini(_query, query_features=None, branches=None, candidates=None):
+            captured["articles"] = [self.matcher._clean_text_value(item.get("article")) for item in candidates or []]
+            choice = (candidates or [])[1]
+            return {
+                "found_name": choice["name"],
+                "article": choice["article"],
+                "compatibility_status": "compatible",
+                "similarity_score": 0.96,
+            }
+
+        self.matcher._match_with_gemini = fake_match_with_gemini
+        features = self.matcher._extract_query_features(
+            "Держатель оцинкованный односторонний D=25-26 (100 шт.), артикул 53344"
+        )
+        features["query_article"] = "53344"
+
+        result = self.matcher._validate_article_match_with_gemini(
+            "Держатель оцинкованный односторонний D=25-26 (100 шт.), артикул 53344",
+            features,
+            self.matcher.catalog_items[0],
+            "53344",
+        )
+
+        self.assertEqual(captured["articles"], ["53344", "53344", "53344R"])
+        self.assertIsNotNone(result)
+        self.assertEqual(result["resolution_source"], "article_validator_gemini")
+        self.assertEqual(result["article"], "53344")
+
+    def test_prioritize_article_affinity_entries_moves_article_related_candidate_first(self):
+        query_features = {"query_article": "53344"}
+        unrelated_item = {
+            "name": "Полка консольная 1U 19''",
+            "article": "RACK-100",
+            "row_idx": 1,
+        }
+        related_item = {
+            "name": "Держатель оцинкованный односторонний 25-26мм усиленный",
+            "article": "53344R",
+            "row_idx": 2,
+        }
+
+        prioritized = self.matcher._prioritize_article_affinity_entries(
+            query_features,
+            [
+                {"item": unrelated_item, "score": 0.95, "lexical_score": 0.95},
+                {"item": related_item, "score": 0.82, "lexical_score": 0.82},
+            ],
+        )
+
+        self.assertEqual(prioritized[0]["item"]["article"], "53344R")
+
     def test_lookup_catalog_item_by_article_series_match_returns_best_compatible_candidate(self):
         self.matcher._uses_duckdb_query_backend = lambda: False
         self.matcher.catalog_items = [
