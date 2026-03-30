@@ -19,11 +19,18 @@ SECTION_ROW_DEFAULTS = {
     "скс",
     "лвс",
     "оборудование",
+    "материалы",
+    "материалы и оборудование",
+    "огнестойкая кабельная линия",
     "сетевая инфраструктура",
     "система кабельных лотков",
     "крепеж и аксессуары",
     "наименование оборудования материалов и кабелей",
 }
+SECTION_ROW_PATTERNS = (
+    r"^материалы(?:\s+и\s+оборудование)?$",
+    r"^огнестойкая\s+кабельная\s+линия$",
+)
 ARTICLE_PATTERNS = (
     r"(?:^|[\s,;/\(\)])(?:артикул|арт\.?|sku|part\s*number|partnumber|vendor\s*code)\s*[:№#-]?\s*(.+?)\s*$",
 )
@@ -84,6 +91,9 @@ def detect_query_row_type(text: str, taxonomy_rules: Mapping[str, Any] | None = 
         return "empty"
     if normalized in SECTION_ROW_DEFAULTS:
         return "section"
+    for pattern in SECTION_ROW_PATTERNS:
+        if re.search(pattern, normalized, flags=re.IGNORECASE):
+            return "section"
     patterns = list((taxonomy_rules or {}).get("section_row_patterns", []) or [])
     for pattern in patterns:
         if re.search(pattern, normalized, flags=re.IGNORECASE):

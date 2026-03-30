@@ -1489,6 +1489,28 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.assertIn("%1,5%", params)
         self.assertIn("%1 5%", params)
 
+    def test_cable_designation_lookup_is_not_attempted_for_generic_box_dimensions(self):
+        signature = self.matcher._extract_cable_designation_signature("Короб с крышкой 80x40 (3 м.)")
+
+        self.assertFalse(
+            self.matcher._should_attempt_cable_designation_lookup(
+                "Короб с крышкой 80x40 (3 м.)",
+                "",
+                signature,
+            )
+        )
+
+    def test_cable_designation_lookup_is_attempted_for_real_cable_article(self):
+        signature = self.matcher._extract_cable_designation_signature("ВВГнг(A)-LS 4x1,5")
+
+        self.assertTrue(
+            self.matcher._should_attempt_cable_designation_lookup(
+                "Кабель силовой",
+                "ВВГнг(A)-LS 4x1,5",
+                signature,
+            )
+        )
+
     def test_hard_incompatibility_rejects_cable_signature_mismatch_for_misclassified_query(self):
         features = self.matcher._extract_query_features("Кабель, артикул КИПЭнг-HF 2х2х0,6")
         item = {
@@ -1502,6 +1524,66 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.assertEqual(
             self.matcher._hard_incompatibility_reason(features, item),
             "designation_family_mismatch",
+        )
+
+    def test_hard_incompatibility_rejects_controller_to_scanner_pair(self):
+        features = self.matcher._extract_query_features("Контроллер двухпроводной линии связи")
+        item = {
+            "name": "Сканер проводки Wall",
+            "normalized_name": "сканер проводки wall",
+            "branch_path": "электрика > инструменты",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._hard_incompatibility_reason(features, item),
+            "controller_vs_scanner_mismatch",
+        )
+
+    def test_hard_incompatibility_rejects_fastener_to_cover_pair(self):
+        features = self.matcher._extract_query_features("Анкер-клин 6х35")
+        item = {
+            "name": "Заглушка клеммная для EZC250, 2шт",
+            "normalized_name": "заглушка клеммная для ezc250 2шт",
+            "branch_path": "электрика > автоматика",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._hard_incompatibility_reason(features, item),
+            "fastener_vs_cover_mismatch",
+        )
+
+    def test_hard_incompatibility_rejects_box_to_frame_pair(self):
+        features = self.matcher._extract_query_features("Короб с крышкой 80x40 (3 м.)")
+        item = {
+            "name": "Рамка 2-местная ГАРМОНИЯ ЛЮКС белая",
+            "normalized_name": "рамка 2 местная гармония люкс белая",
+            "branch_path": "электрика > аксессуары",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._hard_incompatibility_reason(features, item),
+            "box_vs_frame_mismatch",
+        )
+
+    def test_hard_incompatibility_rejects_cabinet_to_block_pair(self):
+        features = self.matcher._extract_query_features("Шкаф контрольно-пусковой")
+        item = {
+            "name": "Блок сигнально-пусковой адресный",
+            "normalized_name": "блок сигнально пусковой адресный",
+            "branch_path": "автоматика > блоки",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._hard_incompatibility_reason(features, item),
+            "cabinet_vs_block_mismatch",
         )
 
     def test_validate_article_match_with_gemini_prefers_tray_alternatives_over_light_exact(self):

@@ -2719,6 +2719,62 @@ class ReMoMatcher:
         signature = self._extract_cable_designation_signature(self._clean_text_value(value))
         return bool(signature)
 
+    def _should_attempt_cable_designation_lookup(
+        self,
+        query_text: str,
+        query_article: str = "",
+        signature: Dict[str, Any] | None = None,
+    ) -> bool:
+        signature = signature or self._extract_cable_designation_signature(
+            self._clean_text_value(query_article) or self._clean_text_value(query_text)
+        )
+        if not signature:
+            return False
+        if self._clean_text_value(shared_detect_query_row_type(query_text, getattr(self, "taxonomy_rules", {}))) != "item":
+            return False
+        if query_article and self._is_likely_cable_designation(query_article):
+            return True
+        normalized_query = self._normalize_text(query_text)
+        if any(
+            token in normalized_query
+            for token in (
+                "кабель",
+                "провод",
+                "витая пара",
+                "utp",
+                "ftp",
+                "sftp",
+                "f/utp",
+                "sf/utp",
+            )
+        ):
+            return True
+        specific_designation_tokens = {
+            "аввг",
+            "аввгнг",
+            "ввг",
+            "ввгнг",
+            "ввгэнг",
+            "кг",
+            "кгвв",
+            "кгвэв",
+            "кпс",
+            "кпсэнг",
+            "кип",
+            "кипэнг",
+            "utp",
+            "ftp",
+            "sftp",
+            "cat",
+            "cat5e",
+            "cat6",
+            "cat6a",
+            "cat7",
+            "h07rn",
+            "nym",
+        }
+        return any(token in specific_designation_tokens for token in self._cable_designation_base_tokens(signature))
+
     def _cable_designation_base_tokens(self, signature: Dict[str, Any]) -> Tuple[str, ...]:
         if not signature:
             return ()
@@ -2912,6 +2968,8 @@ class ReMoMatcher:
         designation_source = self._clean_text_value(query_article) or self._clean_text_value(query_text)
         signature = self._extract_cable_designation_signature(designation_source)
         if not signature:
+            return None
+        if not self._should_attempt_cable_designation_lookup(query_text, query_article, signature):
             return None
         if debug_stats is not None:
             debug_stats["attempted"] = True
@@ -3903,6 +3961,18 @@ class ReMoMatcher:
             for marker_key, marker_value in derived_item_markers.items():
                 if not self._clean_text_value(item_markers.get(marker_key)):
                     item_markers[marker_key] = marker_value
+        lexical_component_mismatch_rules = (
+            ("controller_vs_scanner_mismatch", ("контроллер",), ("сканер", "tester", "тестер")),
+            ("fastener_vs_cover_mismatch", ("анкер", "клин"), ("заглушк", "клемм")),
+            ("box_vs_frame_mismatch", ("короб",), ("рамк",)),
+        )
+        for reason, query_tokens, candidate_tokens_for_reason in lexical_component_mismatch_rules:
+            if any(token in normalized_query for token in query_tokens) and any(
+                token in candidate_normalized for token in candidate_tokens_for_reason
+            ):
+                return reason
+        if "шкаф" in normalized_query and "блок" in candidate_normalized and "шкаф" not in candidate_normalized:
+            return "cabinet_vs_block_mismatch"
 
         strong_family_mismatch = {
             "pdu",
