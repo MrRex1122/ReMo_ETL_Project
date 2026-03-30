@@ -1682,6 +1682,7 @@ class ReMoMatcher:
     ) -> Dict[str, Any]:
         article_lookup_hit = False
         article_series_candidates: List[Dict[str, Any]] = []
+        article_typo_candidates: List[Dict[str, Any]] = []
         article_affinity_candidates: List[Dict[str, Any]] = []
 
         article_match = self._lookup_catalog_item_by_article(query_article) if query_article else None
@@ -1724,6 +1725,7 @@ class ReMoMatcher:
                             "result": validated_result,
                             "article_lookup_hit": article_lookup_hit,
                             "article_series_candidates": article_series_candidates,
+                            "article_typo_candidates": article_typo_candidates,
                             "article_affinity_candidates": article_affinity_candidates,
                         }
                     query_features["gemini_validation_used"] = True
@@ -1762,6 +1764,7 @@ class ReMoMatcher:
                 "result": result,
                 "article_lookup_hit": article_lookup_hit,
                 "article_series_candidates": article_series_candidates,
+                "article_typo_candidates": article_typo_candidates,
                 "article_affinity_candidates": article_affinity_candidates,
             }
 
@@ -1828,6 +1831,42 @@ class ReMoMatcher:
                         "result": result,
                         "article_lookup_hit": article_lookup_hit,
                         "article_series_candidates": article_series_candidates,
+                        "article_typo_candidates": article_typo_candidates,
+                        "article_affinity_candidates": article_affinity_candidates,
+                    }
+
+            article_typo_candidates = self._lookup_catalog_items_by_article_typo(query_article, query_features)
+            query_features["article_typo_candidate_count"] = len(article_typo_candidates)
+            if article_typo_candidates:
+                trace_steps.append(
+                    {
+                        "stage": "article_lookup",
+                        "status": "typo_candidates",
+                        "article_source": article_source,
+                        "query_article": query_article,
+                        "article_typo_candidate_count": len(article_typo_candidates),
+                    }
+                )
+                article_typo_match = self._best_article_typo_match(
+                    query_features,
+                    article_typo_candidates,
+                    article=query_article,
+                )
+                if article_typo_match is not None:
+                    result = self._build_result_from_item(
+                        article_typo_match,
+                        0.955,
+                        "article_typo_local",
+                        True,
+                        "",
+                        "Найден вероятный артикульный typo: кандидат отличается на одну цифру при совпадении типа позиции и размеров. Требуется проверка.",
+                    )
+                    result["resolver_path"] = self._article_series_resolver_path(query_features)
+                    return {
+                        "result": result,
+                        "article_lookup_hit": article_lookup_hit,
+                        "article_series_candidates": article_series_candidates,
+                        "article_typo_candidates": article_typo_candidates,
                         "article_affinity_candidates": article_affinity_candidates,
                     }
 
@@ -1848,6 +1887,7 @@ class ReMoMatcher:
             "result": None,
             "article_lookup_hit": article_lookup_hit,
             "article_series_candidates": article_series_candidates,
+            "article_typo_candidates": article_typo_candidates,
             "article_affinity_candidates": article_affinity_candidates,
         }
 
@@ -3229,6 +3269,74 @@ class ReMoMatcher:
             filtered.append(item)
         return filtered
 
+    @staticmethod
+    def _is_single_digit_article_typo(query_article_compact: str, candidate_article_compact: str) -> bool:
+        if not query_article_compact or not candidate_article_compact:
+            return False
+        if len(query_article_compact) != len(candidate_article_compact):
+            return False
+        digit_mismatches = 0
+        for query_char, candidate_char in zip(query_article_compact, candidate_article_compact):
+            if query_char == candidate_char:
+                continue
+            if query_char.isdigit() and candidate_char.isdigit():
+                digit_mismatches += 1
+                if digit_mismatches > 1:
+                    return False
+                continue
+            return False
+        return digit_mismatches == 1
+
+    def _lookup_catalog_items_by_article_typo(self, article: str, query_features: Dict[str, Any]) -> List[Dict[str, Any]]:
+        article_compact = self._compact_article_series_key(article)
+        if len(article_compact) < 6 or self._is_likely_cable_designation(article):
+            return []
+
+        prefix = article_compact[: max(4, len(article_compact) - 2)]
+        candidates: List[Dict[str, Any]] = []
+        if self._uses_duckdb_query_backend():
+            column = self._quote_sql_identifier(CANONICAL_ARTICLE_COLUMN)
+            compact_expr = f"regexp_replace(lower(trim({column})), '[^0-9a-zа-я]+', '', 'g')"
+            candidates = self._duckdb_fetch_items(
+                where_sql=f"length({compact_expr}) = ? AND {compact_expr} LIKE ?",
+                params=[len(article_compact), f"{prefix}%"],
+                limit=80,
+            )
+        else:
+            for item in getattr(self, "catalog_items", []) or []:
+                item_compact = self._compact_article_series_key(item.get("article"))
+                if len(item_compact) != len(article_compact):
+                    continue
+                if item_compact.startswith(prefix):
+                    candidates.append(item)
+
+        filtered_entries: List[Tuple[float, Dict[str, Any]]] = []
+        seen_row_idx: set[int] = set()
+        for item in candidates:
+            row_idx = int(item.get("row_idx", -1))
+            if row_idx in seen_row_idx:
+                continue
+            seen_row_idx.add(row_idx)
+            item_compact = self._compact_article_series_key(item.get("article"))
+            if item_compact == article_compact:
+                continue
+            if not self._is_single_digit_article_typo(article_compact, item_compact):
+                continue
+            if self._article_match_sanity_reason(query_features, item):
+                continue
+            score = self._article_affinity_score(article, item)
+            filtered_entries.append((score, item))
+
+        filtered_entries.sort(
+            key=lambda entry: (
+                entry[0],
+                len(self._compact_article_series_key(entry[1].get("article"))),
+                -int(entry[1].get("row_idx", 0)),
+            ),
+            reverse=True,
+        )
+        return [item for _score, item in filtered_entries[:10]]
+
     def _article_affinity_search_terms(self, article: str) -> Tuple[str, ...]:
         article_compact = self._compact_article_series_key(article)
         if len(article_compact) < 4:
@@ -3501,6 +3609,49 @@ class ReMoMatcher:
             elif best_score < 0.32 or best_bonus < 0.12:
                 return None
         if len(compatible_scores) > 1 and best_score - second_score < 0.03 and best_score < 0.82 and best_bonus < 0.12:
+            return None
+        return best_entry["item"]
+
+    def _best_article_typo_match(
+        self,
+        query_features: Dict[str, Any],
+        candidates: List[Dict[str, Any]],
+        article: str = "",
+    ) -> Dict[str, Any] | None:
+        if not candidates:
+            return None
+        scored_entries = self._score_candidates_locally(query_features, candidates)
+        if not scored_entries:
+            return None
+        rescored_entries: List[Dict[str, Any]] = []
+        for entry in scored_entries:
+            item_article = self._compact_article_series_key(entry["item"].get("article"))
+            query_article = self._compact_article_series_key(article)
+            typo_bonus = 0.16 if self._is_single_digit_article_typo(query_article, item_article) else 0.0
+            rescored_entries.append(
+                {
+                    **entry,
+                    "article_typo_bonus": typo_bonus,
+                    "score": max(0.0, min(0.999, float(entry["score"]) + typo_bonus)),
+                }
+            )
+        rescored_entries.sort(
+            key=lambda entry: (entry["score"], entry["lexical_score"], -int(entry["item"].get("row_idx", 0))),
+            reverse=True,
+        )
+        best_entry = self._best_compatible_local_entry(query_features, rescored_entries, allow_weak=False)
+        if best_entry is None:
+            return None
+        compatible_scores = [
+            float(entry["score"])
+            for entry in rescored_entries
+            if self._compatibility_label(query_features, entry["item"]) == "compatible"
+        ]
+        best_score = float(best_entry["score"])
+        second_score = compatible_scores[1] if len(compatible_scores) > 1 else 0.0
+        if best_score < 0.46:
+            return None
+        if len(compatible_scores) > 1 and best_score - second_score < 0.04 and best_score < 0.8:
             return None
         return best_entry["item"]
 
@@ -6796,6 +6947,7 @@ class ReMoMatcher:
             )
             article_lookup_hit = bool(article_resolution.get("article_lookup_hit"))
             article_series_candidates = list(article_resolution.get("article_series_candidates") or [])
+            article_typo_candidates = list(article_resolution.get("article_typo_candidates") or [])
             article_affinity_candidates = list(article_resolution.get("article_affinity_candidates") or [])
             if article_resolution.get("result") is not None:
                 return _finalize(article_resolution["result"], stage_of_failure="resolved", reason_code="resolved")
@@ -7037,10 +7189,10 @@ class ReMoMatcher:
                         limit=local_recall_limit,
                         query_features=query_features,
                     )
-            if article_series_candidates or article_affinity_candidates:
+            if article_series_candidates or article_typo_candidates or article_affinity_candidates:
                 merged_candidates: List[Dict[str, Any]] = []
                 seen_row_idx: set[int] = set()
-                for item in article_series_candidates + article_affinity_candidates + branch_candidates:
+                for item in article_series_candidates + article_typo_candidates + article_affinity_candidates + branch_candidates:
                     row_idx = int(item.get("row_idx", -1))
                     if row_idx in seen_row_idx:
                         continue

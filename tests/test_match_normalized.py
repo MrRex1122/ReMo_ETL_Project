@@ -2739,6 +2739,58 @@ class NormalizedMatchTests(unittest.TestCase):
         self.assertEqual(result["resolution_source"], "article_series_local")
         self.assertEqual(result["compatibility_status"], "compatible")
 
+    def test_match_uses_article_typo_local_for_single_digit_neighbor(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.catalog_dict = {}
+        matcher.catalog_normalized_dict = {}
+        matcher.catalog_article_dict = {}
+        matcher.catalog_items = []
+        matcher.parallel_requests = 1
+        matcher.retrieval_backend = "memory"
+        matcher.retrieval_mode = "legacy_limited"
+        matcher.taxonomy_rules = ReMoMatcher._load_taxonomy_rules(matcher)
+        matcher.match_mode = "exact"
+        matcher.branch_index = {}
+        matcher.branch_prefix_index = {}
+        matcher.branch_token_index = {}
+        matcher.branch_priority_scores = {}
+        matcher.token_idf = {}
+        matcher._match_context_local = threading.local()
+        matcher._match_context_local.payload = {
+            "input_article": "",
+            "extracted_article": "36238K",
+            "query_article": "36238K",
+        }
+        matcher._get_from_cache = lambda _query: None
+        matcher._save_to_cache = lambda *_args, **_kwargs: None
+        matcher._uses_duckdb_query_backend = lambda: False
+        typo_item = {
+            "name": "Ответвитель DL 200x50 в комплекте с крепежными элементами необходимыми для монтажа",
+            "article": "36237K",
+            "price": 250.0,
+            "row_idx": 2,
+            "branch_path": "аксессуары вспомогательные",
+            "entity_type": "cable",
+            "item_markers": {"accessory_kind": "tee"},
+            "normalized_name": "ответвитель dl 200x50 в комплекте с крепежными элементами необходимыми для монтажа",
+            "tokens": ["ответвитель", "dl", "200x50"],
+        }
+        matcher._lookup_catalog_items_by_article_series = lambda _article, _features: []
+        matcher._lookup_catalog_items_by_article_typo = lambda _article, _features: [typo_item]
+        matcher._best_article_typo_match = lambda _features, _candidates, article="": typo_item
+
+        result = ReMoMatcher.match(
+            matcher,
+            "Ответвитель DL 200x50 в комплекте с крепежными элементами и соединительными пластинами, артикул 36238K",
+            use_cache=False,
+        )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["article"], "36237K")
+        self.assertEqual(result["resolution_source"], "article_typo_local")
+        self.assertEqual(result["resolver_path"], "rack_tray_dl_tee_200_series_resolver")
+        self.assertEqual(result["verifier_decision"], "review")
+
     def test_best_article_series_match_accepts_holder_short_article_with_matching_accessory_kind(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
         query_features = {

@@ -1290,6 +1290,49 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.assertIsNotNone(item)
         self.assertEqual(item["article"], "37501R")
 
+    def test_lookup_catalog_items_by_article_typo_returns_single_digit_neighbor(self):
+        self.matcher._uses_duckdb_query_backend = lambda: False
+        self.matcher.catalog_items = [
+            {
+                "name": "Ответвитель DL 200x50 в комплекте с крепежными элементами необходимыми для монтажа",
+                "normalized_name": "ответвитель dl 200x50 в комплекте с крепежными элементами необходимыми для монтажа",
+                "branch_path": "кабеленесущие системы",
+                "entity_type": "cable",
+                "item_markers": {"accessory_kind": "tee"},
+                "row_idx": 41,
+                "article": "36237K",
+                "tokens": ["ответвитель", "dl", "200x50"],
+            },
+            {
+                "name": "Ответвитель DL 300x50 в комплекте с крепежными элементами необходимыми для монтажа",
+                "normalized_name": "ответвитель dl 300x50 в комплекте с крепежными элементами необходимыми для монтажа",
+                "branch_path": "кабеленесущие системы",
+                "entity_type": "cable",
+                "item_markers": {"accessory_kind": "tee"},
+                "row_idx": 42,
+                "article": "36238K",
+                "tokens": ["ответвитель", "dl", "300x50"],
+            },
+            {
+                "name": "Крышка на ответвитель DL осн.200 в комплекте с метизами и пластинами PTCE",
+                "normalized_name": "крышка на ответвитель dl осн 200 в комплекте с метизами и пластинами ptce",
+                "branch_path": "кабеленесущие системы",
+                "entity_type": "cable",
+                "item_markers": {"accessory_kind": "cover"},
+                "row_idx": 43,
+                "article": "38365K",
+                "tokens": ["крышка", "ответвитель", "dl", "200"],
+            },
+        ]
+        features = self.matcher._extract_query_features(
+            "Ответвитель DL 200x50 в комплекте с крепежными элементами, артикул 36238K"
+        )
+        features["ranked_branches"] = []
+
+        items = self.matcher._lookup_catalog_items_by_article_typo("36238K", features)
+
+        self.assertEqual([item["article"] for item in items], ["36237K"])
+
     def test_lookup_catalog_item_by_article_series_match_prefers_senzimir_candidate(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
         matcher.taxonomy_rules = ReMoMatcher._load_taxonomy_rules(matcher)
