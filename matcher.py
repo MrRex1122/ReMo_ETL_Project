@@ -1210,6 +1210,11 @@ class ReMoMatcher:
         result["verifier_decision"] = verifier_decision
         result["verifier_reason"] = verifier_reason
         result["auto_accept"] = result["verifier_decision"] == "auto_accept"
+        result["requires_review"] = "нет" if result["auto_accept"] else "да"
+        result["confidence_level"] = self._confidence_level_from_score(
+            float(result.get("similarity_score", 0.0) or 0.0),
+            result["requires_review"] == "да",
+        )
         return result
 
     @staticmethod
@@ -2564,12 +2569,23 @@ class ReMoMatcher:
         base_part = re.sub(r"[\(\)\[\],;:]+", " ", base_part)
         base_tokens = [
             self._clean_text_value(token).lower()
-            for token in re.findall(r"\w+", base_part, flags=re.IGNORECASE)
+            for token in re.findall(r"[a-zа-я0-9]+", base_part, flags=re.IGNORECASE)
             if len(self._clean_text_value(token)) >= 2
             and not self._clean_text_value(token).isdigit()
             and self._clean_text_value(token).lower()
             not in ({"кабель", "провод", "артикул", "арт", "sku"} | CABLE_DESIGNATION_BASE_STOPWORDS)
         ]
+        if not any(token not in {"ls", "hf", "ng"} for token in base_tokens):
+            compact_base = re.sub(r"[^a-zа-я0-9]+", " ", base_part, flags=re.IGNORECASE)
+            fallback_tokens = [
+                self._clean_text_value(token).lower()
+                for token in re.findall(r"[a-zа-я]{2,}[a-zа-я0-9]*", compact_base, flags=re.IGNORECASE)
+                if len(self._clean_text_value(token)) >= 2
+                and self._clean_text_value(token).lower()
+                not in ({"кабель", "провод", "артикул", "арт", "sku"} | CABLE_DESIGNATION_BASE_STOPWORDS)
+            ]
+            if fallback_tokens:
+                base_tokens = fallback_tokens
         if not base_tokens:
             return {}
         base_signature = " ".join(base_tokens)
@@ -2686,11 +2702,12 @@ class ReMoMatcher:
         entity_column = self._quote_sql_identifier("search_entity_type")
         branch_column = self._quote_sql_identifier("search_branch_path")
         where_parts = [
-            f"({entity_column} IN (?, ?) OR {branch_column} = ? OR {branch_column} LIKE ? OR {branch_column} = ? OR {branch_column} LIKE ?)"
+            f"({entity_column} IN (?, ?, ?) OR {branch_column} = ? OR {branch_column} LIKE ? OR {branch_column} = ? OR {branch_column} LIKE ?)"
         ]
         params: List[Any] = [
             "cable",
             "wire",
+            "bulk_twisted_pair",
             "электрика > кабели",
             f"электрика > кабели{BRANCH_PATH_SEPARATOR}%",
             "электрика > провода",
@@ -3258,6 +3275,28 @@ class ReMoMatcher:
         )
         return [item for _score, item in filtered_entries[:20]]
 
+    def _should_prefer_article_alternatives_over_conflicting_exact(
+        self,
+        query_features: Dict[str, Any],
+        reason_code: str,
+    ) -> bool:
+        if self._clean_text_value(reason_code) != "article_query_candidate_domain_mismatch":
+            return False
+        normalized_query = self._normalize_text(
+            query_features.get("original_text")
+            or query_features.get("original_query")
+            or query_features.get("query_text")
+            or ""
+        )
+        if any(
+            token in normalized_query
+            for token in ("лоток", "крышк", "перегород", "ответвител", "угол", "пластин", "консол", "держател", "ptce", "gto", "sep", "dl", "cpo", "cd")
+        ):
+            return True
+        if query_features.get("dimension_pairs") or query_features.get("dimension_triples"):
+            return True
+        return bool(self._clean_text_value((query_features.get("markers") or {}).get("accessory_kind")))
+
     def _prioritize_article_affinity_entries(
         self,
         query_features: Dict[str, Any],
@@ -3789,12 +3828,20 @@ class ReMoMatcher:
         if query_type in {"bulk_twisted_pair", "cable", "wire"} and query_designation and item_designation:
             if not self._designation_family_matches(query_designation, item_designation):
                 return "designation_family_mismatch"
-        if query_type in {"bulk_twisted_pair", "cable", "wire"}:
-            query_signature = self._extract_cable_designation_signature(query_text)
-            if query_signature:
-                candidate_signature = self._extract_cable_designation_signature(candidate_name or candidate_normalized)
-                if candidate_signature and not self._cable_designation_signatures_match(query_signature, candidate_signature):
-                    return "designation_signature_mismatch"
+        query_signature = self._extract_cable_designation_signature(query_text)
+        if query_signature:
+            candidate_signature = self._extract_cable_designation_signature(candidate_name or candidate_normalized)
+            strong_cable_designation_query = (
+                query_type in {"bulk_twisted_pair", "cable", "wire"}
+                or "кабель" in query_text.lower().replace("ё", "е")
+                or len(self._cable_designation_base_tokens(query_signature)) >= 2
+            )
+            if (
+                strong_cable_designation_query
+                and candidate_signature
+                and not self._cable_designation_signatures_match(query_signature, candidate_signature)
+            ):
+                return "designation_signature_mismatch"
 
         if query_type == "ats_sts":
             if not any(
@@ -5820,7 +5867,9 @@ class ReMoMatcher:
         max_alternatives = int(
             registry_gemini_policy_value(getattr(self, "taxonomy_rules", {}), "article_validator", "max_alternatives", 2)
         )
-        shortlist: List[Dict[str, Any]] = [article_match]
+        article_reason = self._article_match_sanity_reason(query_features, article_match)
+        prefer_alternatives = self._should_prefer_article_alternatives_over_conflicting_exact(query_features, article_reason)
+        shortlist: List[Dict[str, Any]] = [] if prefer_alternatives else [article_match]
         alternative_candidates: List[Dict[str, Any]] = []
         alternative_candidates.extend(self._lookup_catalog_items_by_article_series(query_article, query_features))
         alternative_candidates.extend(self._lookup_catalog_items_by_article_affinity(query_article, query_features))
@@ -5842,6 +5891,8 @@ class ReMoMatcher:
         )
         for _score, item in deduped_alternatives[:max_alternatives]:
             shortlist.append(item)
+        if not shortlist:
+            shortlist = [article_match]
         result = self._match_with_gemini(
             query,
             query_features=query_features,

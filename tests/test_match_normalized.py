@@ -3054,6 +3054,25 @@ class NormalizedMatchTests(unittest.TestCase):
         self.assertEqual(result["resolution_source"], "article_exact")
         self.assertEqual(result["article"], "1546799")
 
+    def test_apply_verifier_decision_syncs_requires_review_with_auto_accept(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        result = matcher._apply_verifier_decision(
+            {
+                "success": True,
+                "resolution_source": "article_exact",
+                "compatibility_status": "compatible",
+                "requires_review": "да",
+                "resolver_path": "article_resolver",
+                "similarity_score": 1.0,
+            }
+        )
+
+        self.assertTrue(result["auto_accept"])
+        self.assertEqual(result["requires_review"], "нет")
+        self.assertEqual(result["confidence_level"], "high")
+
 
 if __name__ == "__main__":
     unittest.main()

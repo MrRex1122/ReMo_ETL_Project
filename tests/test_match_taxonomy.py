@@ -996,7 +996,7 @@ class MatchTaxonomyTests(unittest.TestCase):
 
         self.assertEqual(
             self.matcher._hard_incompatibility_reason(features, item),
-            "designation_signature_mismatch",
+            "designation_family_mismatch",
         )
 
     def test_lookup_catalog_items_by_article_series_returns_matching_prefix_candidates(self):
@@ -1384,6 +1384,84 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.assertEqual(features["active_resolver_path"], "rack_tray_resolver")
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["article"], "36782K")
+
+
+    def test_extract_cable_designation_signature_keeps_vvg_family_tokens(self):
+        signature = self.matcher._extract_cable_designation_signature("Кабель, артикул ВВГнг(A)-LS 4x1,5")
+
+        self.assertEqual(signature.get("dimension"), "4x1.5")
+        self.assertIn("ввгнг", signature.get("base_tokens", []))
+        self.assertIn("ls", signature.get("base_tokens", []))
+
+    def test_hard_incompatibility_rejects_cable_signature_mismatch_for_misclassified_query(self):
+        features = self.matcher._extract_query_features("Кабель, артикул КИПЭнг-HF 2х2х0,6")
+        item = {
+            "name": "Кабель силовой XTREM H07RN-F 5G2.5",
+            "normalized_name": "кабель силовой xtrem h07rn f 5g2 5",
+            "branch_path": "электрика > кабели",
+            "entity_type": "cable",
+            "item_markers": {"designation_family": "xtrem"},
+        }
+
+        self.assertEqual(
+            self.matcher._hard_incompatibility_reason(features, item),
+            "designation_family_mismatch",
+        )
+
+    def test_validate_article_match_with_gemini_prefers_tray_alternatives_over_light_exact(self):
+        self.matcher.catalog_items = [
+            {
+                "name": "Светильник светодиодный ДСО-Т03-13-30-5K-IP20",
+                "normalized_name": "светильник светодиодный дсо т03 13 30 5k ip20",
+                "branch_path": "свет > светильники",
+                "entity_type": "other",
+                "item_markers": {},
+                "row_idx": 1,
+                "article": "35264",
+                "price": 10.0,
+            },
+            {
+                "name": "Лоток перфорированный 200х50х3000мм горячеоцинкованный",
+                "normalized_name": "лоток перфорированный 200х50х3000мм горячеоцинкованный",
+                "branch_path": "кабельные лотки > аксессуары",
+                "entity_type": "other",
+                "item_markers": {"accessory_kind": "tray"},
+                "row_idx": 2,
+                "article": "3526410HDZ",
+                "price": 20.0,
+            },
+        ]
+        self.matcher._uses_duckdb_query_backend = lambda: False
+        self.matcher.backend = "google-genai"
+        self.matcher._lookup_catalog_items_by_article_series = lambda _article, _features: [self.matcher.catalog_items[1]]
+        captured: dict[str, list[str]] = {}
+
+        def fake_match_with_gemini(_query, query_features=None, branches=None, candidates=None):
+            captured["articles"] = [self.matcher._clean_text_value(item.get("article")) for item in candidates or []]
+            choice = (candidates or [])[0]
+            return {
+                "found_name": choice["name"],
+                "article": choice["article"],
+                "compatibility_status": "compatible",
+                "similarity_score": 0.93,
+            }
+
+        self.matcher._match_with_gemini = fake_match_with_gemini
+        features = self.matcher._extract_query_features(
+            "Лоток перфорированный, сталь оцинкованная по методу Сендзимира 50 х 200 х 3000 мм, артикул 35264"
+        )
+        features["query_article"] = "35264"
+
+        result = self.matcher._validate_article_match_with_gemini(
+            "Лоток перфорированный, сталь оцинкованная по методу Сендзимира 50 х 200 х 3000 мм, артикул 35264",
+            features,
+            self.matcher.catalog_items[0],
+            "35264",
+        )
+
+        self.assertEqual(captured["articles"], ["3526410HDZ"])
+        self.assertIsNotNone(result)
+        self.assertEqual(result["article"], "3526410HDZ")
 
 
 if __name__ == "__main__":
