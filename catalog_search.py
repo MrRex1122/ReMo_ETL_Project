@@ -1357,6 +1357,13 @@ def _build_search_catalog_duckdb_from_merged(merged_path: Path, target_path: Pat
         connection.close()
 
     part_path.replace(target_path)
+    size_bytes = target_path.stat().st_size if target_path.exists() else 0
+    logger.info(
+        "✅ Search catalog rebuild complete: path=%s rows=%s size_bytes=%s format=duckdb",
+        target_path,
+        rows_total,
+        size_bytes,
+    )
     return target_path
 
 

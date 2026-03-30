@@ -2,6 +2,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import skipUnless
 
 import pandas as pd
 
@@ -154,6 +155,31 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(search_path, get_search_catalog_path(root))
             self.assertTrue(search_path.exists())
             self.assertTrue(is_search_catalog_path(search_path))
+
+    @skipUnless(DUCKDB_AVAILABLE, "duckdb package is not installed")
+    def test_duckdb_search_catalog_rebuild_logs_final_success(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная\n"
+                    "Кабель ВВГ 3x1.5;A-1;100\n"
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertLogs("catalog_search", level="INFO") as captured:
+                search_path = build_search_catalog_from_merged(
+                    merged_path,
+                    get_search_catalog_duckdb_path(root),
+                )
+
+            joined_logs = "\n".join(captured.output)
+            self.assertTrue(search_path.exists())
+            self.assertIn("Search catalog rebuild complete", joined_logs)
+            self.assertIn(str(search_path), joined_logs)
+            self.assertIn("format=duckdb", joined_logs)
 
     def test_classify_item_type_does_not_treat_ups_with_iec_ports_as_power_cable(self):
         self.assertNotEqual(
