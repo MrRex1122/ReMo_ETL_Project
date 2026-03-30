@@ -502,7 +502,7 @@ def _detect_accessory_kind(normalized: str) -> str:
         return "console"
     if "\u0434\u0435\u0440\u0436\u0430\u0442\u0435\u043b" in normalized or (
         "\u0445\u043e\u043c\u0443\u0442" in normalized and "\u0441\u0442\u0430\u043b" in normalized
-    ):
+    ) or "\u0441\u043a\u043e\u0431" in normalized or "\u043e\u0434\u043d\u043e\u043b\u0430\u043f\u043a" in normalized or "\u0434\u0432\u0443\u043b\u0430\u043f\u043a" in normalized:
         return "holder"
     if "\u043f\u0440\u043e\u0444\u0438\u043b" in normalized:
         return "profile"
@@ -517,6 +517,30 @@ def _detect_accessory_kind(normalized: str) -> str:
     if "\u0430\u043d\u043a\u0435\u0440" in normalized or "\u043a\u0440\u0435\u043f\u0435\u0436" in normalized:
         return "fastener"
     return ""
+
+
+def looks_like_telecom_rack_query(normalized: str) -> bool:
+    if not normalized:
+        return False
+    if "\u0448\u043a\u0430\u0444" in normalized:
+        if any(
+            marker in normalized
+            for marker in (
+                "\u043a\u043e\u043d\u0442\u0440\u043e\u043b\u044c\u043d",
+                "\u043f\u0443\u0441\u043a",
+                "\u0443\u043f\u0440\u0430\u0432\u043b",
+                "\u0430\u0432\u0442\u043e\u043c\u0430\u0442",
+            )
+        ):
+            return False
+        return True
+    return bool(
+        re.search(
+            r"\b(?:\u0441\u0442\u043e\u0439\u043a\u0430|\u0441\u0442\u043e\u0439\u043a\u0438|\u0441\u0442\u043e\u0439\u043a\u0443|\u0441\u0442\u043e\u0439\u043a\u0435|\u0441\u0442\u043e\u0439\u043a\u043e\u0439|\u0441\u0442\u043e\u0435\u043a)\b",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _looks_like_ats_sts_device(normalized: str) -> bool:
@@ -650,6 +674,8 @@ def classify_item_type(
     )
     registry_match = classify_entity_type_from_registry(text, rules=rules, markers=extracted_markers)
     registry_entity_type = clean_text_value((registry_match or {}).get("entity_type"))
+    if registry_entity_type == "rack" and not looks_like_telecom_rack_query(normalized):
+        registry_entity_type = ""
     has_iec_connector_markers = _has_iec_power_cable_context(normalized)
     ats_sts_device = _looks_like_ats_sts_device_precise(normalized)
     if ("ats" in normalized or "sts" in normalized) and not ats_sts_device:
@@ -718,7 +744,7 @@ def classify_item_type(
         return "bulk_twisted_pair"
     if "коаксиал" in normalized or "rg " in normalized or "75 ом" in normalized or "50 ом" in normalized:
         return "coax"
-    if "шкаф" in normalized or "стойк" in normalized:
+    if looks_like_telecom_rack_query(normalized):
         return "rack"
     if "кабель" in normalized:
         return "cable"
@@ -750,8 +776,11 @@ def derive_branch_from_text(
     )
     for rule in ranked_rules:
         patterns = [normalize_text(item, synonyms=synonyms) for item in rule.get("patterns", [])]
+        branch_path = normalize_branch_path(rule.get("path", []))
         if any(pattern and pattern in merged for pattern in patterns):
-            return normalize_branch_path(rule.get("path", []))
+            if branch_path == "телеком > шкафы" and not looks_like_telecom_rack_query(merged):
+                continue
+            return branch_path
 
     entity_type = classify_item_type(merged, synonyms=synonyms, taxonomy_rules=taxonomy_rules)
     registry_defaults = registry_family_default_branches(entity_type, taxonomy_rules, branch_hint="")

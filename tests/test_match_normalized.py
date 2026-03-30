@@ -155,6 +155,23 @@ class NormalizedMatchTests(unittest.TestCase):
         self.assertEqual(result["article"], "36480")
         self.assertEqual(result["resolution_source"], "article_exact")
 
+    def test_family_router_skips_low_signal_non_telecom_queries(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+        matcher.backend = object()
+
+        blocked_queries = (
+            "Огнестойкая монтажная пена ОГНЕЗА EI240, 750 мл",
+            "ОГНЕСТОЙКАЯ КАБЕЛЬНАЯ ЛИНИЯ",
+            "Шкаф контрольно-пусковой",
+        )
+        for query in blocked_queries:
+            features = matcher._extract_query_features(query)
+            self.assertFalse(matcher._should_use_family_router_gemini(features), query)
+
+        allowed_features = matcher._extract_query_features('Горизонтальный кабельный органайзер 19" в шкаф')
+        self.assertFalse(matcher._should_block_family_router_for_query(allowed_features))
+
     def test_verifier_policy_uses_resolver_path_not_only_resolution_source(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
         matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})

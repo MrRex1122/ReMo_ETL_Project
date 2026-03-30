@@ -272,7 +272,7 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
         "weak_match_policy": "allow",
         "classifier": {
             "priority": 50,
-            "positive_patterns": ["шкаф", "стойк"],
+            "positive_patterns": ["шкаф"],
         },
         "secondary_filter_rules": [
             {
@@ -303,6 +303,8 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
                 "анкер",
                 "крепеж",
                 "хомут",
+                "скоб",
+                "однолапк",
             ],
             "negative_patterns": ["полк", "щеточ", "заглуш", "rail", "рельс"],
             "required_markers": {
@@ -336,7 +338,7 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
                     "tee": ["ответвител", "tee"],
                     "console": ["консол", "console"],
                     "profile": ["профил", "profile"],
-                    "holder": ["держател", "хомут", "holder"],
+                    "holder": ["держател", "хомут", "скоб", "однолапк", "holder"],
                     "fastener": ["анкер", "крепеж", "fastener"],
                 },
             },

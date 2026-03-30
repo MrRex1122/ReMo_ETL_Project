@@ -368,6 +368,28 @@ class CatalogSearchTests(unittest.TestCase):
             "rack_accessory_strict",
         )
 
+    def test_extract_item_markers_detects_clamp_as_holder(self):
+        clamp_markers = extract_item_markers("Скоба однолапковая d=20-21")
+
+        self.assertEqual(clamp_markers.get("accessory_kind"), "holder")
+        self.assertEqual(classify_item_type("Скоба однолапковая d=20-21"), "rack_accessory_strict")
+
+    def test_classify_item_type_does_not_treat_firestop_items_as_rack(self):
+        self.assertEqual(
+            classify_item_type("Огнестойкая монтажная пена ОГНЕЗА EI240, 750 мл"),
+            "other",
+        )
+        self.assertEqual(
+            classify_item_type("ОГНЕСТОЙКАЯ КАБЕЛЬНАЯ ЛИНИЯ"),
+            "cable",
+        )
+
+    def test_derive_branch_from_text_skips_telecom_rack_for_control_cabinet(self):
+        self.assertEqual(
+            derive_branch_from_text("Шкаф контрольно-пусковой"),
+            "прочее",
+        )
+
     def test_build_search_catalog_can_write_csv_explicitly(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

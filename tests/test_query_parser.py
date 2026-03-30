@@ -36,6 +36,20 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(spec.markers.get("position_kind"), "outer")
         self.assertIn("50x100", spec.dimension_pairs)
 
+    def test_parse_query_spec_classifies_clamp_as_rack_accessory(self):
+        spec = parse_query_spec("Скоба однолапковая d=20-21", taxonomy_rules=self.rules)
+
+        self.assertEqual(spec.entity_type, "rack_accessory_strict")
+        self.assertEqual(spec.markers.get("accessory_kind"), "holder")
+        self.assertIn("20-21", spec.dimension_diameters)
+
+    def test_parse_query_spec_avoids_rack_family_for_firestop_and_control_cabinet(self):
+        foam_spec = parse_query_spec("Огнестойкая монтажная пена ОГНЕЗА EI240, 750 мл", taxonomy_rules=self.rules)
+        cabinet_spec = parse_query_spec("Шкаф контрольно-пусковой", taxonomy_rules=self.rules)
+
+        self.assertEqual(foam_spec.entity_type, "other")
+        self.assertEqual(cabinet_spec.entity_type, "other")
+
 
 if __name__ == "__main__":
     unittest.main()

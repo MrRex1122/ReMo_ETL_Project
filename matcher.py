@@ -38,6 +38,7 @@ from catalog_search import (
     get_search_catalog_readiness,
     is_search_catalog_path,
     iter_search_catalog_chunks,
+    looks_like_telecom_rack_query as shared_looks_like_telecom_rack_query,
     normalize_branch_path as shared_normalize_branch_path,
     normalize_catalog_branch_from_row as shared_normalize_catalog_branch_from_row,
     normalize_query_terms as shared_normalize_query_terms,
@@ -5452,6 +5453,8 @@ class ReMoMatcher:
             for pattern in rule.get("patterns", []):
                 pattern_norm = self._normalize_text(pattern)
                 if pattern_norm and pattern_norm in normalized:
+                    if path == "телеком > шкафы" and not shared_looks_like_telecom_rack_query(normalized):
+                        continue
                     scores[path] += weight
 
         if branch_hint:
@@ -5946,12 +5949,30 @@ class ReMoMatcher:
             raise ValueError("Gemini payload is not a JSON object")
         return payload
 
+    def _should_block_family_router_for_query(self, query_features: Dict[str, Any]) -> bool:
+        normalized_query = self._normalize_text(
+            query_features.get("original_text")
+            or query_features.get("query_text")
+            or query_features.get("normalized_text")
+            or ""
+        )
+        if not normalized_query:
+            return False
+        blocker_groups = (
+            ("пена", "монтажн", "огнез"),
+            ("огнестойк", "кабельн", "линия"),
+            ("шкаф", "контрольно", "пуск"),
+        )
+        return any(all(token in normalized_query for token in token_group) for token_group in blocker_groups)
+
     def _should_use_family_router_gemini(self, query_features: Dict[str, Any]) -> bool:
         if not hasattr(self, "backend"):
             return False
         if not bool(registry_gemini_policy_value(getattr(self, "taxonomy_rules", {}), "family_router", "enabled", False)):
             return False
         if self._clean_text_value(query_features.get("row_type")) != "item":
+            return False
+        if self._should_block_family_router_for_query(query_features):
             return False
         family = self._entity_family(query_features.get("entity_type", ""))
         allowed_families = {
