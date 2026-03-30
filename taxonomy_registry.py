@@ -636,7 +636,6 @@ DEFAULT_VERIFIER_POLICY: Dict[str, Dict[str, Any]] = {
     "cable_designation_resolver": {
         "auto_accept_sources": [
             "article_designation_exact",
-            "designation_exact",
         ],
         "compatible_default_decision": "review",
     },

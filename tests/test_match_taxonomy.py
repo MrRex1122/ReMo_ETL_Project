@@ -1144,6 +1144,42 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.assertEqual(result["resolution_source"], "article_validator_gemini")
         self.assertEqual(result["article"], "53344")
 
+    def test_validate_article_match_with_gemini_rejects_weak_conflicting_exact_without_safe_alternative(self):
+        self.matcher.catalog_items = []
+        self.matcher._uses_duckdb_query_backend = lambda: False
+        self.matcher.backend = "google-genai"
+        self.matcher._lookup_catalog_items_by_article_series = lambda _article, _features: []
+        self.matcher._lookup_catalog_items_by_article_affinity = lambda _article, _features: []
+        self.matcher._match_with_gemini = lambda *_args, **_kwargs: {
+            "found_name": "Светильник светодиодный ДСО-Т03-13-30-5K-IP20",
+            "article": "35264",
+            "compatibility_status": "weakly_compatible",
+            "similarity_score": 0.61,
+        }
+        features = self.matcher._extract_query_features(
+            "Лоток перфорированный, сталь оцинкованная по методу Сендзимира 50 х 200 х 3000 мм, артикул 35264"
+        )
+        features["query_article"] = "35264"
+        article_match = {
+            "name": "Светильник светодиодный ДСО-Т03-13-30-5K-IP20",
+            "normalized_name": "светильник светодиодный дсо т03 13 30 5k ip20",
+            "branch_path": "свет > светильники",
+            "entity_type": "other",
+            "item_markers": {},
+            "row_idx": 1,
+            "article": "35264",
+            "price": 10.0,
+        }
+
+        result = self.matcher._validate_article_match_with_gemini(
+            "Лоток перфорированный, сталь оцинкованная по методу Сендзимира 50 х 200 х 3000 мм, артикул 35264",
+            features,
+            article_match,
+            "35264",
+        )
+
+        self.assertIsNone(result)
+
     def test_prioritize_article_affinity_entries_moves_article_related_candidate_first(self):
         query_features = {"query_article": "53344"}
         unrelated_item = {
@@ -1392,6 +1428,23 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.assertEqual(signature.get("dimension"), "4x1.5")
         self.assertIn("ввгнг", signature.get("base_tokens", []))
         self.assertIn("ls", signature.get("base_tokens", []))
+
+    def test_duckdb_cable_designation_candidates_groups_decimal_dimension_variants_with_or(self):
+        captured: dict[str, object] = {}
+        self.matcher._uses_duckdb_query_backend = lambda: True
+        self.matcher._duckdb_fetch_items = lambda **kwargs: captured.update(kwargs) or []
+        signature = self.matcher._extract_cable_designation_signature("Кабель, артикул ВВГнг(A)-LS 4x1,5")
+
+        self.matcher._duckdb_cable_designation_candidates(signature)
+
+        where_sql = str(captured["where_sql"])
+        params = list(captured["params"])
+        self.assertIn(" OR ", where_sql)
+        self.assertIn("%ввгнг%", params)
+        self.assertIn("%ls%", params)
+        self.assertIn("%1.5%", params)
+        self.assertIn("%1,5%", params)
+        self.assertIn("%1 5%", params)
 
     def test_hard_incompatibility_rejects_cable_signature_mismatch_for_misclassified_query(self):
         features = self.matcher._extract_query_features("Кабель, артикул КИПЭнг-HF 2х2х0,6")

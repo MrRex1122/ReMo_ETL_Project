@@ -2519,6 +2519,38 @@ class ReMoMatcher:
             return ""
         return re.sub(r"[^0-9a-zа-я]+", "", normalized, flags=re.IGNORECASE)
 
+    def _should_override_column_article_with_extracted_article(
+        self,
+        *,
+        query_text: str,
+        column_article: object,
+        extracted_article: object,
+    ) -> bool:
+        normalized_column_article = self._normalize_article_lookup_value(column_article)
+        normalized_extracted_article = self._normalize_article_lookup_value(extracted_article)
+        if (
+            not normalized_column_article
+            or not normalized_extracted_article
+            or normalized_column_article == normalized_extracted_article
+        ):
+            return False
+        compact_query_text = self._compact_article_series_key(query_text)
+        compact_column_article = self._compact_article_series_key(column_article)
+        compact_extracted_article = self._compact_article_series_key(extracted_article)
+        if not compact_query_text or not compact_extracted_article:
+            return False
+        if compact_extracted_article not in compact_query_text:
+            return False
+        if compact_column_article and compact_column_article in compact_query_text:
+            return False
+        extracted_has_alpha = any(ch.isalpha() for ch in compact_extracted_article)
+        column_has_alpha = any(ch.isalpha() for ch in compact_column_article)
+        if extracted_has_alpha and not column_has_alpha:
+            return True
+        if self._is_likely_cable_designation(extracted_article) and not self._is_likely_cable_designation(column_article):
+            return True
+        return False
+
     def _extract_query_article_from_text(self, query: str) -> str:
         cleaned_query = self._clean_text_value(query)
         if not cleaned_query:
@@ -2623,6 +2655,25 @@ class ReMoMatcher:
                     variants.append(cleaned)
         return tuple(variants)
 
+    def _cable_dimension_search_groups(self, signature: Dict[str, Any]) -> Tuple[Tuple[str, ...], ...]:
+        raw_dimension = self._clean_text_value(signature.get("dimension")).lower()
+        if not raw_dimension:
+            return ()
+        groups: List[Tuple[str, ...]] = []
+        for part in [part.strip() for part in raw_dimension.split("x") if part.strip()]:
+            part_variants: List[str] = []
+            for candidate in {
+                part,
+                part.replace(".", ","),
+                part.replace(".", " "),
+            }:
+                cleaned = self._clean_text_value(candidate).lower()
+                if cleaned and cleaned not in part_variants:
+                    part_variants.append(cleaned)
+            if part_variants:
+                groups.append(tuple(part_variants))
+        return tuple(groups)
+
     def _is_likely_cable_designation(self, value: object) -> bool:
         signature = self._extract_cable_designation_signature(self._clean_text_value(value))
         return bool(signature)
@@ -2716,9 +2767,10 @@ class ReMoMatcher:
         for token in self._cable_designation_base_tokens(signature):
             where_parts.append(f"lower({normalized_column}) LIKE ?")
             params.append(f"%{token}%")
-        for part in self._cable_dimension_search_terms(signature):
-            where_parts.append(f"lower({normalized_column}) LIKE ?")
-            params.append(f"%{part.lower()}%")
+        for group in self._cable_dimension_search_groups(signature):
+            like_parts = [f"lower({normalized_column}) LIKE ?" for _ in group]
+            where_parts.append("(" + " OR ".join(like_parts) + ")")
+            params.extend(f"%{term.lower()}%" for term in group)
         return self._duckdb_fetch_items(
             where_sql=" AND ".join(where_parts),
             params=params,
@@ -5902,6 +5954,9 @@ class ReMoMatcher:
         found_name = self._clean_text_value(result.get("found_name"))
         if not found_name or found_name == MISSING_POSITION_TEXT:
             return None
+        compatibility_status = self._clean_text_value(result.get("compatibility_status"))
+        if prefer_alternatives and compatibility_status != "compatible":
+            return None
         result["resolution_source"] = "article_validator_gemini"
         result["gemini_validation_used"] = True
         result["article_validation_status"] = "validated"
@@ -6481,8 +6536,21 @@ class ReMoMatcher:
         article_lookup_conflict = bool(
             normalized_column_article and normalized_text_article and normalized_column_article != normalized_text_article
         )
-        query_article = column_article or extracted_article
-        article_source = "column" if column_article else ("text" if extracted_article else "none")
+        override_column_article = self._should_override_column_article_with_extracted_article(
+            query_text=query_text,
+            column_article=column_article,
+            extracted_article=extracted_article,
+        )
+        query_article = (
+            extracted_article
+            if override_column_article
+            else (column_article or extracted_article)
+        )
+        article_source = (
+            "text"
+            if (override_column_article or (not column_article and extracted_article))
+            else ("column" if column_article else "none")
+        )
         article_lookup_hit = False
         query_features: Dict[str, Any] = {}
         trace_steps: List[Dict[str, Any]] = []
@@ -6614,6 +6682,7 @@ class ReMoMatcher:
                     "article_source": article_source,
                     "query_article": query_article,
                     "article_lookup_conflict": article_lookup_conflict,
+                    "article_lookup_conflict_override": override_column_article,
                 }
             )
 
@@ -6627,6 +6696,7 @@ class ReMoMatcher:
             query_features = self._extract_query_features(query_text)
             query_features["query_article"] = query_article
             query_features["article_source"] = article_source
+            query_features["article_lookup_conflict_override"] = override_column_article
             query_family = self._entity_family(query_features.get("entity_type", ""))
             trace_steps.append(
                 {

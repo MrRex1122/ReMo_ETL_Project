@@ -389,6 +389,26 @@ class NormalizedMatchTests(unittest.TestCase):
         self.assertEqual(result["verifier_reason"], "auto_accept_source:article_designation_exact")
         self.assertTrue(result["auto_accept"])
 
+    def test_verifier_policy_marks_plain_designation_exact_as_review(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        result = matcher._apply_verifier_decision(
+            {
+                "success": True,
+                "resolution_source": "designation_exact",
+                "compatibility_status": "compatible",
+                "requires_review": "нет",
+                "resolver_path": "cable_designation_resolver",
+            },
+            query_features={"row_type": "item"},
+        )
+
+        self.assertEqual(result["resolver_path"], "cable_designation_resolver")
+        self.assertEqual(result["verifier_decision"], "review")
+        self.assertEqual(result["verifier_reason"], "default_review")
+        self.assertFalse(result["auto_accept"])
+
     def test_cable_designation_dimension_preserves_order(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
         matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
@@ -418,6 +438,32 @@ class NormalizedMatchTests(unittest.TestCase):
         matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
 
         self.assertTrue(matcher._designation_family_matches("кгвэвнг ls", "кгвэвнг а ls"))
+
+    def test_explicit_text_article_overrides_conflicting_column_article(self):
+        matcher = ReMoMatcher.__new__(ReMoMatcher)
+        matcher.taxonomy_rules = load_registry_taxonomy_rules(base_rules={})
+
+        self.assertTrue(
+            matcher._should_override_column_article_with_extracted_article(
+                query_text="Угол CD 90 вертикальный внеш. 90° 100x50, артикул 36782K",
+                column_article="49857",
+                extracted_article="36782K",
+            )
+        )
+        self.assertFalse(
+            matcher._should_override_column_article_with_extracted_article(
+                query_text="Угол CD 90 вертикальный внеш. 90° 100x50, артикул 36782K",
+                column_article="36782K",
+                extracted_article="36782K",
+            )
+        )
+        self.assertFalse(
+            matcher._should_override_column_article_with_extracted_article(
+                query_text="Кабель, артикул WRONG-200",
+                column_article="ART-100",
+                extracted_article="WRONG-200",
+            )
+        )
 
     def test_compatibility_label_allows_designation_family_a_marker_variant(self):
         matcher = ReMoMatcher.__new__(ReMoMatcher)
