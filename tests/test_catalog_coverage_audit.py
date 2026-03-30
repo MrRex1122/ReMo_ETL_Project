@@ -123,6 +123,46 @@ class CatalogCoverageAuditTests(unittest.TestCase):
             self.assertEqual(row["same_family_candidates_count"], 0)
             self.assertEqual(row["gap_reason_code"], "missing_family")
 
+    def test_optical_patch_audit_rejects_converter_like_same_family_candidates(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            search_path = Path(tmp_dir) / "price_clean_search.csv"
+            pd.DataFrame(
+                [
+                    {
+                        CANONICAL_NAME_COLUMN: "Конвертер оптический SFP-LC-A",
+                        CANONICAL_ARTICLE_COLUMN: "SFP-LC-A",
+                        "Цена розничная": 1000,
+                        "Название класса": "Оптика",
+                        "Код класса": "OPT-1",
+                        "Тип изделия": "Патч-корд",
+                        "Тип исполнения кабельного изделия": "",
+                        "Производитель": "Vendor",
+                        "search_branch_path": "телеком > оптика > патч корды",
+                        "search_branch_leaf": "патч корды",
+                        "search_normalized_name": "конвертер оптический sfp lc a",
+                        "search_tokens_json": json.dumps(["конвертер", "оптический", "sfp", "lc", "a"], ensure_ascii=False),
+                        "search_entity_type": "optical_patch_cord",
+                        "search_item_markers_json": json.dumps(
+                            {"connector_pair": "lc-lc", "fiber_mode": "os2", "duplex": "yes"},
+                            ensure_ascii=False,
+                        ),
+                    }
+                ]
+            ).to_csv(search_path, sep=";", index=False, encoding="utf-8")
+
+            payload = build_catalog_coverage_audit(
+                _build_result_df("Оптический патч-корд LC-LC duplex OS2 2м"),
+                run_id="run-optical-converter",
+                catalog_source_path=search_path,
+                catalog_source_kind="search",
+            )
+
+            row = self._first_row(payload)
+            self.assertEqual(row["diagnosis"], "catalog_has_family_but_no_compatible_specs")
+            self.assertEqual(row["same_family_candidates_count"], 1)
+            self.assertEqual(row["compatible_candidates_count"], 0)
+            self.assertEqual(row["gap_reason_code"], "component_kind_mismatch")
+
     def test_non_target_rows_do_not_get_gap_reason_and_are_hidden_from_detail_table(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             catalog_path = Path(tmp_dir) / "catalog.csv"

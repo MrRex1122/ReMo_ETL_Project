@@ -354,6 +354,31 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.assertTrue(self.matcher._is_hard_incompatible_match(features, item))
         self.assertEqual(self.matcher._hard_incompatibility_reason(features, item), "optical_cross_family_mismatch")
 
+    def test_optical_cross_rejects_false_optical_device_when_preclassified(self):
+        features = self.matcher._extract_query_features("Оптический кросс на 24 волокна 1U, укомплектованный")
+        item = {
+            "name": "RX-1500 - Усилитель, 2X450 Вт / 8 Ом, 2U, встроенный кроссовер",
+            "normalized_name": "rx 1500 усилитель 2x450 вт 8 ом 2u встроенный кроссовер",
+            "branch_path": "телеком > оптика > кроссы",
+            "entity_type": "optical_cross",
+        }
+
+        self.assertTrue(self.matcher._is_hard_incompatible_match(features, item))
+        self.assertEqual(self.matcher._hard_incompatibility_reason(features, item), "optical_cross_component_mismatch")
+
+    def test_optical_patch_rejects_converter_when_preclassified(self):
+        features = self.matcher._extract_query_features("Оптический патч-корд LC-LC duplex OS2 2м")
+        item = {
+            "name": "Конвертер оптический SFP-LC-A",
+            "normalized_name": "конвертер оптический sfp lc a",
+            "branch_path": "телеком > оптика > патч корды",
+            "entity_type": "optical_patch_cord",
+            "item_markers": {"connector_pair": "lc-lc", "fiber_mode": "os2", "duplex": "yes"},
+        }
+
+        self.assertTrue(self.matcher._is_hard_incompatible_match(features, item))
+        self.assertEqual(self.matcher._hard_incompatibility_reason(features, item), "optical_patch_component_mismatch")
+
     def test_airflow_blanking_panel_rejects_generic_module_blank(self):
         features = self.matcher._extract_query_features("Заглушка для управления потоком воздуха 1U")
         item = {

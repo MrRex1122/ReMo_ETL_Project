@@ -375,6 +375,8 @@ def _gap_reason_from_incompatibility(reason: str) -> str:
         return "shielding_mismatch"
     if "connector" in normalized:
         return "connector_mismatch"
+    if "optical_patch_component" in normalized or "optical_cross_component" in normalized:
+        return "component_kind_mismatch"
     if "component" in normalized:
         return "component_kind_mismatch"
     if "installation" in normalized or normalized == "floor_box_vs_power_item":

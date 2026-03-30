@@ -3484,6 +3484,19 @@ class ReMoMatcher:
         candidate_name = self._clean_text_value(item.get("name"))
         candidate_normalized = self._clean_text_value(item.get("normalized_name")) or self._normalize_text(candidate_name)
         candidate_branch = self._normalize_text(self._clean_text_value(item.get("branch_path")))
+        candidate_tokens = set(
+            self._tokenize(
+                " ".join(
+                    filter(
+                        None,
+                        [
+                            candidate_name,
+                            self._clean_text_value(item.get("branch_path")),
+                        ],
+                    )
+                )
+            )
+        )
         query_type = self._entity_family(
             self._clean_text_value(query_features.get("entity_type")) or self._classify_item_type(query_text)
         )
@@ -3529,15 +3542,36 @@ class ReMoMatcher:
             ("rack_shelf", "rack_rail"),
             ("rack_rail", "rack_shelf"),
         }
+        optical_device_token_prefixes = (
+            "конвертер",
+            "медиаконвертер",
+            "трансивер",
+            "sfp",
+            "dvd",
+            "привод",
+            "нивелир",
+            "усилител",
+            "кроссовер",
+            "converter",
+            "transceiver",
+            "drive",
+        )
+        has_optical_device_tokens = any(
+            any(token.startswith(prefix) for prefix in optical_device_token_prefixes)
+            for token in candidate_tokens
+        )
         if query_type == "patch_panel" and candidate_type != "patch_panel":
             return "patch_panel_family_mismatch"
         if query_type == "optical_cross":
             if candidate_type != "optical_cross":
                 return "optical_cross_family_mismatch"
-            optical_markers = ("оптическ", "кросс", "волокон", "odf", "fiber")
-            optical_haystack = f"{candidate_normalized} {candidate_branch}".strip()
-            if not any(marker in optical_haystack for marker in optical_markers):
-                return "optical_cross_family_mismatch"
+            has_cross_markers = (
+                "odf" in candidate_tokens
+                or "кросс" in candidate_tokens
+                or any(token.startswith("волокон") for token in candidate_tokens)
+            )
+            if not has_cross_markers or has_optical_device_tokens:
+                return "optical_cross_component_mismatch"
         if query_type == "ats_sts" and candidate_type == "soft_starter":
             return "ats_sts_vs_soft_starter"
         if query_type == "airflow_blanking_panel":
@@ -3718,6 +3752,17 @@ class ReMoMatcher:
         if query_type == "optical_patch_cord":
             if candidate_type != "optical_patch_cord":
                 return "optical_marker_mismatch"
+            has_patch_markers = (
+                any(
+                    token in {"patch", "cord", "шнур", "кабель", "duplex", "simplex", "jumper", "pigtail"}
+                    for token in candidate_tokens
+                )
+                or any(token.startswith("патч") for token in candidate_tokens)
+                or any(token.startswith("кабел") for token in candidate_tokens)
+                or any(token.startswith("пигтей") for token in candidate_tokens)
+            )
+            if has_optical_device_tokens or not has_patch_markers:
+                return "optical_patch_component_mismatch"
             if query_connector and item_connector and query_connector != item_connector:
                 return "connector_mismatch"
             if query_connector and not item_connector:
