@@ -605,7 +605,7 @@ def _run_processing_job(run_id: str, matcher_settings: dict[str, Any]) -> None:
         )
         logger.info("✅ Processing run completed: %s", run_id)
         logger.info(
-            "ℹ️ Coverage audit is not built synchronously during background run %s; use the manual audit action in Results.",
+            "ℹ️ Coverage audit is not built synchronously during background run %s; use the manual audit action in Debug/Admin.",
             run_id,
         )
     except InterruptedError as exc:
@@ -996,10 +996,10 @@ def _render_active_run_panel_contents(run_for_display: Any) -> None:
                 key="active_run_auto_refresh_enabled",
                 help="Обновляет только блок статуса во время выполнения прогона, без перезагрузки всей страницы.",
             )
-        elif st.button("📌 Открыть этот прогон в результатах", key="open_active_run_results"):
+        elif st.button("📌 Открыть результат ниже", key="open_active_run_results"):
             st.session_state.active_run_id = run_for_display.run_id
             st.session_state.active_run_status = run_for_display.status
-            st.info("Перейдите на вкладку «Результаты», чтобы открыть этот прогон.")
+            st.info("Прокрутите ниже до блока результата на вкладке «Заполнение КП».")
     with status_col3:
         if auto_refresh_allowed:
             cancel_already_requested = is_processing_run_cancel_requested(run_for_display.run_id)
@@ -1115,8 +1115,8 @@ def process_raw_catalogs_with_etl() -> list[Path]:
 
     logger.info("✅ Этап 2 завершен: ETL обработан для %s файлов", len(saved_paths))
     return saved_paths
-def show_statistics(stats):
-    """Отобразить статистику"""
+def show_statistics(stats, *, include_debug_details: bool = True):
+    """Отобразить статистику."""
     col1, col2, col3, col4, col5 = st.columns(5)
     
     with col1:
@@ -1134,6 +1134,9 @@ def show_statistics(stats):
     
     with col5:
         st.metric("⚠️ Ошибок", stats['errors'])
+
+    if not include_debug_details:
+        return
 
     quality_rows = []
     if "gemini_rows_total" in stats:
@@ -1170,6 +1173,27 @@ def show_statistics(stats):
         )
     for row in quality_rows:
         st.caption(row)
+
+
+def _render_main_kp_statistics(stats: dict[str, Any], df: pd.DataFrame) -> None:
+    """Операционная сводка для основного сценария заполнения КП."""
+    total = int(stats.get("total", len(df)))
+    filled = int(stats.get("found", 0))
+    not_found = int(stats.get("not_found", 0))
+    review_count = int((df.get("Требует проверки", pd.Series(dtype=object)).fillna("").astype(str).str.lower() == "да").sum())
+    errors = int(stats.get("errors", 0))
+
+    col1, col2, col3, col4, col5 = st.columns(5)
+    with col1:
+        st.metric("📌 Всего строк", total)
+    with col2:
+        st.metric("✅ Заполнено", filled)
+    with col3:
+        st.metric("❌ Не найдено", not_found)
+    with col4:
+        st.metric("📝 Требует проверки", review_count)
+    with col5:
+        st.metric("⚠️ Ошибок", errors)
 
 
 
@@ -1965,6 +1989,57 @@ def show_corrections_table(df):
     return updated_df
 
 
+def _load_run_results_for_ui(run) -> tuple[pd.DataFrame | None, dict[str, Any] | None, Exception | None]:
+    try:
+        if (
+            st.session_state.df_processed is None
+            or st.session_state.get("active_run_id") != run.run_id
+            or st.session_state.get("active_run_loaded_at") != run.updated_at
+        ):
+            df, stats = _load_run_results_into_session(run)
+        else:
+            df = st.session_state.df_processed
+            stats = st.session_state.stats
+        return df, stats, None
+    except Exception as exc:
+        logger.error("❌ Не удалось загрузить результаты прогона %s: %s", run.run_id, exc, exc_info=True)
+        return None, None, exc
+
+
+def _render_debug_run_section(run) -> None:
+    st.subheader("Debug по выбранному прогону")
+    if run is None:
+        st.info("📭 Нет выбранного прогона. Запустите обработку на вкладке «Заполнение КП» или выберите прогон из истории.")
+        return
+    if run.status in ("queued", "running"):
+        st.info(
+            f"⏳ Прогон `{run.run_id}` еще выполняется. "
+            "После завершения здесь станут доступны диагностика и coverage audit."
+        )
+        return
+    if run.status in ("failed", "interrupted"):
+        st.error(
+            f"❌ Прогон `{run.run_id}` не завершен: "
+            f"{run.error_text or 'подробности отсутствуют'}"
+        )
+        return
+
+    df, stats, load_error = _load_run_results_for_ui(run)
+    if load_error is not None:
+        st.error(f"❌ Не удалось загрузить результаты прогона `{run.run_id}`: {load_error}")
+        return
+    if df is None or stats is None:
+        st.error(f"❌ Результаты прогона `{run.run_id}` недоступны")
+        return
+
+    st.caption(f"Открыт прогон: `{run.run_id}`")
+    show_statistics(stats, include_debug_details=True)
+    st.divider()
+    _render_catalog_coverage_audit(run, df)
+    st.divider()
+    _render_match_diagnostics(run, df)
+
+
 # ============ MAIN UI ============
 
 def main():
@@ -1976,11 +2051,18 @@ def main():
         logger.info("🚢 Build commit: %s", build_sha)
 
     _restore_active_run_state()
-    # Боковая панель
+    tab1, tab2, tab3 = st.tabs(["📄 Заполнение КП", "🧪 Debug / Admin", "📊 История"])
+
     with st.sidebar:
-        st.header("⚙️ Настройки")
-        
-        st.subheader("1️⃣ Товарная база данных")
+        st.caption("📄 Основной сценарий: вкладка «Заполнение КП».")
+        st.caption("🧪 Технические действия: вкладка «Debug / Admin».")
+
+    with tab2:
+        st.header("🧪 Debug / Admin")
+        st.caption("Диагностика, coverage audit и техническое управление каталогом и matcher.")
+        _render_debug_run_section(_get_active_or_preferred_run())
+        st.divider()
+        st.subheader("Admin каталога и matcher")
 
         catalog_upload = st.file_uploader(
             "Загрузить CSV каталог(и) поставщика",
@@ -2499,11 +2581,12 @@ def main():
             else:
                 st.info("Кэш уже пуст")
     
-    # Основная область
-    tab1, tab2, tab3 = st.tabs(["📤 Загрузка", "📋 Результаты", "📊 История"])
-    
     with tab1:
-        st.header("Загрузка файла КП")
+        st.header("📄 Заполнение КП")
+        st.markdown(
+            "Загрузите КП, и сервис заполнит цену, найденную номенклатуру и артикул. "
+            "Если в строке есть артикул, поиск идет сначала по нему; если артикула нет, используется поиск по названию и семейству."
+        )
 
         run_for_display = _get_active_or_preferred_run()
         if run_for_display is not None:
@@ -2562,15 +2645,16 @@ def main():
                         )
                         st.error(str(e))
     
-    with tab2:
-        st.header("📋 Результаты обработки")
+    with tab1:
+        st.divider()
+        st.subheader("Результат заполнения КП")
         run = _get_active_or_preferred_run()
         if run is None:
-            st.info("📤 Загрузите файл и запустите обработку. Последних прогонов пока нет.")
+            st.info("📤 Загрузите файл КП и запустите обработку. Последних прогонов пока нет.")
         elif run.status in ("queued", "running"):
             st.info(
                 f"⏳ Прогон `{run.run_id}` еще выполняется "
-                f"({run.status}). Обновите страницу позже или нажмите «Обновить статус» на вкладке «Загрузка»."
+                f"({run.status}). Следите за прогрессом выше в блоке «Текущий прогон»."
             )
             progress_state = _load_run_progress_safe(run.run_id)
             if progress_state:
@@ -2594,19 +2678,9 @@ def main():
                 f"{run.error_text or 'подробности отсутствуют'}"
             )
         else:
-            try:
-                if (
-                    st.session_state.df_processed is None
-                    or st.session_state.get("active_run_id") != run.run_id
-                    or st.session_state.get("active_run_loaded_at") != run.updated_at
-                ):
-                    df, stats = _load_run_results_into_session(run)
-                else:
-                    df = st.session_state.df_processed
-                    stats = st.session_state.stats
-            except Exception as e:
-                logger.error("❌ Не удалось загрузить результаты прогона %s: %s", run.run_id, e, exc_info=True)
-                st.error(f"❌ Не удалось загрузить результаты прогона `{run.run_id}`: {e}")
+            df, stats, load_error = _load_run_results_for_ui(run)
+            if load_error is not None:
+                st.error(f"❌ Не удалось загрузить результаты прогона `{run.run_id}`: {load_error}")
                 df = None
                 stats = None
 
@@ -2614,13 +2688,7 @@ def main():
                 st.caption(f"Открыт прогон: `{run.run_id}`")
                 if has_processing_run_draft(run):
                     st.info("📝 Для этого прогона есть автосохраненный черновик правок.")
-                show_statistics(stats)
-                st.divider()
-                _render_catalog_coverage_audit(run, df)
-
-                st.divider()
-                _render_match_diagnostics(run, df)
-
+                _render_main_kp_statistics(stats, df)
                 st.divider()
 
                 default_mode = "Коррекция" if st.session_state.get("active_run_mode") == "correction" else "Просмотр"
@@ -2778,7 +2846,7 @@ def main():
                         st.session_state.active_run_id = selected_run.run_id
                         st.session_state.active_run_status = selected_run.status
                         _clear_loaded_run_cache()
-                        st.success(f"✓ Выбран прогон `{selected_run.run_id}`. Перейдите на вкладку «Результаты».")
+                        st.success(f"✓ Выбран прогон `{selected_run.run_id}`. Откройте его на вкладке «Заполнение КП».")
             else:
                 st.info("📭 История прогонов пока пуста")
         except Exception as e:

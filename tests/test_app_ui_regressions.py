@@ -3,6 +3,17 @@ from pathlib import Path
 
 
 class AppUiRegressionTests(unittest.TestCase):
+    def test_main_ui_is_reorganized_around_kp_fill_and_debug_admin_tabs(self):
+        app_source = Path("app.py").read_text(encoding="utf-8")
+        self.assertIn('st.tabs(["📄 Заполнение КП", "🧪 Debug / Admin", "📊 История"])', app_source)
+        self.assertNotIn('st.tabs(["📤 Загрузка", "📋 Результаты", "📊 История"])', app_source)
+
+    def test_sidebar_is_simplified_and_no_longer_hosts_admin_controls(self):
+        app_source = Path("app.py").read_text(encoding="utf-8")
+        self.assertIn("📄 Основной сценарий: вкладка «Заполнение КП».", app_source)
+        self.assertIn("🧪 Технические действия: вкладка «Debug / Admin».", app_source)
+        self.assertNotIn("⚙️ Настройки", app_source)
+
     def test_no_selected_mode_assignment_left_in_sidebar_ui(self):
         app_source = Path("app.py").read_text(encoding="utf-8")
         self.assertNotIn("selected_mode", app_source)
@@ -19,6 +30,7 @@ class AppUiRegressionTests(unittest.TestCase):
         app_source = Path("app.py").read_text(encoding="utf-8")
         self.assertIn("История прогонов", app_source)
         self.assertIn("Прогон запущен в фоне", app_source)
+        self.assertIn("Откройте его на вкладке «Заполнение КП».", app_source)
 
     def test_catalog_coverage_audit_ui_is_present(self):
         app_source = Path("app.py").read_text(encoding="utf-8")
