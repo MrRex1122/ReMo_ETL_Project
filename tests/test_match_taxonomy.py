@@ -1556,6 +1556,20 @@ class MatchTaxonomyTests(unittest.TestCase):
             "fastener_vs_cover_mismatch",
         )
 
+    def test_effective_candidate_family_promotes_fastener_candidates_from_other_bucket(self):
+        features = self.matcher._extract_query_features("Анкер-клин 6х35 потолочный")
+        item = {
+            "name": "Анкер-клин 6х35 потолочный",
+            "normalized_name": "анкер клин 6х35 потолочный",
+            "branch_path": "крепежные изделия для кабеленесущих систем",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(features.get("entity_type"), "fastener")
+        self.assertEqual(self.matcher._effective_candidate_family_for_query(features, item), "fastener")
+        self.assertEqual(self.matcher._compatibility_label(features, item), "compatible")
+
     def test_hard_incompatibility_rejects_box_to_frame_pair(self):
         features = self.matcher._extract_query_features("Короб с крышкой 80x40 (3 м.)")
         item = {
