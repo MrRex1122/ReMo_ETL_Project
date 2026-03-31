@@ -4,10 +4,10 @@ import argparse
 import csv
 import json
 import random
-from collections import Counter
+import time
+from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
-import time
 from typing import Any, Dict, Iterable, Iterator, List, Mapping
 
 import pandas as pd
@@ -23,12 +23,18 @@ from catalog_search import (
 )
 from taxonomy_registry import entity_family_for_type
 
+NAME_COL = "ÐÐ°Ð¸Ð¼ÐµÐ½Ð¾Ð²Ð°Ð½Ð¸Ðµ"
+ARTICLE_COL = "ÐÑ€Ñ‚Ð¸ÐºÑƒÐ»"
+CLASS_COL = "ÐÐ°Ð·Ð²Ð°Ð½Ð¸Ðµ ÐºÐ»Ð°ÑÑÐ°"
+ITEM_TYPE_COL = "Ð¢Ð¸Ð¿ Ð¸Ð·Ð´ÐµÐ»Ð¸Ñ"
+MANUFACTURER_COL = "ÐŸÑ€Ð¾Ð¸Ð·Ð²Ð¾Ð´Ð¸Ñ‚ÐµÐ»ÑŒ"
+
 PROJECTED_PROFILE_COLUMNS = {
-    "Наименование",
-    "Артикул",
-    "Название класса",
-    "Тип изделия",
-    "Производитель",
+    NAME_COL,
+    ARTICLE_COL,
+    CLASS_COL,
+    ITEM_TYPE_COL,
+    MANUFACTURER_COL,
     "search_branch_path",
     "search_tokens_json",
     "search_entity_type",
@@ -130,6 +136,30 @@ def _write_counter_csv(path: Path, header: List[str], rows: Iterable[Iterable[An
             writer.writerow(list(row))
 
 
+def _format_counter(counter: Counter[str], *, limit: int = 3) -> str:
+    parts: List[str] = []
+    for key, count in counter.most_common(limit):
+        parts.append(f"{key or '<empty>'} ({count})")
+    return " | ".join(parts)
+
+
+def _format_examples(examples: List[str], *, limit: int = 3) -> str:
+    return " | ".join(example for example in examples[:limit] if example)
+
+
+def _branch_alignment_status(*, total_rows: int, other_rows: int) -> str:
+    if total_rows <= 0:
+        return "empty"
+    if other_rows <= 0:
+        return "mapped"
+    other_share = other_rows / total_rows
+    if other_share >= 0.999:
+        return "all_other"
+    if other_share >= 0.8:
+        return "mostly_other"
+    return "mixed"
+
+
 def analyze_other_catalog(
     source_path: str | Path,
     *,
@@ -162,58 +192,64 @@ def analyze_other_catalog(
     item_type_counter: Counter[str] = Counter()
     manufacturer_counter: Counter[str] = Counter()
     token_counter: Counter[str] = Counter()
+    branch_total_counter: Counter[str] = Counter()
+    branch_other_counter: Counter[str] = Counter()
+    branch_family_counter: Dict[str, Counter[str]] = defaultdict(Counter)
+    branch_other_class_counter: Dict[str, Counter[str]] = defaultdict(Counter)
+    branch_examples: Dict[str, List[str]] = defaultdict(list)
 
     for raw_row in _iter_catalog_rows(source, chunksize=chunksize):
         total_rows += 1
         projected = _project_row(raw_row, taxonomy_rules)
         effective_family = clean_text_value(projected.get("search_effective_family")).lower()
-        if effective_family != "other":
-            if progress_every > 0 and total_rows % progress_every == 0:
-                elapsed = max(time.perf_counter() - start_ts, 0.001)
-                rows_per_second = round(total_rows / elapsed, 1)
-                _emit(
-                    f"[other-profiler] progress rows={total_rows} other_rows={other_rows} sample={len(sample_rows)} rate={rows_per_second} rows/s",
-                    verbose=verbose,
-                )
-            continue
 
-        other_rows += 1
-        name = clean_text_value(projected.get("Наименование"))
-        article = clean_text_value(projected.get("Артикул"))
-        class_name = clean_text_value(projected.get("Название класса"))
-        item_type = clean_text_value(projected.get("Тип изделия"))
-        manufacturer = clean_text_value(projected.get("Производитель"))
+        name = clean_text_value(projected.get(NAME_COL))
+        article = clean_text_value(projected.get(ARTICLE_COL))
+        class_name = clean_text_value(projected.get(CLASS_COL))
+        item_type = clean_text_value(projected.get(ITEM_TYPE_COL))
+        manufacturer = clean_text_value(projected.get(MANUFACTURER_COL))
         branch_path = clean_text_value(projected.get("search_branch_path"))
-        effective_entity_type = clean_text_value(projected.get("search_effective_entity_type"))
-        markers_json = clean_text_value(projected.get("search_item_markers_json"))
+        branch_key = branch_path or ""
 
-        branch_counter[branch_path or ""] += 1
-        class_counter[(class_name or "", branch_path or "", item_type or "")] += 1
-        item_type_counter[item_type or ""] += 1
-        manufacturer_counter[manufacturer or ""] += 1
-        token_counter.update(token for token in _parse_tokens(projected.get("search_tokens_json")) if len(token) >= 3)
+        branch_total_counter[branch_key] += 1
+        branch_family_counter[branch_key][effective_family or ""] += 1
+        if name and name not in branch_examples[branch_key] and len(branch_examples[branch_key]) < 5:
+            branch_examples[branch_key].append(name)
 
-        _reservoir_push(
-            sample_rows,
-            {
-                "Наименование": name,
-                "Артикул": article,
-                "Название класса": class_name,
-                "Тип изделия": item_type,
-                "Производитель": manufacturer,
-                "search_branch_path": branch_path,
-                "search_entity_type": clean_text_value(projected.get("search_entity_type")),
-                "search_effective_family": effective_family,
-                "search_effective_entity_type": effective_entity_type,
-                "search_item_markers_json": markers_json,
-                "manual_family": "",
-                "manual_subfamily": "",
-                "notes": "",
-            },
-            other_rows,
-            sample_size,
-            rng,
-        )
+        if effective_family == "other":
+            other_rows += 1
+            effective_entity_type = clean_text_value(projected.get("search_effective_entity_type"))
+            markers_json = clean_text_value(projected.get("search_item_markers_json"))
+
+            branch_other_counter[branch_key] += 1
+            branch_other_class_counter[branch_key][class_name or ""] += 1
+            branch_counter[branch_key] += 1
+            class_counter[(class_name or "", branch_key, item_type or "")] += 1
+            item_type_counter[item_type or ""] += 1
+            manufacturer_counter[manufacturer or ""] += 1
+            token_counter.update(token for token in _parse_tokens(projected.get("search_tokens_json")) if len(token) >= 3)
+
+            _reservoir_push(
+                sample_rows,
+                {
+                    NAME_COL: name,
+                    ARTICLE_COL: article,
+                    CLASS_COL: class_name,
+                    ITEM_TYPE_COL: item_type,
+                    MANUFACTURER_COL: manufacturer,
+                    "search_branch_path": branch_path,
+                    "search_entity_type": clean_text_value(projected.get("search_entity_type")),
+                    "search_effective_family": effective_family,
+                    "search_effective_entity_type": effective_entity_type,
+                    "search_item_markers_json": markers_json,
+                    "manual_family": "",
+                    "manual_subfamily": "",
+                    "notes": "",
+                },
+                other_rows,
+                sample_size,
+                rng,
+            )
 
         if progress_every > 0 and total_rows % progress_every == 0:
             elapsed = max(time.perf_counter() - start_ts, 0.001)
@@ -226,7 +262,7 @@ def analyze_other_catalog(
     sample_frame = pd.DataFrame(sample_rows)
     if not sample_frame.empty:
         sample_frame.sort_values(
-            by=["Название класса", "search_branch_path", "Наименование", "Артикул"],
+            by=[CLASS_COL, "search_branch_path", NAME_COL, ARTICLE_COL],
             inplace=True,
             na_position="last",
         )
@@ -239,23 +275,63 @@ def analyze_other_catalog(
     )
     _write_counter_csv(
         target_dir / "other_class_summary.csv",
-        ["Название класса", "search_branch_path", "Тип изделия", "count"],
+        [CLASS_COL, "search_branch_path", ITEM_TYPE_COL, "count"],
         ((*key, count) for key, count in class_counter.most_common()),
     )
     _write_counter_csv(
         target_dir / "other_item_type_summary.csv",
-        ["Тип изделия", "count"],
+        [ITEM_TYPE_COL, "count"],
         ((item_type, count) for item_type, count in item_type_counter.most_common()),
     )
     _write_counter_csv(
         target_dir / "other_manufacturer_summary.csv",
-        ["Производитель", "count"],
+        [MANUFACTURER_COL, "count"],
         ((manufacturer, count) for manufacturer, count in manufacturer_counter.most_common()),
     )
     _write_counter_csv(
         target_dir / "other_token_summary.csv",
         ["token", "count"],
         ((token, count) for token, count in token_counter.most_common(300)),
+    )
+
+    branch_alignment_rows: List[List[Any]] = []
+    for branch_path, total_count in branch_total_counter.most_common():
+        other_count = branch_other_counter.get(branch_path, 0)
+        other_share = round((other_count / total_count) * 100, 2) if total_count else 0.0
+        family_counter = branch_family_counter.get(branch_path, Counter())
+        non_other_families = Counter(
+            {family: count for family, count in family_counter.items() if family and family != "other"}
+        )
+        branch_alignment_rows.append(
+            [
+                branch_path,
+                total_count,
+                other_count,
+                other_share,
+                _branch_alignment_status(total_rows=total_count, other_rows=other_count),
+                _format_counter(family_counter, limit=5),
+                _format_counter(non_other_families, limit=5),
+                _format_counter(branch_other_class_counter.get(branch_path, Counter()), limit=5),
+                _format_examples(branch_examples.get(branch_path, []), limit=3),
+            ]
+        )
+
+    alignment_header = [
+        "search_branch_path",
+        "total_rows",
+        "other_rows",
+        "other_share",
+        "status",
+        "top_families",
+        "top_non_other_families",
+        "top_other_classes",
+        "example_names",
+    ]
+    _write_counter_csv(target_dir / "branch_family_alignment.csv", alignment_header, branch_alignment_rows)
+    _write_counter_csv(
+        target_dir / "other_branch_alignment.csv",
+        alignment_header,
+        (row for row in branch_alignment_rows if int(row[2]) > 0),
     )
 
     summary_lines = [
@@ -276,7 +352,9 @@ def analyze_other_catalog(
         verbose=verbose,
     )
     _emit(
-        f"[other-profiler] files: other_sample_random.csv, other_branch_summary.csv, other_class_summary.csv, other_item_type_summary.csv, other_manufacturer_summary.csv, other_token_summary.csv, summary.txt",
+        "[other-profiler] files: other_sample_random.csv, other_branch_summary.csv, other_class_summary.csv, "
+        "other_item_type_summary.csv, other_manufacturer_summary.csv, other_token_summary.csv, "
+        "branch_family_alignment.csv, other_branch_alignment.csv, summary.txt",
         verbose=verbose,
     )
     return target_dir
