@@ -89,6 +89,19 @@ class AppUiRegressionTests(unittest.TestCase):
         self.assertNotIn("result_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx", app_source)
         self.assertNotIn("result_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", app_source)
 
+    def test_main_kp_tab_uses_trimmed_result_view(self):
+        app_source = Path("app.py").read_text(encoding="utf-8")
+        self.assertIn("_build_main_kp_result_df", app_source)
+        self.assertIn("Полная таблица доступна во вкладке «Debug / Admin».", app_source)
+        self.assertIn("show_corrections_table(df, visible_columns=list(_build_main_kp_result_df(df).columns))", app_source)
+        self.assertIn("main_result_df = _build_main_kp_result_df(df)", app_source)
+
+    def test_debug_tab_exposes_full_result_downloads(self):
+        app_source = Path("app.py").read_text(encoding="utf-8")
+        self.assertIn("Полная таблица результата", app_source)
+        self.assertIn("download_full_result_excel_", app_source)
+        self.assertIn("download_full_result_csv_", app_source)
+
 
 if __name__ == "__main__":
     unittest.main()

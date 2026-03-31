@@ -237,6 +237,30 @@ class ProcessExcelExistingColumnsTests(unittest.TestCase):
         self.assertEqual(stats["total"], 1)
         self.assertEqual(stats["not_found"], 1)
 
+    def test_process_excel_fills_material_cost_columns_and_clears_labor_costs(self):
+        df = pd.DataFrame(
+            {
+                "Наименование оборудования, материалов и кабелей": ["Позиция 1", "Позиция 2"],
+                "Количество": [2, 3],
+                "Стоимость материала за ед. в руб.": [None, None],
+                "Общая стоимость материалов в руб": [None, None],
+                "Стоимость работ за ед. в руб": [123, 456],
+                "Общая стоимость работ в руб.": [789, 999],
+            }
+        )
+
+        result_df, _stats = self._run_process(df)
+
+        self.assertEqual(result_df.loc[0, "Стоимость материала за ед. в руб."], 100.5)
+        self.assertEqual(result_df.loc[0, "Общая стоимость материалов в руб"], 201.0)
+        self.assertTrue(pd.isna(result_df.loc[0, "Стоимость работ за ед. в руб"]))
+        self.assertTrue(pd.isna(result_df.loc[0, "Общая стоимость работ в руб."]))
+
+        self.assertTrue(pd.isna(result_df.loc[1, "Стоимость материала за ед. в руб."]))
+        self.assertTrue(pd.isna(result_df.loc[1, "Общая стоимость материалов в руб"]))
+        self.assertTrue(pd.isna(result_df.loc[1, "Стоимость работ за ед. в руб"]))
+        self.assertTrue(pd.isna(result_df.loc[1, "Общая стоимость работ в руб."]))
+
 
 if __name__ == "__main__":
     unittest.main()

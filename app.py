@@ -52,6 +52,7 @@ from config import (
     get_upload_dir,
 )
 from catalog_merge import get_catalog_readiness, get_merged_catalog_path, refresh_merged_catalog
+from catalog_schema import normalize_header
 from catalog_snapshot import prepare_catalog_duplicate_report
 from google_drive_sync import sync_drive_folder_csvs
 from etl_pipeline import PriceETL
@@ -578,6 +579,11 @@ def _run_processing_job(run_id: str, matcher_settings: dict[str, Any]) -> None:
             stats = apply_match_diagnostics_summary_to_stats(stats, diagnostics_payload)
         except Exception:
             logger.exception("Failed to build or apply diagnostics for run %s", run_id)
+
+        try:
+            _build_main_kp_result_df(df_result).to_excel(artifacts.result_xlsx_path, index=False, engine="openpyxl")
+        except Exception:
+            logger.exception("Failed to save trimmed KP workbook for run %s", run_id)
 
         write_processing_run_result(run_id, df_result, stats)
         rows_total = int(stats.get("total", len(df_result)))
@@ -1924,6 +1930,52 @@ def _prepare_df_for_display(df: pd.DataFrame) -> pd.DataFrame:
     return display_df
 
 
+_DEBUG_RESULT_COLUMNS = {
+    "Ошибка сопоставления",
+    "Путь категории",
+    "Уровень уверенности",
+    "Альтернативы",
+    "Источник решения",
+    "Совместимость решения",
+    "Причина несовместимости",
+    "Этап отказа",
+    "Код причины",
+    "Класс причины",
+    "Verifier decision",
+    "Auto accept",
+    "Gemini shortlist",
+    "Gemini visible candidates",
+    "Gemini truncated",
+}
+
+
+def _looks_like_material_unit_cost_column(column_name: object) -> bool:
+    normalized = normalize_header(column_name).lower().replace("ё", "е")
+    compact = normalized.replace(" ", "")
+    return (
+        "стоим" in normalized
+        and "материал" in normalized
+        and "общ" not in normalized
+        and "работ" not in normalized
+        and ("за ед" in normalized or "за еди" in normalized or "заед" in compact)
+    )
+
+
+def _build_main_kp_result_df(df: pd.DataFrame) -> pd.DataFrame:
+    hidden_columns = set(_DEBUG_RESULT_COLUMNS)
+    if any(_looks_like_material_unit_cost_column(column) for column in df.columns):
+        hidden_columns.add("Цена")
+    visible_columns = [column for column in df.columns if column not in hidden_columns]
+    return df.loc[:, visible_columns].copy()
+
+
+def _is_source_query_column(column_name: object) -> bool:
+    normalized = normalize_header(column_name).lower().replace("ё", "е")
+    if "найден" in normalized:
+        return False
+    return "наименован" in normalized or "номенклатур" in normalized
+
+
 def _summary_mapping_to_df(summary: dict[str, Any], *, labels: dict[str, str] | None = None) -> pd.DataFrame:
     prepared_rows = []
     for key, value in summary.items():
@@ -1954,8 +2006,19 @@ def _result_download_filename(run, extension: str) -> str:
     return f"result_{run_id}{suffix}"
 
 
-def show_corrections_table(df):
-    """Таблица для ручной коррекции результатов"""
+def _full_result_download_filename(run, extension: str) -> str:
+    suffix = extension if extension.startswith(".") else f".{extension}"
+    run_id = str(getattr(run, "run_id", "") or "session")
+    return f"result_full_{run_id}{suffix}"
+
+
+def show_corrections_table(df, *, visible_columns: list[str] | None = None):
+    if visible_columns is not None:
+        visible_columns = [column for column in visible_columns if column in df.columns]
+        base_df = df.loc[:, visible_columns].copy()
+    else:
+        base_df = df.copy()
+    # Таблица для ручной коррекции пользовательской версии результата.
     st.subheader("✏️ Коррекция результатов")
     
     # Фильтр: показать только не найденные
@@ -1963,15 +2026,16 @@ def show_corrections_table(df):
     
     if show_only_missing:
         missing_mask = (
-            df['Найденная номенклатура'].isna()
-            | (df['Найденная номенклатура'].astype(str).str.strip() == '')
-            | (df['Найденная номенклатура'].astype(str).str.strip() == MISSING_POSITION_TEXT)
+            base_df['Найденная номенклатура'].isna()
+            | (base_df['Найденная номенклатура'].astype(str).str.strip() == '')
+            | (base_df['Найденная номенклатура'].astype(str).str.strip() == MISSING_POSITION_TEXT)
         )
-        df_view = df[missing_mask].copy()
+        df_view = base_df[missing_mask].copy()
         st.info(f"📌 Найдено {len(df_view)} позиций без сопоставления")
     else:
-        df_view = df.copy()
+        df_view = base_df.copy()
     original_index = df_view.index.copy()
+    disabled_columns = [column for column in df_view.columns if _is_source_query_column(column)]
     
     # Редактируемая таблица
     st.write("**Отредактируйте результаты в таблице ниже:**")
@@ -1979,13 +2043,13 @@ def show_corrections_table(df):
     edited_df = st.data_editor(
         df_view,
         width="stretch",
-        disabled=['Наименование оборудования, материалов и кабелей'],  # Закрыть от редактирования
+        disabled=disabled_columns,
         num_rows="fixed"
     )
 
     updated_df = df.copy()
     edited_df.index = original_index
-    updated_df.loc[original_index] = edited_df
+    updated_df.loc[original_index, list(edited_df.columns)] = edited_df
     return updated_df
 
 
@@ -2034,6 +2098,32 @@ def _render_debug_run_section(run) -> None:
 
     st.caption(f"Открыт прогон: `{run.run_id}`")
     show_statistics(stats, include_debug_details=True)
+    with st.expander("Полная таблица результата", expanded=False):
+        st.caption("Здесь доступен полный результат прогона со всеми техническими полями. На главной вкладке показывается облегченная КП-версия.")
+        full_download_col1, full_download_col2 = st.columns(2)
+        with full_download_col1:
+            full_excel_buffer = io.BytesIO()
+            df.to_excel(full_excel_buffer, index=False, engine="openpyxl")
+            full_excel_buffer.seek(0)
+            st.download_button(
+                "📥 Скачать полный Excel",
+                full_excel_buffer.getvalue(),
+                _full_result_download_filename(run, ".xlsx"),
+                "application/vnd.ms-excel",
+                key=f"download_full_result_excel_{run.run_id}",
+                on_click="ignore",
+            )
+        with full_download_col2:
+            full_csv_data = df.to_csv(index=False, sep=";", encoding="utf-8").encode("utf-8")
+            st.download_button(
+                "📥 Скачать полный CSV",
+                full_csv_data,
+                _full_result_download_filename(run, ".csv"),
+                "text/csv",
+                key=f"download_full_result_csv_{run.run_id}",
+                on_click="ignore",
+            )
+        st.dataframe(_prepare_df_for_display(df), width="stretch")
     st.divider()
     _render_catalog_coverage_audit(run, df)
     st.divider()
@@ -2690,6 +2780,7 @@ def main():
                     st.info("📝 Для этого прогона есть автосохраненный черновик правок.")
                 _render_main_kp_statistics(stats, df)
                 st.divider()
+                st.caption("На главной вкладке показана КП-версия результата без технических debug-колонок. Полная таблица доступна во вкладке «Debug / Admin».")
 
                 default_mode = "Коррекция" if st.session_state.get("active_run_mode") == "correction" else "Просмотр"
                 mode = st.radio(
@@ -2701,7 +2792,7 @@ def main():
                 st.session_state.active_run_mode = "correction" if mode == "Коррекция" else "view"
 
                 if mode == "Коррекция":
-                    edited_df = show_corrections_table(df)
+                    edited_df = show_corrections_table(df, visible_columns=list(_build_main_kp_result_df(df).columns))
                     if not _dataframes_equal_for_persistence(edited_df, df):
                         save_processing_run_draft(run.run_id, edited_df)
                         st.session_state.df_processed = edited_df.copy()
@@ -2766,7 +2857,8 @@ def main():
                 start_idx = (page - 1) * page_size
                 end_idx = start_idx + page_size
 
-                st.dataframe(_prepare_df_for_display(df_view.iloc[start_idx:end_idx]), width="stretch")
+                main_df_view = _build_main_kp_result_df(df_view)
+                st.dataframe(_prepare_df_for_display(main_df_view.iloc[start_idx:end_idx]), width="stretch")
 
                 if max_pages > 1:
                     st.markdown(f"Страница {page} из {max_pages}")
@@ -2774,6 +2866,7 @@ def main():
                 st.divider()
 
                 output_format = st.radio("Формат для скачивания", ["Excel", "CSV"])
+                main_result_df = _build_main_kp_result_df(df)
 
                 download_col1, download_col2 = st.columns(2)
 
@@ -2781,7 +2874,7 @@ def main():
                     if output_format == "Excel":
                         try:
                             excel_buffer = io.BytesIO()
-                            df.to_excel(excel_buffer, index=False, engine='openpyxl')
+                            main_result_df.to_excel(excel_buffer, index=False, engine='openpyxl')
                             excel_buffer.seek(0)
                             st.download_button(
                                 "📥 Скачать Excel",
@@ -2797,7 +2890,7 @@ def main():
                             logger.error(f"Ошибка Excel: {e}", exc_info=True)
 
                 with download_col2:
-                    csv_data = df.to_csv(index=False, sep=';', encoding='utf-8').encode("utf-8")
+                    csv_data = main_result_df.to_csv(index=False, sep=';', encoding='utf-8').encode("utf-8")
                     st.download_button(
                         "📥 Скачать CSV",
                         csv_data,

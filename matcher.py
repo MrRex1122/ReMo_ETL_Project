@@ -3857,6 +3857,121 @@ class ReMoMatcher:
 
         return best_query_column, article_column
 
+    @staticmethod
+    def _normalized_header_key(column_name: object) -> str:
+        return normalize_header(column_name).lower().replace("ё", "е")
+
+    def _resolve_best_optional_column(
+        self,
+        df: pd.DataFrame,
+        scorer: Callable[[object], int],
+    ) -> str | None:
+        best_column: str | None = None
+        best_score = 0
+        for column in df.columns:
+            score = int(scorer(column) or 0)
+            if score > best_score:
+                best_score = score
+                best_column = str(column)
+        return best_column
+
+    def _score_quantity_column(self, column_name: object) -> int:
+        normalized = self._normalized_header_key(column_name)
+        if not normalized:
+            return 0
+        compact = normalized.replace(" ", "")
+        if normalized in {"количество", "quantity", "qty"} or compact in {"кол-во", "колво"}:
+            return 100
+        score = 0
+        if "колич" in normalized:
+            score += 80
+        if "qty" in normalized or "quantity" in normalized:
+            score += 80
+        if "кол-во" in normalized or "кол во" in normalized or "колво" in compact:
+            score += 80
+        if any(marker in normalized for marker in ("цена", "стоим", "стоимость", "сумма", "итог", "работ", "материал")):
+            score -= 100
+        return score
+
+    def _score_material_unit_cost_column(self, column_name: object) -> int:
+        normalized = self._normalized_header_key(column_name)
+        compact = normalized.replace(" ", "")
+        if "стоим" not in normalized or "материал" not in normalized:
+            return 0
+        score = 80
+        if "за ед" in normalized or "за еди" in normalized or "заед" in compact:
+            score += 20
+        if "общ" in normalized:
+            score -= 100
+        if "работ" in normalized:
+            score -= 100
+        return score
+
+    def _score_material_total_cost_column(self, column_name: object) -> int:
+        normalized = self._normalized_header_key(column_name)
+        if "стоим" not in normalized or "материал" not in normalized:
+            return 0
+        score = 70
+        if "общ" in normalized:
+            score += 30
+        if "работ" in normalized:
+            score -= 100
+        return score
+
+    def _score_labor_unit_cost_column(self, column_name: object) -> int:
+        normalized = self._normalized_header_key(column_name)
+        compact = normalized.replace(" ", "")
+        if "стоим" not in normalized or "работ" not in normalized:
+            return 0
+        score = 80
+        if "за ед" in normalized or "за еди" in normalized or "заед" in compact:
+            score += 20
+        if "общ" in normalized:
+            score -= 100
+        return score
+
+    def _score_labor_total_cost_column(self, column_name: object) -> int:
+        normalized = self._normalized_header_key(column_name)
+        if "стоим" not in normalized or "работ" not in normalized:
+            return 0
+        score = 70
+        if "общ" in normalized:
+            score += 30
+        return score
+
+    def _coerce_numeric_series(self, series: pd.Series) -> pd.Series:
+        parsed = series.map(self._parse_price_value)
+        return pd.to_numeric(parsed, errors="coerce").astype("float64")
+
+    def _apply_kp_cost_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        material_unit_column = self._resolve_best_optional_column(df, self._score_material_unit_cost_column)
+        material_total_column = self._resolve_best_optional_column(df, self._score_material_total_cost_column)
+        labor_unit_column = self._resolve_best_optional_column(df, self._score_labor_unit_cost_column)
+        labor_total_column = self._resolve_best_optional_column(df, self._score_labor_total_cost_column)
+        quantity_column = self._resolve_best_optional_column(df, self._score_quantity_column)
+
+        price_series = pd.to_numeric(df.get("Цена", pd.Series(index=df.index, dtype="float64")), errors="coerce").astype("float64")
+
+        if material_unit_column:
+            df[material_unit_column] = price_series
+
+        if material_total_column:
+            if quantity_column:
+                quantity_series = self._coerce_numeric_series(df[quantity_column])
+                material_total_series = (price_series * quantity_series).where(
+                    price_series.notna() & quantity_series.notna()
+                )
+                df[material_total_column] = material_total_series.astype("float64")
+            else:
+                df[material_total_column] = pd.Series([None] * len(df), index=df.index, dtype="float64")
+
+        if labor_unit_column:
+            df[labor_unit_column] = pd.Series([None] * len(df), index=df.index, dtype="float64")
+        if labor_total_column:
+            df[labor_total_column] = pd.Series([None] * len(df), index=df.index, dtype="float64")
+
+        return df
+
     def _current_match_input_context(self) -> Dict[str, Any]:
         local_context = getattr(self, "_match_context_local", None)
         if local_context is None:
@@ -8144,6 +8259,8 @@ class ReMoMatcher:
             "gemini_total_ms_total",
         ):
             stats[key] = round(float(stats.get(key) or 0.0), 2)
+
+        df = self._apply_kp_cost_columns(df)
 
         if cancel_requested is not None and cancel_requested():
             self.last_match_diagnostics_rows = diagnostic_rows
