@@ -514,7 +514,19 @@ def _detect_accessory_kind(normalized: str) -> str:
         return "plate"
     if "\u043a\u0440\u044b\u0448\u043a" in normalized:
         return "cover"
-    if "\u0430\u043d\u043a\u0435\u0440" in normalized or "\u043a\u0440\u0435\u043f\u0435\u0436" in normalized:
+    if any(
+        token in normalized
+        for token in (
+            "\u0430\u043d\u043a\u0435\u0440",
+            "\u043a\u0440\u0435\u043f\u0435\u0436",
+            "\u0431\u043e\u043b\u0442",
+            "\u0448\u0443\u0440\u0443\u043f",
+            "\u0448\u043f\u0438\u043b\u044c\u043a",
+            "\u0434\u044e\u0431\u0435\u043b",
+            "\u0433\u0430\u0439\u043a",
+            "\u0448\u0430\u0439\u0431",
+        )
+    ):
         return "fastener"
     return ""
 
@@ -731,6 +743,8 @@ def classify_item_type(
         return "rack_shelf"
     if "рельс" in normalized or "rail" in normalized or "направляющ" in normalized:
         return "rack_rail"
+    if any(token in normalized for token in ("анкер", "болт", "шуруп", "шпильк", "дюбел", "гайк", "шайб")):
+        return "fastener"
     if "заземл" in normalized and "шин" in normalized:
         return "ground_bar"
     if has_iec_connector_markers and not _looks_like_pdu_device(normalized):

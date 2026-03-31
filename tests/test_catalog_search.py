@@ -374,6 +374,12 @@ class CatalogSearchTests(unittest.TestCase):
         self.assertEqual(clamp_markers.get("accessory_kind"), "holder")
         self.assertEqual(classify_item_type("Скоба однолапковая d=20-21"), "rack_accessory_strict")
 
+    def test_classify_item_type_detects_fastener_queries(self):
+        fastener_markers = extract_item_markers("Анкер-клин 6х35 потолочный")
+
+        self.assertEqual(fastener_markers.get("accessory_kind"), "fastener")
+        self.assertEqual(classify_item_type("Анкер-клин 6х35 потолочный"), "fastener")
+
     def test_classify_item_type_does_not_treat_firestop_items_as_rack(self):
         self.assertEqual(
             classify_item_type("Огнестойкая монтажная пена ОГНЕЗА EI240, 750 мл"),

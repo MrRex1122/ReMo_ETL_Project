@@ -542,7 +542,7 @@ DEFAULT_DOMAIN_REGISTRY: Dict[str, Any] = {
             "families": [],
         },
         "fastener": {
-            "patterns": ["держател", "хомут", "скоб"],
+            "patterns": ["держател", "хомут", "скоб", "анкер", "болт", "шуруп", "шпильк", "дюбел", "гайк", "шайб"],
             "families": [],
         },
         "electrical_protection": {
