@@ -2805,7 +2805,7 @@ class NormalizedMatchTests(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertEqual(result["article"], "36237K")
         self.assertEqual(result["resolution_source"], "article_typo_local")
-        self.assertEqual(result["resolver_path"], "rack_tray_dl_tee_200_series_resolver")
+        self.assertEqual(result["resolver_path"], "article_resolver")
         self.assertEqual(result["verifier_decision"], "review")
 
     def test_best_article_series_match_accepts_holder_short_article_with_matching_accessory_kind(self):

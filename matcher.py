@@ -2411,7 +2411,7 @@ class ReMoMatcher:
         query_family = self._entity_family(query_features.get("entity_type", ""))
         family_types = sorted(self._entity_types_for_family(query_features.get("entity_type", "")))
         filters = ["(" + " OR ".join(branch_clauses) + ")"]
-        if family_types and query_family not in {"", "other"}:
+        if family_types and query_family not in {"", "other"} and not self._should_relax_family_entity_filter(query_family):
             entity_column = self._quote_sql_identifier("search_entity_type")
             placeholders = ", ".join("?" for _ in family_types)
             filters.append(f"{entity_column} IN ({placeholders})")
@@ -2458,7 +2458,7 @@ class ReMoMatcher:
 
         query_family = self._entity_family(features.get("entity_type", ""))
         family_types = sorted(self._entity_types_for_family(features.get("entity_type", "")))
-        if family_types and query_family not in {"", "other"}:
+        if family_types and query_family not in {"", "other"} and not self._should_relax_family_entity_filter(query_family):
             entity_column = self._quote_sql_identifier("search_entity_type")
             placeholders = ", ".join("?" for _ in family_types)
             filters.append(f"{entity_column} IN ({placeholders})")
@@ -4692,6 +4692,10 @@ class ReMoMatcher:
             return "fastener"
         return ""
 
+    @staticmethod
+    def _should_relax_family_entity_filter(query_family: str) -> bool:
+        return query_family == "fastener"
+
     def _should_cap_rack_tray_whole_category_pool(self, query_features: Dict[str, Any]) -> bool:
         if self._clean_text_value(query_features.get("row_type")) != "item":
             return False
@@ -4787,6 +4791,10 @@ class ReMoMatcher:
                 if query_environment == "outdoor" and item_environment and item_environment != "outdoor":
                     return False
                 return True
+            if entity_family == "fastener":
+                if item_family == "fastener":
+                    return True
+                return self._effective_item_accessory_kind(item) == "fastener" and not self._is_hard_incompatible_match(query_features, item)
             if entity_family == "rack_accessory_strict":
                 if item_family != "rack_accessory_strict":
                     return False
@@ -5785,7 +5793,7 @@ class ReMoMatcher:
             where_clauses = ["(" + " OR ".join(clauses) + ")"]
             query_family = self._entity_family((query_features or {}).get("entity_type", ""))
             family_types = sorted(self._entity_types_for_family((query_features or {}).get("entity_type", "")))
-            if family_types and query_family not in {"", "other"}:
+            if family_types and query_family not in {"", "other"} and not self._should_relax_family_entity_filter(query_family):
                 entity_column = self._quote_sql_identifier("search_entity_type")
                 placeholders = ", ".join("?" for _ in family_types)
                 where_clauses.append(f"{entity_column} IN ({placeholders})")

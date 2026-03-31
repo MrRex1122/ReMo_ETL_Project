@@ -1655,8 +1655,9 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.assertEqual(self.matcher._effective_item_accessory_kind(item), "fastener")
         self.assertEqual(self.matcher._hard_incompatibility_reason(features, item), "")
 
-    def test_typed_candidate_pool_for_rack_tray_accepts_inferred_fastener_candidate(self):
+    def test_typed_candidate_pool_accepts_inferred_fastener_candidate_for_fastener_family(self):
         features = self.matcher._extract_query_features("Анкер-клин 6х35 потолочный")
+        features["entity_type"] = "fastener"
         features["ranked_branches"] = []
         candidate = {
             "name": "Анкер-клин 6х35 потолочный",
@@ -1664,15 +1665,35 @@ class MatchTaxonomyTests(unittest.TestCase):
             "branch_path": "крепежные изделия для кабеленесущих систем",
             "entity_type": "other",
             "item_markers": {},
-            "row_idx": 7,
+            "row_idx": 8,
         }
-        self.matcher._should_use_whole_category_retrieval = lambda _features: False
         self.matcher._collect_branch_candidates = lambda _branches, limit=None, query_features=None: []
         self.matcher._select_candidates = lambda _query_text, limit=0: [candidate]
 
-        pool = self.matcher._typed_candidate_pool_for_rack_tray("Анкер-клин 6х35 потолочный", features, 50)
+        pool = self.matcher._typed_candidate_pool("Анкер-клин 6х35 потолочный", features, 50)
 
-        self.assertEqual([item["row_idx"] for item in pool], [7])
+        self.assertEqual([item["row_idx"] for item in pool], [8])
+
+    def test_collect_branch_candidates_relaxes_entity_filter_for_fastener_family(self):
+        self.matcher._uses_duckdb_query_backend = lambda: True
+        captured = {}
+
+        def fake_fetch_items(where_sql="", params=None, limit=None):
+            captured["where_sql"] = where_sql
+            captured["params"] = list(params or [])
+            captured["limit"] = limit
+            return []
+
+        self.matcher._duckdb_fetch_items = fake_fetch_items
+
+        self.matcher._collect_branch_candidates(
+            ["крепежные изделия для кабеленесущих систем"],
+            limit=25,
+            query_features={"entity_type": "fastener"},
+        )
+
+        self.assertNotIn("search_entity_type", captured["where_sql"])
+        self.assertEqual(captured["limit"], 25)
 
     def test_typed_candidate_pool_for_rack_tray_caps_unstructured_whole_category_queries(self):
         features = {
