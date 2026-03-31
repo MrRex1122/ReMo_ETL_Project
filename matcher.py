@@ -4647,6 +4647,8 @@ class ReMoMatcher:
     def _effective_candidate_family_for_query(self, query_features: Dict[str, Any], item: Dict[str, Any]) -> str:
         query_family = self._entity_family(query_features.get("entity_type", ""))
         candidate_family = self._entity_family(item.get("entity_type", ""))
+        if candidate_family in {"", "other"}:
+            candidate_family = self._infer_other_subfamily_for_item(item) or candidate_family
         if query_family == "fastener":
             if candidate_family == "fastener":
                 return candidate_family
@@ -4680,6 +4682,44 @@ class ReMoMatcher:
             return "rack_accessory_strict"
         return candidate_family
 
+    def _infer_other_subfamily_for_item(self, item: Dict[str, Any]) -> str:
+        search_text = self._normalize_text(
+            " ".join(
+                filter(
+                    None,
+                    [
+                        self._clean_text_value(item.get("name")),
+                        self._clean_text_value(item.get("normalized_name")),
+                        self._clean_text_value(item.get("branch_path")),
+                    ],
+                )
+            )
+        )
+        branch_path = self._normalize_text(self._clean_text_value(item.get("branch_path")))
+        if not search_text and not branch_path:
+            return ""
+        if branch_path.startswith("свет > светильники") or any(
+            token in search_text for token in ("светильник", "прожектор", "светодиодн", "дсо", "дсп", "дпо", "дку")
+        ):
+            if "табло" not in search_text:
+                return "lighting_fixture"
+        if "световое табло" in branch_path or (
+            "табло" in search_text and any(token in search_text for token in ("светов", "эвакуац", "аварийн", "выход", "exit"))
+        ):
+            return "light_signage"
+        if (
+            "листовые лотки" in branch_path
+            or any(token in search_text for token in ("лоток", "крышк", "ответвител", "угол", "перегород", "ptce", "gto", "sep"))
+        ) and "светильник" not in search_text:
+            return "tray_sheet"
+        if any(token in branch_path for token in ("контакторы магнитные", "пускатели магнитные")) or any(
+            token in search_text for token in ("контактор", "пускател")
+        ):
+            return "contactor_starter"
+        if "промежуточные реле" in branch_path or ("реле" in search_text and "рельс" not in search_text):
+            return "control_relay"
+        return ""
+
     def _effective_item_accessory_kind(self, item: Dict[str, Any]) -> str:
         item_markers = item.get("item_markers", {}) or {}
         accessory_kind = self._clean_text_value(item_markers.get("accessory_kind"))
@@ -4703,7 +4743,14 @@ class ReMoMatcher:
 
     @staticmethod
     def _should_relax_family_entity_filter(query_family: str) -> bool:
-        return query_family == "fastener"
+        return query_family in {
+            "fastener",
+            "lighting_fixture",
+            "tray_sheet",
+            "contactor_starter",
+            "control_relay",
+            "light_signage",
+        }
 
     def _should_cap_rack_tray_whole_category_pool(self, query_features: Dict[str, Any]) -> bool:
         if self._clean_text_value(query_features.get("row_type")) != "item":
@@ -4739,7 +4786,7 @@ class ReMoMatcher:
         supplemented = 0
 
         def _matches_typed_family(item: Dict[str, Any]) -> bool:
-            item_family = self._entity_family(item.get("entity_type", ""))
+            item_family = self._effective_candidate_family_for_query(query_features, item)
             if entity_family == "patch_panel":
                 if item_family == "patch_panel":
                     return True

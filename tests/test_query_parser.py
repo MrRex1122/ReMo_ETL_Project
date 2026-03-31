@@ -54,6 +54,15 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(foam_spec.entity_type, "other")
         self.assertEqual(cabinet_spec.entity_type, "other")
 
+    def test_parse_query_spec_uses_other_subfamily_split_for_lighting_and_tray(self):
+        lighting_spec = parse_query_spec("Светильник светодиодный аварийный 595x595", taxonomy_rules=self.rules)
+        tray_spec = parse_query_spec("Лоток листовой перфорированный 200х50", taxonomy_rules=self.rules)
+
+        self.assertEqual(lighting_spec.entity_type, "lighting_fixture")
+        self.assertEqual(lighting_spec.branch_hint, "свет > светильники")
+        self.assertEqual(tray_spec.entity_type, "tray_sheet")
+        self.assertTrue(tray_spec.branch_hint.startswith("листовые лотки"))
+
 
 if __name__ == "__main__":
     unittest.main()

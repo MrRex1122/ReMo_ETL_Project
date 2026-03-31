@@ -1711,6 +1711,43 @@ class MatchTaxonomyTests(unittest.TestCase):
             "fastener",
         )
 
+    def test_effective_candidate_family_maps_other_lighting_branch(self):
+        features = self.matcher._extract_query_features("Светильник светодиодный аварийный 595x595")
+        features["entity_type"] = "lighting_fixture"
+        candidate = {
+            "name": "Светильник светодиодный аварийный 595x595",
+            "normalized_name": "светильник светодиодный аварийный 595x595",
+            "branch_path": "свет > светильники",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(features, candidate),
+            "lighting_fixture",
+        )
+
+    def test_collect_branch_candidates_relaxes_entity_filter_for_other_subfamilies(self):
+        self.matcher._uses_duckdb_query_backend = lambda: True
+        captured = {}
+
+        def fake_fetch_items(where_sql="", params=None, limit=None):
+            captured["where_sql"] = where_sql
+            captured["params"] = list(params or [])
+            captured["limit"] = limit
+            return []
+
+        self.matcher._duckdb_fetch_items = fake_fetch_items
+
+        self.matcher._collect_branch_candidates(
+            ["свет > светильники"],
+            limit=25,
+            query_features={"entity_type": "lighting_fixture"},
+        )
+
+        self.assertNotIn("search_entity_type", captured["where_sql"])
+        self.assertEqual(captured["limit"], 25)
+
     def test_strict_fallback_allows_fastener_like_candidate_after_family_normalization(self):
         features = self.matcher._extract_query_features("Анкер-клин 6х35 потолочный")
         features["entity_type"] = "fastener"

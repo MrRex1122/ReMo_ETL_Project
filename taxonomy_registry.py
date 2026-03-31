@@ -153,6 +153,81 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
             "positive_patterns": ["анкер", "болт", "шуруп", "шпильк", "дюбел", "гайк", "шайб", "крепеж"],
         },
     },
+    "lighting_fixture": {
+        "entity_types": ["lighting_fixture"],
+        "default_branches": ["свет > светильники"],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 56,
+            "positive_patterns": ["светильник", "прожектор", "светодиодн", "дво", "дсо", "дсп", "дпо", "дку"],
+            "negative_patterns": ["световое табло", "табло выход"],
+        },
+    },
+    "tray_sheet": {
+        "entity_types": ["tray_sheet"],
+        "default_branches": [
+            "листовые лотки оцинкованные (метод сендзимира)",
+            "листовые лотки горячеоцинкованные (метод погружения)",
+            "листовые лотки с покрытием цинк-ламель",
+        ],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 52,
+            "positive_patterns": [
+                "лоток",
+                "крышк",
+                "ответвител",
+                "угол",
+                "консол",
+                "пластин",
+                "перегород",
+                "листов",
+                "ptce",
+                "gto",
+                "sep",
+            ],
+            "negative_patterns": ["светильник", "реле", "контактор"],
+        },
+    },
+    "contactor_starter": {
+        "entity_types": ["contactor_starter"],
+        "default_branches": ["контакторы магнитные", "пускатели магнитные"],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 58,
+            "positive_patterns": ["контактор", "пускател"],
+        },
+    },
+    "control_relay": {
+        "entity_types": ["control_relay"],
+        "default_branches": ["промежуточные реле"],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 54,
+            "positive_patterns": ["реле"],
+            "negative_patterns": ["рельс", "rack rail", "тепловое реле"],
+        },
+    },
+    "light_signage": {
+        "entity_types": ["light_signage"],
+        "default_branches": ["световое табло"],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 57,
+            "positive_patterns": ["табло", "выход", "exit"],
+            "required_any_tokens": [["табло", "выход", "exit"], ["светов", "эвакуац", "аварийн"]],
+        },
+    },
     "ground_bar": {
         "entity_types": ["ground_bar"],
         "default_branches": ["телеком > аксессуары > заземление"],
@@ -531,11 +606,11 @@ DEFAULT_DOMAIN_REGISTRY: Dict[str, Any] = {
     "domains": {
         "tray": {
             "patterns": ["лоток", "крышк", "перегород", "пластин", "ответвител", "угол", "gto", "ptce", "sep"],
-            "families": [],
+            "families": ["tray_sheet"],
         },
         "lighting": {
             "patterns": ["светильник", "светодиод", "треков", "дсо", "дсп", "дпо", "дку"],
-            "families": [],
+            "families": ["lighting_fixture", "light_signage"],
         },
         "software": {
             "patterns": ["программ", "лиценз", "software", "monitoring"],

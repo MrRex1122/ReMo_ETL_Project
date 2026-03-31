@@ -202,6 +202,42 @@ class CatalogSearchTests(unittest.TestCase):
             "iec_power_cable",
         )
 
+    def test_classify_item_type_splits_other_into_lighting_and_tray_sheet(self):
+        self.assertEqual(
+            classify_item_type("Светильник светодиодный аварийный 595x595"),
+            "lighting_fixture",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Светильник светодиодный аварийный 595x595"),
+            "свет > светильники",
+        )
+        self.assertEqual(
+            classify_item_type("Лоток листовой перфорированный 200х50"),
+            "tray_sheet",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Лоток листовой перфорированный 200х50"),
+            "листовые лотки оцинкованные (метод сендзимира)",
+        )
+
+    def test_classify_item_type_splits_other_into_contactor_relay_and_signage(self):
+        self.assertEqual(
+            classify_item_type("Контактор магнитный 25А"),
+            "contactor_starter",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Контактор магнитный 25А"),
+            "контакторы магнитные",
+        )
+        self.assertEqual(
+            classify_item_type("Реле промежуточное 24В"),
+            "control_relay",
+        )
+        self.assertEqual(
+            classify_item_type("Световое табло ВЫХОД аварийное"),
+            "light_signage",
+        )
+
     def test_classify_item_type_does_not_treat_ascii_ups_ports_as_iec_power_cable(self):
         self.assertNotEqual(
             classify_item_type("online ups 2000va input IEC-320-C20 output IEC-320-C13 IEC-320-C19"),

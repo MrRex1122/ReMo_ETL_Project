@@ -779,6 +779,7 @@ def derive_branch_from_text(
     synonyms: Mapping[str, str] | None = None,
     taxonomy_rules: Mapping[str, Any] | None = None,
 ) -> str:
+    rules = taxonomy_rules if taxonomy_rules is not None else load_registry_taxonomy_rules()
     merged = normalize_text(" ".join(filter(None, texts)), synonyms=synonyms)
     if not merged:
         return "прочее"
@@ -796,10 +797,10 @@ def derive_branch_from_text(
                 continue
             return branch_path
 
-    entity_type = classify_item_type(merged, synonyms=synonyms, taxonomy_rules=taxonomy_rules)
-    registry_defaults = registry_family_default_branches(entity_type, taxonomy_rules, branch_hint="")
+    entity_type = classify_item_type(merged, synonyms=synonyms, taxonomy_rules=rules)
+    registry_defaults = registry_family_default_branches(entity_type, rules, branch_hint="")
     if registry_defaults and registry_defaults[0] != "прочее":
-        registry_family = entity_family_for_type(entity_type, taxonomy_rules)
+        registry_family = entity_family_for_type(entity_type, rules)
         if registry_family in {
             "airflow_blanking_panel",
             "ats_sts",
@@ -812,6 +813,11 @@ def derive_branch_from_text(
             "ground_bar",
             "breaker",
             "socket",
+            "lighting_fixture",
+            "tray_sheet",
+            "contactor_starter",
+            "control_relay",
+            "light_signage",
         }:
             return registry_defaults[0]
     if entity_type in {"pdu", "pdu_basic", "pdu_metered"}:
