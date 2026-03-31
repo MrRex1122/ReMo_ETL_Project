@@ -1791,6 +1791,50 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.assertIn("%80x40%", captured["params"])
         self.assertEqual(captured["limit"], 120)
 
+    def test_collect_branch_candidates_uses_precomputed_effective_family_columns(self):
+        self.matcher._uses_duckdb_query_backend = lambda: True
+        self.matcher.search_catalog_columns = {"search_effective_family", "search_effective_entity_type"}
+        self.matcher._should_relax_family_entity_filter = lambda _family: False
+        captured = {}
+
+        def fake_fetch_items(where_sql="", params=None, order_by_sql="", limit=None):
+            captured["where_sql"] = where_sql
+            captured["params"] = list(params or [])
+            captured["order_by_sql"] = order_by_sql
+            captured["limit"] = limit
+            return []
+
+        self.matcher._duckdb_fetch_items = fake_fetch_items
+
+        self.matcher._collect_branch_candidates(
+            ["электрика > кабели"],
+            limit=40,
+            query_features={"entity_type": "cable"},
+        )
+
+        self.assertIn("search_effective_family", captured["where_sql"])
+        self.assertIn("search_effective_entity_type", captured["where_sql"])
+        self.assertIn("cable", captured["params"])
+        self.assertEqual(captured["limit"], 40)
+
+    def test_effective_candidate_family_prefers_precomputed_effective_family(self):
+        features = self.matcher._extract_query_features("Блок сигнально-пусковой адресный")
+        features["entity_type"] = "security_control_device"
+        candidate = {
+            "name": "Преобразователь интерфейса МС-Е",
+            "normalized_name": "преобразователь интерфейса мс е",
+            "branch_path": "дополнительное оборудование для пс",
+            "entity_type": "other",
+            "effective_entity_type": "security_control_device",
+            "effective_family": "security_control_device",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(features, candidate),
+            "security_control_device",
+        )
+
     def test_effective_candidate_family_maps_misclassified_fire_alarm_items(self):
         detector_features = self.matcher._extract_query_features("Извещатель пожарный дымовой адресный")
         detector_features["entity_type"] = "fire_alarm_device"

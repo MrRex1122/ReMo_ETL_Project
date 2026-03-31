@@ -566,6 +566,10 @@ class ReMoMatcher:
         branch_path = self._clean_text_value(row.get("search_branch_path")) or self._normalize_catalog_branch(row)
         branch_leaf = self._clean_text_value(row.get("search_branch_leaf")) or branch_path.split(BRANCH_PATH_SEPARATOR)[-1]
         entity_type = self._clean_text_value(row.get("search_entity_type")) or self._classify_item_type(combined_text)
+        effective_entity_type = self._clean_text_value(row.get("search_effective_entity_type")) or entity_type
+        effective_family = self._clean_text_value(row.get("search_effective_family")) or self._entity_family(
+            effective_entity_type
+        )
 
         item_markers: Dict[str, Any] = {}
         precomputed_markers_raw = self._clean_text_value(row.get("search_item_markers_json"))
@@ -609,6 +613,8 @@ class ReMoMatcher:
             "cable_execution": self._clean_text_value(row.get("Тип исполнения кабельного изделия")),
             "manufacturer": self._clean_text_value(row.get("Производитель")),
             "entity_type": entity_type,
+            "effective_entity_type": effective_entity_type,
+            "effective_family": effective_family,
             "item_markers": item_markers,
         }
 
@@ -2501,6 +2507,8 @@ class ReMoMatcher:
             "search_normalized_name",
             "search_tokens_json",
             "search_entity_type",
+            "search_effective_family",
+            "search_effective_entity_type",
             "search_item_markers_json",
         }
         if header in explicit_columns:
@@ -4649,7 +4657,9 @@ class ReMoMatcher:
 
     def _effective_candidate_family_for_query(self, query_features: Dict[str, Any], item: Dict[str, Any]) -> str:
         query_family = self._entity_family(query_features.get("entity_type", ""))
-        candidate_family = self._entity_family(item.get("entity_type", ""))
+        candidate_family = self._clean_text_value(item.get("effective_family")) or self._entity_family(
+            self._clean_text_value(item.get("effective_entity_type")) or item.get("entity_type", "")
+        )
         candidate_family = self._infer_other_subfamily_for_item(item) or candidate_family
         if query_family == "fastener":
             if candidate_family == "fastener":
@@ -5193,6 +5203,7 @@ class ReMoMatcher:
         self.branch_index = {}
         self.branch_prefix_index = {}
         self.branch_token_index = {}
+        self.search_catalog_columns = set()
         self.catalog_row_count = 0
         token_to_items: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         token_doc_frequency: Counter[str] = Counter()
@@ -5210,6 +5221,7 @@ class ReMoMatcher:
             self.retrieval_mode = "whole_category"
             self._duckdb_path = str(source_path)
             frame = self._duckdb_fetch_frame(f"SELECT * FROM {SEARCH_CATALOG_TABLE} LIMIT 300")
+            self.search_catalog_columns = {str(column) for column in frame.columns}
             for row in frame.to_dict(orient="records"):
                 item = self._catalog_row_to_item(row)
                 if item is None:
@@ -5243,6 +5255,7 @@ class ReMoMatcher:
 
         for chunk in chunk_iter:
             chunk = canonicalize_catalog_columns(chunk, create_missing=True)
+            self.search_catalog_columns.update(str(column) for column in chunk.columns)
             if CANONICAL_NAME_COLUMN in chunk.columns:
                 saw_name_column = True
 
@@ -5891,13 +5904,24 @@ class ReMoMatcher:
                 params.extend([path, f"{path}{BRANCH_PATH_SEPARATOR}%"])
             where_clauses = ["(" + " OR ".join(clauses) + ")"]
             order_by_clauses: List[str] = []
-            query_family = self._entity_family((query_features or {}).get("entity_type", ""))
-            family_types = sorted(self._entity_types_for_family((query_features or {}).get("entity_type", "")))
+            query_entity_type = self._clean_text_value((query_features or {}).get("entity_type"))
+            query_family = self._entity_family(query_entity_type)
+            family_types = sorted(self._entity_types_for_family(query_entity_type))
             if family_types and query_family not in {"", "other"} and not self._should_relax_family_entity_filter(query_family):
                 entity_column = self._quote_sql_identifier("search_entity_type")
                 placeholders = ", ".join("?" for _ in family_types)
-                where_clauses.append(f"{entity_column} IN ({placeholders})")
+                family_filters = [f"{entity_column} IN ({placeholders})"]
                 params.extend(family_types)
+                available_columns = set(getattr(self, "search_catalog_columns", set()) or set())
+                if "search_effective_family" in available_columns:
+                    effective_family_column = self._quote_sql_identifier("search_effective_family")
+                    family_filters.append(f"{effective_family_column} = ?")
+                    params.append(query_family)
+                if "search_effective_entity_type" in available_columns and query_entity_type:
+                    effective_entity_column = self._quote_sql_identifier("search_effective_entity_type")
+                    family_filters.append(f"{effective_entity_column} = ?")
+                    params.append(query_entity_type)
+                where_clauses.append("(" + " OR ".join(family_filters) + ")")
 
             query_markers = (query_features or {}).get("markers", {}) or {}
             query_installation = self._clean_text_value(query_markers.get("installation_kind"))

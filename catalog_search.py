@@ -103,6 +103,8 @@ SEARCH_DERIVED_COLUMNS = [
     "search_normalized_name",
     "search_tokens_json",
     "search_entity_type",
+    "search_effective_family",
+    "search_effective_entity_type",
     "search_item_markers_json",
 ]
 
@@ -1150,6 +1152,13 @@ def build_search_projection_row(
     tokens = sorted(set(tokenize(" ".join(filter(None, [name, item_type, class_name])), synonyms=synonyms)))
     entity_type = classify_item_type(combined_text, synonyms=synonyms, taxonomy_rules=rules)
     item_markers = extract_item_markers(combined_text, attribute_patterns=rules.get("attribute_patterns"), synonyms=synonyms)
+    registry_match = classify_entity_type_from_registry(
+        combined_text,
+        rules=rules,
+        markers=item_markers,
+    )
+    effective_entity_type = clean_text_value((registry_match or {}).get("entity_type")) or entity_type
+    effective_family = entity_family_for_type(effective_entity_type or entity_type, rules)
 
     projected = {column: row.get(column, "") for column in SEARCH_BASE_COLUMNS}
     projected.update(
@@ -1159,6 +1168,8 @@ def build_search_projection_row(
             "search_normalized_name": normalize_text(name, synonyms=synonyms),
             "search_tokens_json": json.dumps(tokens, ensure_ascii=False),
             "search_entity_type": entity_type,
+            "search_effective_family": effective_family,
+            "search_effective_entity_type": effective_entity_type,
             "search_item_markers_json": json.dumps(item_markers, ensure_ascii=False),
         }
     )

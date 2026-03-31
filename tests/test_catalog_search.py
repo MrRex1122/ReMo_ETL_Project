@@ -488,8 +488,12 @@ class CatalogSearchTests(unittest.TestCase):
 
             self.assertEqual(search_path, get_search_catalog_csv_path(root))
             self.assertIn("search_branch_path", built.columns)
+            self.assertIn("search_effective_family", built.columns)
+            self.assertIn("search_effective_entity_type", built.columns)
             self.assertEqual(len(built), 1)
             self.assertEqual(built.loc[0, "search_entity_type"], "pdu_basic")
+            self.assertEqual(built.loc[0, "search_effective_family"], "pdu")
+            self.assertEqual(built.loc[0, "search_effective_entity_type"], "pdu")
 
     def test_build_search_catalog_can_write_duckdb_explicitly(self):
         if not DUCKDB_AVAILABLE:
