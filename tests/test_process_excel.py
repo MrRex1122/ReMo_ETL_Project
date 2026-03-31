@@ -70,38 +70,6 @@ class ContextAwareDummyMatcher(DummyMatcher):
         }
 
 
-class SectionRowDummyMatcher(DummyMatcher):
-    def match(self, query: str, use_cache: bool = True):
-        if query == "ОБОРУДОВАНИЕ":
-            return {
-                "found_name": "",
-                "price": None,
-                "article": None,
-                "similarity_score": 0.0,
-                "from_cache": False,
-                "success": True,
-                "error": None,
-                "reason": "Строка-раздел, сопоставление не требуется.",
-                "category_path": None,
-                "confidence_level": "",
-                "requires_review": "нет",
-                "alternatives": "",
-                "resolution_source": "unresolved",
-                "compatibility_status": "unresolved_no_compatible_candidates",
-                "incompatibility_reason": "section_row_detected",
-                "stage_of_failure": "query_input",
-                "reason_code": "section_row_detected",
-                "reason_class": "section_row_detected",
-                "verifier_decision": "reject",
-                "verifier_reason": "reject_non_item_row",
-                "auto_accept": False,
-                "gemini_shortlist_count": 0,
-                "gemini_visible_candidates": 0,
-                "gemini_truncated_candidates": 0,
-            }
-        return super().match(query, use_cache=use_cache)
-
-
 class ProcessExcelExistingColumnsTests(unittest.TestCase):
     def setUp(self):
         self.matcher = DummyMatcher()
@@ -251,27 +219,6 @@ class ProcessExcelExistingColumnsTests(unittest.TestCase):
         self.assertEqual(stats["input_article_column"], "")
         self.assertEqual(result_df.loc[0, "Артикул"], "ART-200")
         self.assertEqual(result_df.loc[0, "Источник решения"], "article_extracted_exact")
-
-    def test_process_excel_leaves_section_rows_blank_in_found_name(self):
-        self.matcher = SectionRowDummyMatcher()
-        df = pd.DataFrame(
-            {
-                "Наименование оборудования, материалов и кабелей": ["ОБОРУДОВАНИЕ", "Позиция 2"],
-            }
-        )
-
-        result_df, stats = self._run_process(df)
-
-        self.assertEqual(result_df.loc[0, "Найденная номенклатура"], "")
-        self.assertEqual(result_df.loc[0, "Требует проверки"], "нет")
-        self.assertEqual(result_df.loc[0, "Код причины"], "section_row_detected")
-        self.assertEqual(
-            result_df.loc[0, "Причина отсутствия"],
-            "Строка-раздел, сопоставление не требуется.",
-        )
-        self.assertEqual(stats["skipped_non_item"], 1)
-        self.assertEqual(stats["found"], 0)
-        self.assertEqual(stats["not_found"], 1)
 
 
 if __name__ == "__main__":

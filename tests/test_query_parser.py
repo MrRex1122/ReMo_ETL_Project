@@ -45,14 +45,6 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(spec.markers.get("accessory_kind"), "holder")
         self.assertIn("20-21", spec.dimension_diameters)
 
-    def test_parse_query_spec_classifies_anchor_wedge_as_fastener(self):
-        spec = parse_query_spec("Анкер-клин 6х35 потолочный", taxonomy_rules=self.rules)
-
-        self.assertEqual(spec.entity_type, "fastener")
-        self.assertEqual(spec.query_family, "fastener")
-        self.assertEqual(spec.markers.get("accessory_kind"), "fastener")
-        self.assertIn("6x35", spec.dimension_pairs)
-
     def test_parse_query_spec_avoids_rack_family_for_firestop_and_control_cabinet(self):
         foam_spec = parse_query_spec("Огнестойкая монтажная пена ОГНЕЗА EI240, 750 мл", taxonomy_rules=self.rules)
         cabinet_spec = parse_query_spec("Шкаф контрольно-пусковой", taxonomy_rules=self.rules)

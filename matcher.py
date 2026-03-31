@@ -4520,22 +4520,6 @@ class ReMoMatcher:
     def _effective_candidate_family_for_query(self, query_features: Dict[str, Any], item: Dict[str, Any]) -> str:
         query_family = self._entity_family(query_features.get("entity_type", ""))
         candidate_family = self._entity_family(item.get("entity_type", ""))
-        if query_family == "fastener":
-            if candidate_family == "fastener":
-                return candidate_family
-            if candidate_family not in {"", "other"}:
-                return candidate_family
-
-            item_markers = item.get("item_markers", {}) or {}
-            accessory_kind = self._clean_text_value(item_markers.get("accessory_kind"))
-            search_text = self._normalize_text(
-                f"{self._clean_text_value(item.get('name'))} {self._clean_text_value(item.get('branch_path'))}"
-            )
-            if accessory_kind == "fastener" or any(
-                token in search_text for token in ("анкер", "крепеж", "клин", "дюбел", "болт", "гайк", "шпильк")
-            ):
-                return "fastener"
-            return candidate_family
         if query_family != "rack_accessory_strict":
             return candidate_family
         if candidate_family not in {"", "other", "cable"}:
@@ -4640,21 +4624,6 @@ class ReMoMatcher:
                 return True
             if entity_family == "rack_accessory_strict":
                 if item_family != "rack_accessory_strict":
-                    return False
-                return not self._is_hard_incompatible_match(query_features, item)
-            if entity_family == "fastener":
-                if item_family == "fastener":
-                    return not self._is_hard_incompatible_match(query_features, item)
-                if item_family not in {"", "other"}:
-                    return False
-                item_markers = item.get("item_markers", {}) or {}
-                accessory_kind = self._clean_text_value(item_markers.get("accessory_kind"))
-                search_text = self._normalize_text(
-                    f"{self._clean_text_value(item.get('name'))} {self._clean_text_value(item.get('branch_path'))}"
-                )
-                if accessory_kind != "fastener" and not any(
-                    token in search_text for token in ("анкер", "крепеж", "клин", "дюбел", "болт", "гайк", "шпильк")
-                ):
                     return False
                 return not self._is_hard_incompatible_match(query_features, item)
             if entity_family and item_family and item_family != entity_family:
@@ -5882,12 +5851,9 @@ class ReMoMatcher:
         gemini_truncated_candidates: int = 0,
         gemini_model: str = "",
         gemini_result_status: str = "",
-        found_name: str = MISSING_POSITION_TEXT,
-        confidence_level: str = "low",
-        requires_review: str = "да",
     ) -> Dict[str, Any]:
         return {
-            "found_name": found_name,
+            "found_name": MISSING_POSITION_TEXT,
             "price": None,
             "article": None,
             "similarity_score": 0.0,
@@ -5896,8 +5862,8 @@ class ReMoMatcher:
             "error": error,
             "reason": reason or f"Позиция '{query}' не найдена",
             "category_path": None,
-            "confidence_level": confidence_level,
-            "requires_review": requires_review,
+            "confidence_level": "low",
+            "requires_review": "да",
             "alternatives": alternatives,
             "resolution_source": "unresolved",
             "compatibility_status": compatibility_status,
@@ -6987,11 +6953,8 @@ class ReMoMatcher:
             if query_features.get("row_type") == "section":
                 result = self._build_missing_result(
                     query_text,
-                    "Строка-раздел, сопоставление не требуется.",
+                    "Строка похожа на раздел каталога и не является конкретной товарной позицией.",
                     incompatibility_reason="section_row_detected",
-                    found_name="",
-                    confidence_level="",
-                    requires_review="нет",
                 )
                 trace_steps.append({"stage": "query_input", "status": "failed", "reason_code": "section_row_detected"})
                 return _finalize(result, stage_of_failure="query_input", reason_code="section_row_detected")
@@ -7964,7 +7927,6 @@ class ReMoMatcher:
             "total": 0,
             "found": 0,
             "not_found": 0,
-            "skipped_non_item": 0,
             "from_cache": 0,
             "errors": 0,
             "gemini_rows_total": 0,
@@ -8036,13 +7998,7 @@ class ReMoMatcher:
         processed_count = 0
         for idx, result in self._run_matches_parallel(tasks, cancel_requested=cancel_requested):
             processed_count += 1
-            result_found_name = self._clean_text_value(result.get("found_name"))
-            is_non_item_row = (
-                self._clean_text_value(result.get("reason_code")) == "section_row_detected"
-                or self._clean_text_value(result.get("incompatibility_reason")) == "section_row_detected"
-                or self._clean_text_value(result.get("verifier_reason")) == "reject_non_item_row"
-            )
-            found_name = "" if is_non_item_row else (result_found_name or MISSING_POSITION_TEXT)
+            found_name = result.get("found_name") or MISSING_POSITION_TEXT
             df.at[idx, "Цена"] = result.get("price")
             df.at[idx, "Найденная номенклатура"] = found_name
             df.at[idx, "Артикул"] = result.get("article")
@@ -8063,20 +8019,14 @@ class ReMoMatcher:
             df.at[idx, "Gemini visible candidates"] = result.get("gemini_visible_candidates")
             df.at[idx, "Gemini truncated"] = result.get("gemini_truncated_candidates")
 
-            if is_non_item_row:
-                df.at[idx, "Причина отсутствия"] = (
-                    self._clean_text_value(result.get("reason")) or "Строка-раздел, сопоставление не требуется."
-                )
-            elif found_name == MISSING_POSITION_TEXT:
+            if found_name == MISSING_POSITION_TEXT:
                 df.at[idx, "Причина отсутствия"] = self._compose_not_found_reason(task_query_map.get(idx, ""), result)
             else:
                 df.at[idx, "Причина отсутствия"] = result.get("reason") or None
 
             if result.get("from_cache"):
                 stats["from_cache"] += 1
-            if is_non_item_row:
-                stats["skipped_non_item"] += 1
-            elif found_name == MISSING_POSITION_TEXT:
+            if found_name == MISSING_POSITION_TEXT:
                 stats["not_found"] += 1
             else:
                 stats["found"] += 1

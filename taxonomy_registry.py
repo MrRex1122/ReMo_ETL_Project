@@ -283,32 +283,6 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
             }
         ],
     },
-    "fastener": {
-        "entity_types": ["fastener", "other"],
-        "default_branches": ["крепежные изделия для кабеленесущих систем"],
-        "retrieval_mode": "branch_limited",
-        "strictness": "semi_strict",
-        "audited": True,
-        "weak_match_policy": "reject_in_exact",
-        "classifier": {
-            "priority": 72,
-            "positive_patterns": [
-                "анкер",
-                "крепеж",
-                "клин",
-                "дюбел",
-                "болт",
-                "гайк",
-                "шпильк",
-                "шайб",
-            ],
-            "negative_patterns": ["держател", "скоб", "хомут", "однолапк", "двулапк"],
-            "required_markers": {
-                "accessory_kind": ["fastener"],
-            },
-            "returns": "fastener",
-        },
-    },
     "rack_accessory_strict": {
         "entity_types": ["rack_blank_panel", "rack_brush_panel", "rack_shelf", "rack_rail"],
         "default_branches": ["телеком > аксессуары > шкафные аксессуары"],
@@ -568,8 +542,8 @@ DEFAULT_DOMAIN_REGISTRY: Dict[str, Any] = {
             "families": [],
         },
         "fastener": {
-            "patterns": ["держател", "хомут", "скоб", "анкер", "крепеж", "клин", "дюбел", "болт", "гайк", "шпильк"],
-            "families": ["fastener"],
+            "patterns": ["держател", "хомут", "скоб"],
+            "families": [],
         },
         "electrical_protection": {
             "patterns": ["выключател", "автоматическ", "автомат", "optidin", "bm63"],
@@ -1616,7 +1590,6 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "bulk_twisted_pair",
         "cable",
         "coax",
-        "fastener",
         "floor_box",
         "ground_bar",
         "iec_power_cable",
@@ -1653,7 +1626,6 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "cable": "electrical_cable",
         "wire": "electrical_cable",
         "coax": "electrical_cable",
-        "fastener": "fastener",
         "ground_bar": "grounding",
         "floor_box": "floor_box",
         "rack": "rack",
@@ -1671,7 +1643,6 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "airflow_accessories": "airflow/accessories",
         "rack_accessories": "rack accessories",
         "electrical_cable": "electrical cable",
-        "fastener": "fastener",
         "grounding": "grounding",
         "floor_box": "floor_box",
         "rack": "rack",
