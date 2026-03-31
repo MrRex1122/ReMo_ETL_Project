@@ -1695,6 +1695,36 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.assertNotIn("search_entity_type", captured["where_sql"])
         self.assertEqual(captured["limit"], 25)
 
+    def test_effective_candidate_family_maps_fastener_like_candidate_to_fastener(self):
+        features = self.matcher._extract_query_features("Анкер-клин 6х35 потолочный")
+        features["entity_type"] = "fastener"
+        candidate = {
+            "name": "Анкер-клин 6х35 потолочный",
+            "normalized_name": "анкер клин 6х35 потолочный",
+            "branch_path": "крепежные изделия для кабеленесущих систем",
+            "entity_type": "rack_accessory_strict",
+            "item_markers": {"accessory_kind": "fastener"},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(features, candidate),
+            "fastener",
+        )
+
+    def test_strict_fallback_allows_fastener_like_candidate_after_family_normalization(self):
+        features = self.matcher._extract_query_features("Анкер-клин 6х35 потолочный")
+        features["entity_type"] = "fastener"
+        candidate = {
+            "name": "Анкер-клин 6х35 потолочный",
+            "normalized_name": "анкер клин 6х35 потолочный",
+            "branch_path": "крепежные изделия для кабеленесущих систем",
+            "entity_type": "rack_accessory_strict",
+            "item_markers": {"accessory_kind": "fastener"},
+        }
+        self.matcher._compatibility_label = lambda _features, _item: "compatible"
+
+        self.assertTrue(self.matcher._is_strict_fallback_allowed(features, candidate))
+
     def test_typed_candidate_pool_for_rack_tray_caps_unstructured_whole_category_queries(self):
         features = {
             "row_type": "item",

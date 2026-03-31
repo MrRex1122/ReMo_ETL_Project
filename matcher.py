@@ -4644,6 +4644,12 @@ class ReMoMatcher:
     def _effective_candidate_family_for_query(self, query_features: Dict[str, Any], item: Dict[str, Any]) -> str:
         query_family = self._entity_family(query_features.get("entity_type", ""))
         candidate_family = self._entity_family(item.get("entity_type", ""))
+        if query_family == "fastener":
+            if candidate_family == "fastener":
+                return candidate_family
+            if self._effective_item_accessory_kind(item) == "fastener":
+                return "fastener"
+            return candidate_family
         if query_family != "rack_accessory_strict":
             return candidate_family
         if candidate_family not in {"", "other", "cable"}:
