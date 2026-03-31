@@ -1609,11 +1609,18 @@ class ReMoMatcher:
         seen: set[int] = set()
         supplemented = 0
         query_features["active_resolver_path"] = self._rack_tray_semantic_resolver_path_for_query(query_features)
+        query_markers = query_features.get("markers", {}) or {}
+        query_accessory_kind = self._clean_text_value(query_markers.get("accessory_kind"))
 
         def _matches_rack_tray_candidate(item: Dict[str, Any]) -> bool:
             item_family = self._entity_family(item.get("entity_type", ""))
             if item_family != entity_family:
-                return False
+                if not (
+                    entity_family == "rack_accessory_strict"
+                    and query_accessory_kind == "fastener"
+                    and self._effective_item_accessory_kind(item) == "fastener"
+                ):
+                    return False
             return not self._is_hard_incompatible_match(query_features, item)
 
         def _append_candidates(items: List[Dict[str, Any]], *, stop_after_limit: bool) -> bool:
@@ -1633,7 +1640,10 @@ class ReMoMatcher:
         if self._should_use_whole_category_retrieval(query_features):
             category_key, category_candidates, _elapsed_ms = self._duckdb_category_candidates(query_features)
             query_features["query_category_key"] = category_key
-            _append_candidates(category_candidates, stop_after_limit=False)
+            _append_candidates(
+                category_candidates,
+                stop_after_limit=self._should_cap_rack_tray_whole_category_pool(query_features),
+            )
         else:
             branch_candidates = self._collect_branch_candidates(
                 branch_paths,
@@ -3606,9 +3616,8 @@ class ReMoMatcher:
         query_family = self._entity_family(query_features.get("entity_type", ""))
         if query_family == "rack_accessory_strict":
             query_markers = query_features.get("markers", {}) or {}
-            item_markers = item.get("item_markers", {}) or {}
             query_accessory = self._clean_text_value(query_markers.get("accessory_kind"))
-            item_accessory = self._clean_text_value(item_markers.get("accessory_kind"))
+            item_accessory = self._effective_item_accessory_kind(item)
             if query_accessory and item_accessory and query_accessory == item_accessory:
                 bonus += 0.08
 
@@ -4269,7 +4278,7 @@ class ReMoMatcher:
             if query_mount and not item_mount:
                 return "rack_accessory_type_mismatch"
             query_accessory = self._clean_text_value(query_markers.get("accessory_kind"))
-            item_accessory = self._clean_text_value(item_markers.get("accessory_kind"))
+            item_accessory = self._effective_item_accessory_kind(item)
             if query_accessory and item_accessory and query_accessory != item_accessory:
                 return "rack_accessory_type_mismatch"
             if query_accessory and not item_accessory:
@@ -4641,7 +4650,7 @@ class ReMoMatcher:
             return candidate_family
 
         item_markers = item.get("item_markers", {}) or {}
-        accessory_kind = self._clean_text_value(item_markers.get("accessory_kind"))
+        accessory_kind = self._effective_item_accessory_kind(item)
         mount_kind = self._clean_text_value(item_markers.get("mount_kind"))
         if accessory_kind in {
             "holder",
@@ -4649,6 +4658,7 @@ class ReMoMatcher:
             "tee",
             "corner",
             "cover",
+            "fastener",
             "organizer",
             "brush_panel",
             "partition",
@@ -4660,6 +4670,46 @@ class ReMoMatcher:
         if mount_kind in {"holder", "organizer", "brush", "shelf", "rail"}:
             return "rack_accessory_strict"
         return candidate_family
+
+    def _effective_item_accessory_kind(self, item: Dict[str, Any]) -> str:
+        item_markers = item.get("item_markers", {}) or {}
+        accessory_kind = self._clean_text_value(item_markers.get("accessory_kind"))
+        if accessory_kind:
+            return accessory_kind
+        candidate_text = self._normalize_text(
+            " ".join(
+                filter(
+                    None,
+                    [
+                        self._clean_text_value(item.get("name")),
+                        self._clean_text_value(item.get("normalized_name")),
+                        self._clean_text_value(item.get("branch_path")),
+                    ],
+                )
+            )
+        )
+        if any(token in candidate_text for token in ("анкер", "крепеж", "болт", "шуруп", "шпильк", "дюбел")):
+            return "fastener"
+        return ""
+
+    def _should_cap_rack_tray_whole_category_pool(self, query_features: Dict[str, Any]) -> bool:
+        if self._clean_text_value(query_features.get("row_type")) != "item":
+            return False
+        if self._normalize_article_lookup_value(query_features.get("query_article")):
+            return False
+        markers = query_features.get("markers", {}) or {}
+        if self._clean_text_value(markers.get("accessory_kind")):
+            return False
+        if self._clean_text_value(markers.get("mount_kind")):
+            return False
+        if (
+            query_features.get("dimension_pairs")
+            or query_features.get("dimension_triples")
+            or query_features.get("dimension_lengths")
+            or query_features.get("dimension_diameters")
+        ):
+            return False
+        return True
 
     def _typed_candidate_pool(self, query_text: str, query_features: Dict[str, Any], limit: int) -> List[Dict[str, Any]]:
         strictness = self._match_strictness_for_query(query_features)

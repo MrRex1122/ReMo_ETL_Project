@@ -1642,5 +1642,65 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.assertEqual(result["article"], "3526410HDZ")
 
 
+    def test_hard_incompatibility_allows_inferred_fastener_candidate_without_marker(self):
+        features = self.matcher._extract_query_features("Анкер-клин 6х35 потолочный")
+        item = {
+            "name": "Анкер-клин 6х35 потолочный",
+            "normalized_name": "анкер клин 6х35 потолочный",
+            "branch_path": "крепежные изделия для кабеленесущих систем",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(self.matcher._effective_item_accessory_kind(item), "fastener")
+        self.assertEqual(self.matcher._hard_incompatibility_reason(features, item), "")
+
+    def test_typed_candidate_pool_for_rack_tray_accepts_inferred_fastener_candidate(self):
+        features = self.matcher._extract_query_features("Анкер-клин 6х35 потолочный")
+        features["ranked_branches"] = []
+        candidate = {
+            "name": "Анкер-клин 6х35 потолочный",
+            "normalized_name": "анкер клин 6х35 потолочный",
+            "branch_path": "крепежные изделия для кабеленесущих систем",
+            "entity_type": "other",
+            "item_markers": {},
+            "row_idx": 7,
+        }
+        self.matcher._should_use_whole_category_retrieval = lambda _features: False
+        self.matcher._collect_branch_candidates = lambda _branches, limit=None, query_features=None: []
+        self.matcher._select_candidates = lambda _query_text, limit=0: [candidate]
+
+        pool = self.matcher._typed_candidate_pool_for_rack_tray("Анкер-клин 6х35 потолочный", features, 50)
+
+        self.assertEqual([item["row_idx"] for item in pool], [7])
+
+    def test_typed_candidate_pool_for_rack_tray_caps_unstructured_whole_category_queries(self):
+        features = {
+            "row_type": "item",
+            "entity_type": "rack_accessory_strict",
+            "markers": {},
+            "ranked_branches": [{"path": "телеком > аксессуары > шкафные аксессуары", "score": 5.0}],
+            "original_text": "Гусак",
+        }
+        category_candidates = [
+            {
+                "name": f"candidate {index}",
+                "normalized_name": f"candidate {index}",
+                "branch_path": "телеком > аксессуары > шкафные аксессуары",
+                "entity_type": "rack_accessory_strict",
+                "item_markers": {},
+                "row_idx": index,
+            }
+            for index in range(450)
+        ]
+        self.matcher._should_use_whole_category_retrieval = lambda _features: True
+        self.matcher._duckdb_category_candidates = lambda _features: ("rack_accessories", category_candidates, 0.0)
+        self.matcher._select_candidates = lambda _query_text, limit=0: []
+
+        pool = self.matcher._typed_candidate_pool_for_rack_tray("Гусак", features, 400)
+
+        self.assertEqual(len(pool), 300)
+
+
 if __name__ == "__main__":
     unittest.main()
