@@ -5882,12 +5882,15 @@ class ReMoMatcher:
             if not branch_paths:
                 return []
             branch_column = self._quote_sql_identifier("search_branch_path")
+            normalized_column = self._quote_sql_identifier("search_normalized_name")
+            markers_column = self._quote_sql_identifier("search_item_markers_json")
             clauses: List[str] = []
             params: List[Any] = []
             for path in branch_paths:
                 clauses.append(f"({branch_column} = ? OR {branch_column} LIKE ?)")
                 params.extend([path, f"{path}{BRANCH_PATH_SEPARATOR}%"])
             where_clauses = ["(" + " OR ".join(clauses) + ")"]
+            order_by_clauses: List[str] = []
             query_family = self._entity_family((query_features or {}).get("entity_type", ""))
             family_types = sorted(self._entity_types_for_family((query_features or {}).get("entity_type", "")))
             if family_types and query_family not in {"", "other"} and not self._should_relax_family_entity_filter(query_family):
@@ -5895,10 +5898,38 @@ class ReMoMatcher:
                 placeholders = ", ".join("?" for _ in family_types)
                 where_clauses.append(f"{entity_column} IN ({placeholders})")
                 params.extend(family_types)
+
+            query_markers = (query_features or {}).get("markers", {}) or {}
+            query_installation = self._clean_text_value(query_markers.get("installation_kind"))
+            if query_installation == "cable_channel":
+                order_by_clauses.append(
+                    f"CASE WHEN lower(coalesce({markers_column}, '')) LIKE ? THEN 0 ELSE 1 END"
+                )
+                params.append('%"installation_kind": "cable_channel"%')
+                order_by_clauses.append(
+                    f"CASE WHEN lower(coalesce({normalized_column}, '')) LIKE ? THEN 0 ELSE 1 END"
+                )
+                params.append("%кабель канал%")
+                order_by_clauses.append(
+                    f"CASE WHEN lower(coalesce({normalized_column}, '')) LIKE ? THEN 0 ELSE 1 END"
+                )
+                params.append("%короб%")
+                for token in (query_features or {}).get("tokens", []) or []:
+                    normalized_token = self._clean_text_value(token).replace("х", "x")
+                    if re.fullmatch(r"\d+x\d+", normalized_token):
+                        order_by_clauses.append(
+                            f"CASE WHEN lower(coalesce({normalized_column}, '')) LIKE ? THEN 0 ELSE 1 END"
+                        )
+                        params.append(f"%{normalized_token}%")
+                        break
+                order_by_clauses.append(f"LENGTH(coalesce({branch_column}, '')) DESC")
+
+            order_by_sql = ", ".join(order_by_clauses)
             duckdb_limit = max(1, int(limit)) if limit is not None else None
             return self._duckdb_fetch_items(
                 where_sql=" AND ".join(where_clauses),
                 params=params,
+                order_by_sql=order_by_sql,
                 limit=duckdb_limit,
             )
 

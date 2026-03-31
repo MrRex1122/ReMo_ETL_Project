@@ -815,9 +815,10 @@ class MatchTaxonomyTests(unittest.TestCase):
     def test_rj45_connector_whole_category_query_includes_cable_branch(self):
         captured: dict[str, object] = {}
 
-        def fake_fetch_items(where_sql, params, limit=None):
+        def fake_fetch_items(where_sql, params, order_by_sql="", limit=None):
             captured["where_sql"] = where_sql
             captured["params"] = list(params)
+            captured["order_by_sql"] = order_by_sql
             captured["limit"] = limit
             return []
 
@@ -1686,9 +1687,10 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.matcher._uses_duckdb_query_backend = lambda: True
         captured = {}
 
-        def fake_fetch_items(where_sql="", params=None, limit=None):
+        def fake_fetch_items(where_sql="", params=None, order_by_sql="", limit=None):
             captured["where_sql"] = where_sql
             captured["params"] = list(params or [])
+            captured["order_by_sql"] = order_by_sql
             captured["limit"] = limit
             return []
 
@@ -1739,9 +1741,10 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.matcher._uses_duckdb_query_backend = lambda: True
         captured = {}
 
-        def fake_fetch_items(where_sql="", params=None, limit=None):
+        def fake_fetch_items(where_sql="", params=None, order_by_sql="", limit=None):
             captured["where_sql"] = where_sql
             captured["params"] = list(params or [])
+            captured["order_by_sql"] = order_by_sql
             captured["limit"] = limit
             return []
 
@@ -1755,6 +1758,38 @@ class MatchTaxonomyTests(unittest.TestCase):
 
         self.assertNotIn("search_entity_type", captured["where_sql"])
         self.assertEqual(captured["limit"], 25)
+
+    def test_collect_branch_candidates_prioritizes_cable_channel_rows(self):
+        self.matcher._uses_duckdb_query_backend = lambda: True
+        captured = {}
+
+        def fake_fetch_items(where_sql="", params=None, order_by_sql="", limit=None):
+            captured["where_sql"] = where_sql
+            captured["params"] = list(params or [])
+            captured["order_by_sql"] = order_by_sql
+            captured["limit"] = limit
+            return []
+
+        self.matcher._duckdb_fetch_items = fake_fetch_items
+
+        self.matcher._collect_branch_candidates(
+            ["электрика > кабели > кабель-каналы", "электрика > кабели"],
+            limit=120,
+            query_features={
+                "entity_type": "cable",
+                "tokens": ["короб", "крышкой", "80x40"],
+                "markers": {"installation_kind": "cable_channel", "length_m": "3"},
+            },
+        )
+
+        self.assertIn("search_entity_type", captured["where_sql"])
+        self.assertIn("search_item_markers_json", captured["order_by_sql"])
+        self.assertIn("search_normalized_name", captured["order_by_sql"])
+        self.assertIn('%"installation_kind": "cable_channel"%', captured["params"])
+        self.assertIn("%кабель канал%", captured["params"])
+        self.assertIn("%короб%", captured["params"])
+        self.assertIn("%80x40%", captured["params"])
+        self.assertEqual(captured["limit"], 120)
 
     def test_effective_candidate_family_maps_misclassified_fire_alarm_items(self):
         detector_features = self.matcher._extract_query_features("Извещатель пожарный дымовой адресный")
