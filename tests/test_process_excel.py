@@ -220,6 +220,23 @@ class ProcessExcelExistingColumnsTests(unittest.TestCase):
         self.assertEqual(result_df.loc[0, "Артикул"], "ART-200")
         self.assertEqual(result_df.loc[0, "Источник решения"], "article_extracted_exact")
 
+    def test_process_excel_skips_uppercase_section_rows(self):
+        df = pd.DataFrame(
+            {
+                "Наименование оборудования, материалов и кабелей": ["ОБОРУДОВАНИЕ", "Позиция 2"],
+            }
+        )
+
+        result_df, stats = self._run_process(df)
+
+        self.assertEqual(result_df.loc[0, "Найденная номенклатура"], "")
+        self.assertEqual(result_df.loc[0, "Требует проверки"], "нет")
+        self.assertEqual(result_df.loc[0, "Код причины"], "section_row_detected")
+        self.assertEqual(result_df.loc[0, "Причина отсутствия"], "Строка-раздел, сопоставление не требуется.")
+        self.assertEqual(stats["skipped_non_item"], 1)
+        self.assertEqual(stats["total"], 1)
+        self.assertEqual(stats["not_found"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -85,8 +85,25 @@ class ParsedQuerySpec:
         return data
 
 
+def _looks_like_uppercase_section_row(text: str) -> bool:
+    original = clean_text_value(text)
+    if not original or re.search(r"\d", original):
+        return False
+    words = re.findall(r"[A-Za-zА-ЯЁ]+", original)
+    if not words or len(words) > 6:
+        return False
+    if len(words) == 1 and len(words[0]) < 7:
+        return False
+    if any(char.islower() for char in original if char.isalpha()):
+        return False
+    if len(original) > 80:
+        return False
+    return bool(re.search(r"[А-ЯЁ]", original))
+
+
 def detect_query_row_type(text: str, taxonomy_rules: Mapping[str, Any] | None = None) -> str:
-    normalized = normalize_text(clean_text_value(text))
+    original = clean_text_value(text)
+    normalized = normalize_text(original)
     if not normalized:
         return "empty"
     if normalized in SECTION_ROW_DEFAULTS:
@@ -94,6 +111,8 @@ def detect_query_row_type(text: str, taxonomy_rules: Mapping[str, Any] | None = 
     for pattern in SECTION_ROW_PATTERNS:
         if re.search(pattern, normalized, flags=re.IGNORECASE):
             return "section"
+    if _looks_like_uppercase_section_row(original):
+        return "section"
     patterns = list((taxonomy_rules or {}).get("section_row_patterns", []) or [])
     for pattern in patterns:
         if re.search(pattern, normalized, flags=re.IGNORECASE):

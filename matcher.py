@@ -7927,6 +7927,7 @@ class ReMoMatcher:
             "total": 0,
             "found": 0,
             "not_found": 0,
+            "skipped_non_item": 0,
             "from_cache": 0,
             "errors": 0,
             "gemini_rows_total": 0,
@@ -7967,6 +7968,30 @@ class ReMoMatcher:
             if not query or query.lower() == "nan":
                 continue
             if query.strip().lower() in {"наименование", "наименование оборудования, материалов и кабелей", "nomenclature"}:
+                continue
+            row_type = self._detect_query_row_type(query)
+            if row_type == "section":
+                df.at[idx, "Цена"] = None
+                df.at[idx, "Найденная номенклатура"] = ""
+                df.at[idx, "Артикул"] = None
+                df.at[idx, "Ошибка сопоставления"] = None
+                df.at[idx, "Путь категории"] = None
+                df.at[idx, "Уровень уверенности"] = None
+                df.at[idx, "Требует проверки"] = "нет"
+                df.at[idx, "Альтернативы"] = None
+                df.at[idx, "Источник решения"] = None
+                df.at[idx, "Совместимость решения"] = None
+                df.at[idx, "Причина несовместимости"] = None
+                df.at[idx, "Verifier decision"] = "reject"
+                df.at[idx, "Auto accept"] = False
+                df.at[idx, "Этап отказа"] = "query_input"
+                df.at[idx, "Код причины"] = "section_row_detected"
+                df.at[idx, "Класс причины"] = infer_reason_class("query_input", "section_row_detected")
+                df.at[idx, "Gemini shortlist"] = 0
+                df.at[idx, "Gemini visible candidates"] = 0
+                df.at[idx, "Gemini truncated"] = 0
+                df.at[idx, "Причина отсутствия"] = "Строка-раздел, сопоставление не требуется."
+                stats["skipped_non_item"] += 1
                 continue
             input_article = self._clean_text_value(row.get(article_column)) if article_column else ""
             extracted_article = self._extract_query_article_from_text(query)

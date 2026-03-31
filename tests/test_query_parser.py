@@ -16,6 +16,8 @@ class QueryParserTests(unittest.TestCase):
         )
         self.assertEqual(detect_query_row_type("ОГНЕСТОЙКАЯ КАБЕЛЬНАЯ ЛИНИЯ", self.rules), "section")
         self.assertEqual(detect_query_row_type("МАТЕРИАЛЫ", self.rules), "section")
+        self.assertEqual(detect_query_row_type("КАБЕЛЬНАЯ ПРОДУКЦИЯ", self.rules), "section")
+        self.assertEqual(detect_query_row_type("МПН", self.rules), "item")
 
     def test_parse_query_spec_extracts_article_and_designation_signature(self):
         spec = parse_query_spec("Кабель, артикул ВВГнг(A)-LS 4x4", taxonomy_rules=self.rules)
