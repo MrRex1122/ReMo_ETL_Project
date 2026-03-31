@@ -1748,6 +1748,35 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.assertNotIn("search_entity_type", captured["where_sql"])
         self.assertEqual(captured["limit"], 25)
 
+    def test_effective_candidate_family_maps_misclassified_fire_alarm_items(self):
+        detector_features = self.matcher._extract_query_features("Извещатель пожарный дымовой адресный")
+        detector_features["entity_type"] = "fire_alarm_device"
+        detector_candidate = {
+            "name": "Извещатель пожарный дымовой взрывозащищенный",
+            "normalized_name": "извещатель пожарный дымовой взрывозащищенный",
+            "branch_path": "извещатели пожарные",
+            "entity_type": "cable",
+            "item_markers": {},
+        }
+        control_features = self.matcher._extract_query_features("Блок сигнально-пусковой адресный")
+        control_features["entity_type"] = "security_control_device"
+        control_candidate = {
+            "name": "Преобразователь интерфейса МС-Е",
+            "normalized_name": "преобразователь интерфейса мс е",
+            "branch_path": "дополнительное оборудование для пс",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(detector_features, detector_candidate),
+            "fire_alarm_device",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(control_features, control_candidate),
+            "security_control_device",
+        )
+
     def test_strict_fallback_allows_fastener_like_candidate_after_family_normalization(self):
         features = self.matcher._extract_query_features("Анкер-клин 6х35 потолочный")
         features["entity_type"] = "fastener"

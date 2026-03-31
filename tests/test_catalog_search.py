@@ -238,6 +238,32 @@ class CatalogSearchTests(unittest.TestCase):
             "light_signage",
         )
 
+    def test_classify_item_type_splits_other_into_fire_alarm_control_software_power_and_firestop(self):
+        self.assertEqual(
+            classify_item_type("Извещатель пожарный дымовой адресный"),
+            "fire_alarm_device",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Извещатель пожарный дымовой адресный"),
+            "извещатели пожарные",
+        )
+        self.assertEqual(
+            classify_item_type("Блок сигнально-пусковой адресный"),
+            "security_control_device",
+        )
+        self.assertEqual(
+            classify_item_type("ПО Сервер Орион Про"),
+            "security_software",
+        )
+        self.assertEqual(
+            classify_item_type("Аккумуляторная батарея 26 Ач"),
+            "power_backup",
+        )
+        self.assertEqual(
+            classify_item_type("Герметик огнезащитный терморасширяющийся"),
+            "firestop_material",
+        )
+
     def test_classify_item_type_does_not_treat_ascii_ups_ports_as_iec_power_cable(self):
         self.assertNotEqual(
             classify_item_type("online ups 2000va input IEC-320-C20 output IEC-320-C13 IEC-320-C19"),
@@ -419,7 +445,7 @@ class CatalogSearchTests(unittest.TestCase):
     def test_classify_item_type_does_not_treat_firestop_items_as_rack(self):
         self.assertEqual(
             classify_item_type("Огнестойкая монтажная пена ОГНЕЗА EI240, 750 мл"),
-            "other",
+            "firestop_material",
         )
         self.assertEqual(
             classify_item_type("ОГНЕСТОЙКАЯ КАБЕЛЬНАЯ ЛИНИЯ"),

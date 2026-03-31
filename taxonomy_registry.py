@@ -228,6 +228,87 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
             "required_any_tokens": [["табло", "выход", "exit"], ["светов", "эвакуац", "аварийн"]],
         },
     },
+    "fire_alarm_device": {
+        "entity_types": ["fire_alarm_device"],
+        "default_branches": [
+            "извещатели пожарные",
+            "извещатели охранные",
+            "световой оповещатель",
+            "звуковой оповещатель",
+        ],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 63,
+            "positive_patterns": ["извещател", "оповещател"],
+            "negative_patterns": ["комплект", "креплен", "кроншт", "табло"],
+        },
+    },
+    "security_control_device": {
+        "entity_types": ["security_control_device"],
+        "default_branches": [
+            "приборы приёмно-контрольные для опс",
+            "дополнительное оборудование для пс",
+            "дополнительное оборудование систем оповещения",
+            "дополнительное оборудование для ос",
+        ],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 61,
+            "required_any_tokens": [
+                ["пульт", "блок", "модуль", "преобразователь", "устройство"],
+                ["контрол", "интерфейс", "сигнальн", "пуск", "коммутац", "линии связи", "адресн", "нагрузк", "изолир", "разветв"],
+            ],
+        },
+    },
+    "security_software": {
+        "entity_types": ["security_software"],
+        "default_branches": ["программное обеспечение опс"],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 66,
+            "positive_patterns": [
+                "орион про",
+                "программное обеспечение",
+                "генератор отчетов",
+                "администратор базы данных",
+                "по сервер",
+                "по мониторинга",
+            ],
+        },
+    },
+    "power_backup": {
+        "entity_types": ["power_backup"],
+        "default_branches": [
+            "аккумуляторы стационарные",
+            "аккумуляторы для автомобиля",
+            "дополнительное оборудование для ос",
+        ],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 59,
+            "positive_patterns": ["источник питания", "аккумулятор", "аккумуляторная батарея", "батарея"],
+        },
+    },
+    "firestop_material": {
+        "entity_types": ["firestop_material"],
+        "default_branches": ["защитные составы", "проходки огнестойкие"],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 60,
+            "positive_patterns": ["огнезащит", "герметик", "пена", "проходк", "огнестойк"],
+            "negative_patterns": ["кабельная линия", "коробка"],
+        },
+    },
     "ground_bar": {
         "entity_types": ["ground_bar"],
         "default_branches": ["телеком > аксессуары > заземление"],
@@ -614,7 +695,7 @@ DEFAULT_DOMAIN_REGISTRY: Dict[str, Any] = {
         },
         "software": {
             "patterns": ["программ", "лиценз", "software", "monitoring"],
-            "families": [],
+            "families": ["security_software"],
         },
         "monitoring_hw": {
             "patterns": ["камер", "видеокамер", "извещат", "датчик", "шкаф"],
@@ -647,6 +728,10 @@ DEFAULT_DOMAIN_REGISTRY: Dict[str, Any] = {
         "cable": {
             "patterns": ["кабель", "провод", "ввг", "кгв", "кипэ", "сгпм"],
             "families": ["cable", "wire", "coax", "bulk_twisted_pair", "iec_power_cable"],
+        },
+        "fire_alarm": {
+            "patterns": ["извещател", "оповещател", "опс", "орион про", "контрольно-пуск", "с2000", "пульт", "приемно-контрольн"],
+            "families": ["fire_alarm_device", "security_control_device", "security_software", "power_backup", "firestop_material"],
         },
     },
     "conflicts": [

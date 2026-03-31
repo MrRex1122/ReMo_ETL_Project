@@ -51,7 +51,7 @@ class QueryParserTests(unittest.TestCase):
         foam_spec = parse_query_spec("Огнестойкая монтажная пена ОГНЕЗА EI240, 750 мл", taxonomy_rules=self.rules)
         cabinet_spec = parse_query_spec("Шкаф контрольно-пусковой", taxonomy_rules=self.rules)
 
-        self.assertEqual(foam_spec.entity_type, "other")
+        self.assertEqual(foam_spec.entity_type, "firestop_material")
         self.assertEqual(cabinet_spec.entity_type, "other")
 
     def test_parse_query_spec_uses_other_subfamily_split_for_lighting_and_tray(self):
@@ -62,6 +62,19 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(lighting_spec.branch_hint, "свет > светильники")
         self.assertEqual(tray_spec.entity_type, "tray_sheet")
         self.assertTrue(tray_spec.branch_hint.startswith("листовые лотки"))
+
+    def test_parse_query_spec_uses_other_subfamily_split_for_fire_alarm_and_supporting_items(self):
+        detector = parse_query_spec("Извещатель пожарный дымовой адресный", taxonomy_rules=self.rules)
+        control = parse_query_spec("Блок сигнально-пусковой адресный", taxonomy_rules=self.rules)
+        software = parse_query_spec("ПО Сервер Орион Про", taxonomy_rules=self.rules)
+        battery = parse_query_spec("Аккумуляторная батарея 26 Ач", taxonomy_rules=self.rules)
+        firestop = parse_query_spec("Герметик огнезащитный терморасширяющийся", taxonomy_rules=self.rules)
+
+        self.assertEqual(detector.entity_type, "fire_alarm_device")
+        self.assertEqual(control.entity_type, "security_control_device")
+        self.assertEqual(software.entity_type, "security_software")
+        self.assertEqual(battery.entity_type, "power_backup")
+        self.assertEqual(firestop.entity_type, "firestop_material")
 
 
 if __name__ == "__main__":

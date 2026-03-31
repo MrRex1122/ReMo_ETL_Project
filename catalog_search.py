@@ -818,6 +818,11 @@ def derive_branch_from_text(
             "contactor_starter",
             "control_relay",
             "light_signage",
+            "fire_alarm_device",
+            "security_control_device",
+            "security_software",
+            "power_backup",
+            "firestop_material",
         }:
             return registry_defaults[0]
     if entity_type in {"pdu", "pdu_basic", "pdu_metered"}:

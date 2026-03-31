@@ -4647,8 +4647,7 @@ class ReMoMatcher:
     def _effective_candidate_family_for_query(self, query_features: Dict[str, Any], item: Dict[str, Any]) -> str:
         query_family = self._entity_family(query_features.get("entity_type", ""))
         candidate_family = self._entity_family(item.get("entity_type", ""))
-        if candidate_family in {"", "other"}:
-            candidate_family = self._infer_other_subfamily_for_item(item) or candidate_family
+        candidate_family = self._infer_other_subfamily_for_item(item) or candidate_family
         if query_family == "fastener":
             if candidate_family == "fastener":
                 return candidate_family
@@ -4707,6 +4706,40 @@ class ReMoMatcher:
             "табло" in search_text and any(token in search_text for token in ("светов", "эвакуац", "аварийн", "выход", "exit"))
         ):
             return "light_signage"
+        if any(token in branch_path for token in ("извещатели пожарные", "извещатели охранные", "световой оповещатель", "звуковой оповещатель")) or (
+            any(token in search_text for token in ("извещател", "оповещател")) and "табло" not in search_text
+        ):
+            return "fire_alarm_device"
+        if any(
+            token in branch_path
+            for token in (
+                "приборы приёмно-контрольные для опс",
+                "дополнительное оборудование для пс",
+                "дополнительное оборудование систем оповещения",
+                "дополнительное оборудование для ос",
+            )
+        ) or (
+            any(token in search_text for token in ("пульт", "блок", "модуль", "преобразователь", "устройство"))
+            and any(
+                token in search_text
+                for token in ("контрол", "интерфейс", "сигнальн", "пуск", "коммутац", "линии связи", "адресн", "нагрузк", "изолир", "разветв")
+            )
+        ):
+            return "security_control_device"
+        if "программное обеспечение опс" in branch_path or any(
+            token in search_text
+            for token in ("орион про", "программное обеспечение", "генератор отчетов", "администратор базы данных", "по сервер", "по мониторинга")
+        ):
+            return "security_software"
+        if any(token in branch_path for token in ("аккумуляторы стационарные", "аккумуляторы для автомобиля", "дополнительное оборудование для ос")) or any(
+            token in search_text for token in ("источник питания", "аккумулятор", "аккумуляторная батарея", "батарея")
+        ):
+            return "power_backup"
+        if any(token in branch_path for token in ("защитные составы", "проходки огнестойкие")) or (
+            any(token in search_text for token in ("огнезащит", "герметик", "пена", "проходк"))
+            and "коробка" not in search_text
+        ):
+            return "firestop_material"
         if (
             "листовые лотки" in branch_path
             or any(token in search_text for token in ("лоток", "крышк", "ответвител", "угол", "перегород", "ptce", "gto", "sep"))
@@ -4750,6 +4783,11 @@ class ReMoMatcher:
             "contactor_starter",
             "control_relay",
             "light_signage",
+            "fire_alarm_device",
+            "security_control_device",
+            "security_software",
+            "power_backup",
+            "firestop_material",
         }
 
     def _should_cap_rack_tray_whole_category_pool(self, query_features: Dict[str, Any]) -> bool:
