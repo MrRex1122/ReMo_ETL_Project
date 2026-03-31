@@ -187,6 +187,33 @@ class ProcessExcelExistingColumnsTests(unittest.TestCase):
         self.assertEqual(result_df.loc[0, "Найденная номенклатура"], "Номенклатура 1")
         self.assertTrue(pd.isna(result_df.loc[1, "Найденная номенклатура"]))
 
+    def test_process_excel_can_skip_runtime_diagnostics_payload_for_main_kp_runs(self):
+        df = pd.DataFrame(
+            {
+                "Наименование оборудования, материалов и кабелей": ["Позиция 1", "Позиция 2"],
+            }
+        )
+
+        fd, input_path = tempfile.mkstemp(suffix=".xlsx")
+        os.close(fd)
+        output_path = input_path.replace(".xlsx", "_out.xlsx")
+        try:
+            df.to_excel(input_path, index=False)
+            result_df, stats = self.matcher.process_excel(
+                input_path,
+                output_path,
+                build_runtime_diagnostics=False,
+            )
+        finally:
+            for path in (input_path, output_path):
+                if os.path.exists(path):
+                    os.unlink(path)
+
+        self.assertEqual(stats["total"], 2)
+        self.assertIsNone(self.matcher.last_match_diagnostics_payload)
+        self.assertEqual(self.matcher.last_match_diagnostics_rows, [])
+        self.assertEqual(result_df.loc[0, "Найденная номенклатура"], "Номенклатура 1")
+
     def test_process_excel_promotes_embedded_header_row_and_detects_article_column(self):
         self.matcher = ContextAwareDummyMatcher()
         df = pd.DataFrame(

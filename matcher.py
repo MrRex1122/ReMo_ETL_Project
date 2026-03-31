@@ -395,6 +395,9 @@ class ReMoMatcher:
         self.local_margin_threshold = get_matcher_local_margin_threshold()
         self.prompt_template = self._load_prompt_template()
         self.taxonomy_rules = self._load_taxonomy_rules()
+        self.runtime_diagnostics_enabled = True
+        self.last_match_diagnostics_rows: List[dict[str, Any]] = []
+        self.last_match_diagnostics_payload: Dict[str, Any] | None = None
 
         if GENAI_SDK_AVAILABLE:
             try:
@@ -6130,6 +6133,13 @@ class ReMoMatcher:
             or (query_features or {}).get("active_resolver_path")
             or self._resolver_path_for_source(resolver_source)
         )
+        result["stage_of_failure"] = stage_of_failure
+        result["reason_code"] = reason_code_value
+        result["reason_class"] = infer_reason_class(stage_of_failure, reason_code_value)
+        result["resolver_path"] = resolver_path
+        if not bool(getattr(self, "runtime_diagnostics_enabled", True)):
+            result.pop("diagnostic_trace", None)
+            return result
         diagnostic_trace = {
             "query_text": self._clean_text_value(query_text),
             "query_article": self._clean_text_value(query_article),
@@ -6169,10 +6179,6 @@ class ReMoMatcher:
             "gemini": gemini_payload,
             "trace_steps": trace_steps,
         }
-        result["stage_of_failure"] = diagnostic_trace["stage_of_failure"]
-        result["reason_code"] = diagnostic_trace["reason_code"]
-        result["reason_class"] = diagnostic_trace["reason_class"]
-        result["resolver_path"] = diagnostic_trace["resolver_path"]
         result["diagnostic_trace"] = diagnostic_trace
         return result
 
@@ -7079,6 +7085,14 @@ class ReMoMatcher:
                     "reason_code": effective_reason_code,
                 }
             )
+            if bool(getattr(self, "runtime_diagnostics_enabled", True)):
+                pipeline_counts = _build_pipeline_counts()
+                candidate_snapshots = _build_candidate_snapshots()
+                gemini_payload = _build_gemini_payload(result)
+            else:
+                pipeline_counts = {}
+                candidate_snapshots = {}
+                gemini_payload = {}
             return self._attach_diagnostic_trace(
                 result,
                 query_text=query_text or str(query or ""),
@@ -7090,9 +7104,9 @@ class ReMoMatcher:
                 stage_of_failure=stage_of_failure,
                 reason_code=effective_reason_code,
                 trace_steps=trace_steps_with_final,
-                pipeline_counts=_build_pipeline_counts(),
-                candidate_snapshots=_build_candidate_snapshots(),
-                gemini_payload=_build_gemini_payload(result),
+                pipeline_counts=pipeline_counts,
+                candidate_snapshots=candidate_snapshots,
+                gemini_payload=gemini_payload,
             )
 
         if query_article:
@@ -8063,8 +8077,11 @@ class ReMoMatcher:
         output_path: str | None = None,
         progress_callback: Callable[..., None] | None = None,
         cancel_requested: Callable[[], bool] | None = None,
+        build_runtime_diagnostics: bool = True,
     ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
         logger.info("Start processing Excel: %s", excel_path)
+        previous_runtime_diagnostics_enabled = bool(getattr(self, "runtime_diagnostics_enabled", True))
+        self.runtime_diagnostics_enabled = bool(build_runtime_diagnostics)
         if progress_callback is not None:
             progress_callback(stage="reading_excel", message="Чтение Excel-файла")
         df = pd.read_excel(excel_path)
@@ -8289,7 +8306,7 @@ class ReMoMatcher:
             df.at[idx, "Класс причины"] = reason_class
 
             trace = result.get("diagnostic_trace")
-            if isinstance(trace, dict):
+            if build_runtime_diagnostics and isinstance(trace, dict):
                 trace_row = dict(trace)
                 trace_row["run_row_number"] = int(idx) + 2
                 diagnostic_rows.append(trace_row)
@@ -8327,14 +8344,19 @@ class ReMoMatcher:
         df = self._apply_kp_cost_columns(df)
 
         if cancel_requested is not None and cancel_requested():
-            self.last_match_diagnostics_rows = diagnostic_rows
-            self.last_match_diagnostics_payload = build_match_diagnostics_payload(
-                diagnostic_rows,
-                run_id=str(Path(excel_path).stem),
-            )
+            if build_runtime_diagnostics:
+                self.last_match_diagnostics_rows = diagnostic_rows
+                self.last_match_diagnostics_payload = build_match_diagnostics_payload(
+                    diagnostic_rows,
+                    run_id=str(Path(excel_path).stem),
+                )
+            else:
+                self.last_match_diagnostics_rows = []
+                self.last_match_diagnostics_payload = None
             stats["_interrupted"] = True
             stats["processed"] = processed_count
             logger.info("Result processing interrupted before final save: processed=%s total=%s", processed_count, len(tasks))
+            self.runtime_diagnostics_enabled = previous_runtime_diagnostics_enabled
             return df, stats
 
         if output_path is None:
@@ -8349,11 +8371,17 @@ class ReMoMatcher:
                 message="Сохранение итогового Excel-файла",
             )
         df.to_excel(output_path, index=False)
-        self.last_match_diagnostics_rows = diagnostic_rows
-        self.last_match_diagnostics_payload = build_match_diagnostics_payload(
-            diagnostic_rows,
-            run_id=str(Path(excel_path).stem),
-        )
+        if build_runtime_diagnostics:
+            self.last_match_diagnostics_rows = diagnostic_rows
+            self.last_match_diagnostics_payload = build_match_diagnostics_payload(
+                diagnostic_rows,
+                run_id=str(Path(excel_path).stem),
+            )
+        else:
+            self.last_match_diagnostics_rows = []
+            self.last_match_diagnostics_payload = None
+            logger.info("Runtime diagnostics payload skipped for main KP run: source=%s", excel_path)
+        self.runtime_diagnostics_enabled = previous_runtime_diagnostics_enabled
         logger.info("Result saved: %s", output_path)
         return df, stats
 

@@ -529,6 +529,7 @@ def _run_processing_job(run_id: str, matcher_settings: dict[str, Any]) -> None:
             output_path=str(artifacts.result_xlsx_path),
             progress_callback=_progress_callback,
             cancel_requested=_is_cancel_requested,
+            build_runtime_diagnostics=False,
         )
 
         if bool(stats.get("_interrupted")) or _is_cancel_requested():

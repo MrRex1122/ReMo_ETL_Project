@@ -107,6 +107,7 @@ class AppUiRegressionTests(unittest.TestCase):
         app_source = Path("app.py").read_text(encoding="utf-8")
         self.assertIn('stats["diagnostics_mode"] = "lite"', app_source)
         self.assertIn('stats["runtime_diagnostics_saved"] = False', app_source)
+        self.assertIn("build_runtime_diagnostics=False", app_source)
         self.assertIn("runtime-диагностика не сохранялась автоматически", app_source)
 
 
