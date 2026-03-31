@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, Dict, Mapping, Tuple
 
 from catalog_search import (
+    _looks_like_cable_channel_box,
     clean_text_value,
     classify_item_type,
     derive_branch_from_text,
@@ -217,6 +218,8 @@ def extract_cable_designation_signature(text: str, *, synonyms: Mapping[str, str
     if not cleaned_text:
         return {}
     normalized = cleaned_text.lower().replace("ё", "е")
+    if _looks_like_cable_channel_box(normalized):
+        return {}
     normalized = re.sub(
         r"\b(?:кабель|провод|артикул|арт\.?|sku|part\s*number|partnumber|vendor\s*code)\b",
         " ",
@@ -282,6 +285,12 @@ def parse_query_spec(query: str, *, taxonomy_rules: Mapping[str, Any] | None = N
             or entity_family in {"", "other"} and registry_confidence >= 0.72
             or entity_family in {"cable", "wire", "coax", "rack", "sensor"} and registry_confidence >= 0.62
         )
+        if (
+            clean_text_value(markers.get("installation_kind")) == "cable_channel"
+            and entity_family == "cable"
+            and registry_family != "cable"
+        ):
+            should_apply_registry = False
         if should_apply_registry:
             entity_type = registry_entity_type
             entity_family = registry_family

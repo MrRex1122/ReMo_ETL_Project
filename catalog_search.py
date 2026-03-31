@@ -462,6 +462,8 @@ _GENERIC_CABLE_DESIGNATION_TOKENS = {
 def _extract_cable_designation_family(normalized: str) -> str:
     if not normalized:
         return ""
+    if _looks_like_cable_channel_box(normalized):
+        return ""
 
     dimension_match = re.search(
         r"(\d+(?:[.,]\d+)?)\s*[x\u0445\u00d7*/]\s*(\d+(?:[.,]\d+)?)(?:\s*[x\u0445\u00d7*/]\s*(\d+(?:[.,]\d+)?))?",
@@ -671,6 +673,41 @@ def _looks_like_rj45_outlet(normalized: str) -> bool:
     return any(marker in normalized for marker in outlet_markers)
 
 
+def _looks_like_cable_channel_box(
+    normalized: str,
+    *,
+    extracted_markers: Mapping[str, Any] | None = None,
+) -> bool:
+    if not normalized:
+        return False
+    if "коробка" in normalized or "лючок" in normalized:
+        return False
+    has_channel_phrase = (
+        "кабель канал" in normalized
+        or "кабель-канал" in normalized
+        or re.search(r"\bкороб\b", normalized, flags=re.IGNORECASE) is not None
+    )
+    if not has_channel_phrase:
+        return False
+    has_dimensions = bool(
+        re.search(
+            r"\b\d+(?:[.,]\d+)?\s*[xх×]\s*\d+(?:[.,]\d+)?(?:\s*[xх×]\s*\d+(?:[.,]\d+)?)?\b",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+    )
+    markers = extracted_markers or {}
+    has_length = bool(
+        clean_text_value(markers.get("length_m"))
+        or re.search(r"\b\d+(?:[.,]\d+)?\s*м\b", normalized, flags=re.IGNORECASE)
+    )
+    if not has_dimensions:
+        return False
+    if "кабель канал" in normalized or "кабель-канал" in normalized:
+        return True
+    return ("крышк" in normalized and has_length) or ("канал" in normalized and has_length)
+
+
 def classify_item_type(
     text: str,
     synonyms: Mapping[str, str] | None = None,
@@ -733,6 +770,8 @@ def classify_item_type(
         return "rj45_connector"
     if _looks_like_rj45_outlet(normalized):
         return "rj45_outlet"
+    if _looks_like_cable_channel_box(normalized, extracted_markers=extracted_markers):
+        return "cable"
     if "лючок" in normalized or ("напольн" in normalized and "короб" in normalized):
         return "floor_box"
     if "щеточ" in normalized:
@@ -858,6 +897,8 @@ def derive_branch_from_text(
     if entity_type == "socket":
         return "электрика > розетки"
     if entity_type in {"cable", "bulk_twisted_pair", "coax", "iec_power_cable"}:
+        if _looks_like_cable_channel_box(merged):
+            return "электрика > кабели > кабель-каналы"
         if "cat6" in merged:
             return "телеком > кабели > витая пара > cat6"
         if "cat5e" in merged:
@@ -1025,6 +1066,8 @@ def extract_item_markers(
         markers["installation_kind"] = "floor_box"
     elif re.search(r"\brj[\s-]?45\b", normalized, flags=re.IGNORECASE) and "розетк" in normalized:
         markers["installation_kind"] = "outlet_module"
+    elif _looks_like_cable_channel_box(normalized, extracted_markers=markers):
+        markers["installation_kind"] = "cable_channel"
 
     if "адаптер" in normalized:
         markers["component_kind"] = "adapter"

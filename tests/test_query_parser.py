@@ -54,6 +54,17 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(foam_spec.entity_type, "firestop_material")
         self.assertEqual(cabinet_spec.entity_type, "other")
 
+    def test_parse_query_spec_detects_cable_channel_box_query(self):
+        spec = parse_query_spec("Короб с крышкой 80x40 (3 м.)", taxonomy_rules=self.rules)
+
+        self.assertEqual(spec.entity_type, "cable")
+        self.assertEqual(spec.branch_hint, "электрика > кабели > кабель-каналы")
+        self.assertEqual(spec.markers.get("installation_kind"), "cable_channel")
+        self.assertEqual(spec.markers.get("length_m"), "3")
+        self.assertNotIn("designation_family", spec.markers)
+        self.assertEqual(spec.designation_signature, "")
+        self.assertIn("40x80", spec.dimension_pairs)
+
     def test_parse_query_spec_uses_other_subfamily_split_for_lighting_and_tray(self):
         lighting_spec = parse_query_spec("Светильник светодиодный аварийный 595x595", taxonomy_rules=self.rules)
         tray_spec = parse_query_spec("Лоток листовой перфорированный 200х50", taxonomy_rules=self.rules)

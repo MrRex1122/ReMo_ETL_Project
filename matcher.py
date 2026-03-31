@@ -31,6 +31,7 @@ from catalog_search import (
     DUCKDB_AVAILABLE as SEARCH_DUCKDB_AVAILABLE,
     SEARCH_CATALOG_FILENAME,
     SEARCH_CATALOG_TABLE,
+    _looks_like_cable_channel_box as shared_looks_like_cable_channel_box,
     clean_text_value as shared_clean_text_value,
     classify_item_type as shared_classify_item_type,
     derive_branch_from_text as shared_derive_branch_from_text,
@@ -2627,6 +2628,8 @@ class ReMoMatcher:
         if not cleaned_text:
             return {}
         normalized = cleaned_text.lower().replace("ё", "е")
+        if shared_looks_like_cable_channel_box(normalized):
+            return {}
         normalized = re.sub(
             r"\b(?:кабель|провод|артикул|арт\.?|sku|part\s*number|partnumber|vendor\s*code)\b",
             " ",

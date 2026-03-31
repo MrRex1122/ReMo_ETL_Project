@@ -452,6 +452,18 @@ class CatalogSearchTests(unittest.TestCase):
             "cable",
         )
 
+    def test_classify_item_type_detects_cable_channel_box_rows(self):
+        query = "Короб с крышкой 80x40 (3 м.)"
+        markers = extract_item_markers(query)
+
+        self.assertEqual(classify_item_type(query), "cable")
+        self.assertEqual(markers.get("installation_kind"), "cable_channel")
+        self.assertEqual(markers.get("length_m"), "3")
+        self.assertEqual(
+            derive_branch_from_text(query),
+            "электрика > кабели > кабель-каналы",
+        )
+
     def test_derive_branch_from_text_skips_telecom_rack_for_control_cabinet(self):
         self.assertEqual(
             derive_branch_from_text("Шкаф контрольно-пусковой"),

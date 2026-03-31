@@ -1571,6 +1571,14 @@ class MatchTaxonomyTests(unittest.TestCase):
             "box_vs_frame_mismatch",
         )
 
+    def test_cable_channel_box_query_extracts_cable_channel_features(self):
+        features = self.matcher._extract_query_features("Короб с крышкой 80x40 (3 м.)")
+
+        self.assertEqual(features.get("entity_type"), "cable")
+        self.assertEqual(features.get("markers", {}).get("installation_kind"), "cable_channel")
+        self.assertEqual(features.get("branch_hint"), "электрика > кабели > кабель-каналы")
+        self.assertEqual(self.matcher._extract_cable_designation_signature("Короб с крышкой 80x40 (3 м.)"), {})
+
     def test_hard_incompatibility_rejects_cabinet_to_block_pair(self):
         features = self.matcher._extract_query_features("Шкаф контрольно-пусковой")
         item = {
