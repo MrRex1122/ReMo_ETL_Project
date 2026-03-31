@@ -95,6 +95,7 @@ class AppUiRegressionTests(unittest.TestCase):
         self.assertIn("Полная таблица доступна во вкладке «Debug / Admin».", app_source)
         self.assertIn("show_corrections_table(df, visible_columns=list(_build_main_kp_result_df(df).columns))", app_source)
         self.assertIn("main_result_df = _build_main_kp_result_df(df)", app_source)
+        self.assertIn('if "Найденная номенклатура" in visible_columns:', app_source)
 
     def test_debug_tab_exposes_full_result_downloads(self):
         app_source = Path("app.py").read_text(encoding="utf-8")

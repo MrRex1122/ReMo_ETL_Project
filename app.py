@@ -1966,6 +1966,9 @@ def _build_main_kp_result_df(df: pd.DataFrame) -> pd.DataFrame:
     if any(_looks_like_material_unit_cost_column(column) for column in df.columns):
         hidden_columns.add("Цена")
     visible_columns = [column for column in df.columns if column not in hidden_columns]
+    if "Найденная номенклатура" in visible_columns:
+        cutoff_index = visible_columns.index("Найденная номенклатура")
+        visible_columns = visible_columns[: cutoff_index + 1]
     return df.loc[:, visible_columns].copy()
 
 
