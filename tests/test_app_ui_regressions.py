@@ -103,6 +103,12 @@ class AppUiRegressionTests(unittest.TestCase):
         self.assertIn("download_full_result_excel_", app_source)
         self.assertIn("download_full_result_csv_", app_source)
 
+    def test_main_run_uses_lite_diagnostics_and_debug_mentions_reconstruction(self):
+        app_source = Path("app.py").read_text(encoding="utf-8")
+        self.assertIn('stats["diagnostics_mode"] = "lite"', app_source)
+        self.assertIn('stats["runtime_diagnostics_saved"] = False', app_source)
+        self.assertIn("runtime-диагностика не сохранялась автоматически", app_source)
+
 
 if __name__ == "__main__":
     unittest.main()

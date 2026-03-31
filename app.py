@@ -28,9 +28,6 @@ from catalog_coverage_audit import (
     prepare_catalog_gap_reason_table,
 )
 from match_diagnostics import (
-    apply_match_diagnostics_summary_to_stats,
-    apply_match_diagnostics_to_result_dataframe,
-    build_match_diagnostics_payload,
     enrich_match_diagnostics_payload,
     is_match_diagnostics_fresh,
     prepare_match_diagnostics_reason_table,
@@ -553,32 +550,16 @@ def _run_processing_job(run_id: str, matcher_settings: dict[str, Any]) -> None:
             logger.info("🛑 Processing run interrupted by user: %s processed=%s total=%s", run_id, partial_processed, partial_total)
             return
 
-        diagnostics_rows = getattr(matcher, "last_match_diagnostics_rows", None)
         write_processing_run_progress(
             run_id,
             stage="saving_results",
             current=int(stats.get("total", len(df_result))),
             total=int(stats.get("total", len(df_result))),
             percent=0.98,
-            message="Сохранение результатов и runtime-диагностики",
+            message="Сохранение результатов",
         )
-        diagnostics_payload = None
-        try:
-            if isinstance(diagnostics_rows, list):
-                diagnostics_payload = build_match_diagnostics_payload(
-                    diagnostics_rows,
-                    run_id=run_id,
-                )
-            else:
-                diagnostics_payload = reconstruct_match_diagnostics(
-                    df_result,
-                    run_id=run_id,
-                )
-            write_processing_run_match_diagnostics(run_id, diagnostics_payload)
-            apply_match_diagnostics_to_result_dataframe(df_result, diagnostics_payload)
-            stats = apply_match_diagnostics_summary_to_stats(stats, diagnostics_payload)
-        except Exception:
-            logger.exception("Failed to build or apply diagnostics for run %s", run_id)
+        stats["diagnostics_mode"] = "lite"
+        stats["runtime_diagnostics_saved"] = False
 
         try:
             _build_main_kp_result_df(df_result).to_excel(artifacts.result_xlsx_path, index=False, engine="openpyxl")
@@ -2101,6 +2082,8 @@ def _render_debug_run_section(run) -> None:
 
     st.caption(f"Открыт прогон: `{run.run_id}`")
     show_statistics(stats, include_debug_details=True)
+    if str(stats.get("diagnostics_mode") or "").strip().lower() == "lite":
+        st.caption("Для ускорения обычного КП-прогона runtime-диагностика не сохранялась автоматически. Во вкладке Debug она достраивается по запросу.")
     with st.expander("Полная таблица результата", expanded=False):
         st.caption("Здесь доступен полный результат прогона со всеми техническими полями. На главной вкладке показывается облегченная КП-версия.")
         full_download_col1, full_download_col2 = st.columns(2)
