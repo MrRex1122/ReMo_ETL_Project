@@ -57,7 +57,14 @@ class ProfileOtherCatalogTests(unittest.TestCase):
             frame = pd.DataFrame(rows, columns=SEARCH_BASE_COLUMNS + SEARCH_DERIVED_COLUMNS)
             frame.to_csv(source_path, sep=";", encoding="utf-8", index=False)
 
-            result_dir = analyze_other_catalog(source_path, output_dir=output_dir, sample_size=10, seed=7, chunksize=10)
+            result_dir = analyze_other_catalog(
+                source_path,
+                output_dir=output_dir,
+                sample_size=10,
+                seed=7,
+                chunksize=10,
+                verbose=False,
+            )
 
             self.assertEqual(result_dir, output_dir)
             self.assertTrue((output_dir / "other_sample_random.csv").exists())

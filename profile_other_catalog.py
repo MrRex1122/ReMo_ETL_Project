@@ -7,6 +7,7 @@ import random
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
+import time
 from typing import Any, Dict, Iterable, Iterator, List, Mapping
 
 import pandas as pd
@@ -35,6 +36,11 @@ PROJECTED_PROFILE_COLUMNS = {
     "search_effective_entity_type",
     "search_item_markers_json",
 }
+
+
+def _emit(message: str, *, verbose: bool) -> None:
+    if verbose:
+        print(message, flush=True)
 
 
 def _iter_catalog_rows(source_path: Path, *, chunksize: int) -> Iterator[Dict[str, Any]]:
@@ -131,11 +137,19 @@ def analyze_other_catalog(
     sample_size: int = 100,
     seed: int = 42,
     chunksize: int = 50000,
+    progress_every: int = 50000,
+    verbose: bool = True,
 ) -> Path:
     source = Path(source_path)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     target_dir = Path(output_dir) if output_dir else Path("batch_output") / "other_profiling" / timestamp
     target_dir.mkdir(parents=True, exist_ok=True)
+
+    start_ts = time.perf_counter()
+    _emit(
+        f"[other-profiler] start source={source} output={target_dir} sample_size={sample_size} chunksize={chunksize} seed={seed}",
+        verbose=verbose,
+    )
 
     taxonomy_rules = load_search_taxonomy_rules()
     rng = random.Random(seed)
@@ -154,6 +168,13 @@ def analyze_other_catalog(
         projected = _project_row(raw_row, taxonomy_rules)
         effective_family = clean_text_value(projected.get("search_effective_family")).lower()
         if effective_family != "other":
+            if progress_every > 0 and total_rows % progress_every == 0:
+                elapsed = max(time.perf_counter() - start_ts, 0.001)
+                rows_per_second = round(total_rows / elapsed, 1)
+                _emit(
+                    f"[other-profiler] progress rows={total_rows} other_rows={other_rows} sample={len(sample_rows)} rate={rows_per_second} rows/s",
+                    verbose=verbose,
+                )
             continue
 
         other_rows += 1
@@ -194,6 +215,14 @@ def analyze_other_catalog(
             rng,
         )
 
+        if progress_every > 0 and total_rows % progress_every == 0:
+            elapsed = max(time.perf_counter() - start_ts, 0.001)
+            rows_per_second = round(total_rows / elapsed, 1)
+            _emit(
+                f"[other-profiler] progress rows={total_rows} other_rows={other_rows} sample={len(sample_rows)} rate={rows_per_second} rows/s",
+                verbose=verbose,
+            )
+
     sample_frame = pd.DataFrame(sample_rows)
     if not sample_frame.empty:
         sample_frame.sort_values(
@@ -231,6 +260,7 @@ def analyze_other_catalog(
 
     summary_lines = [
         f"source={source}",
+        f"output_dir={target_dir}",
         f"total_rows={total_rows}",
         f"other_rows={other_rows}",
         f"other_share={round((other_rows / total_rows) * 100, 2) if total_rows else 0.0}",
@@ -238,6 +268,17 @@ def analyze_other_catalog(
         f"seed={seed}",
     ]
     (target_dir / "summary.txt").write_text("\n".join(summary_lines) + "\n", encoding="utf-8")
+    elapsed = max(time.perf_counter() - start_ts, 0.001)
+    rows_per_second = round(total_rows / elapsed, 1)
+    other_share = round((other_rows / total_rows) * 100, 2) if total_rows else 0.0
+    _emit(
+        f"[other-profiler] done rows={total_rows} other_rows={other_rows} other_share={other_share}% elapsed_s={round(elapsed, 1)} rate={rows_per_second} rows/s",
+        verbose=verbose,
+    )
+    _emit(
+        f"[other-profiler] files: other_sample_random.csv, other_branch_summary.csv, other_class_summary.csv, other_item_type_summary.csv, other_manufacturer_summary.csv, other_token_summary.csv, summary.txt",
+        verbose=verbose,
+    )
     return target_dir
 
 
@@ -247,7 +288,9 @@ def main() -> None:
     parser.add_argument("--sample-size", type=int, default=100, help="Reservoir sample size for other rows")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducible sampling")
     parser.add_argument("--chunksize", type=int, default=50000, help="Chunk size for reading large catalogs")
+    parser.add_argument("--progress-every", type=int, default=50000, help="Print progress every N processed rows")
     parser.add_argument("--output-dir", default="", help="Optional output directory")
+    parser.add_argument("--quiet", action="store_true", help="Disable progress logs and print only the output path")
     args = parser.parse_args()
 
     output_dir = analyze_other_catalog(
@@ -256,6 +299,8 @@ def main() -> None:
         sample_size=max(1, int(args.sample_size)),
         seed=int(args.seed),
         chunksize=max(1000, int(args.chunksize)),
+        progress_every=max(1000, int(args.progress_every)),
+        verbose=not bool(args.quiet),
     )
     print(output_dir)
 
