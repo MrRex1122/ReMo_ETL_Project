@@ -826,16 +826,137 @@ def classify_item_type(
     return registry_entity_type or "other"
 
 
+def _has_strong_security_domain_signal(normalized_text: str) -> bool:
+    normalized = normalize_text(normalized_text)
+    if not normalized:
+        return False
+    if re.search(r"\b(?:опс|пс|bolid|s2000)\b", normalized, flags=re.IGNORECASE):
+        return True
+    return any(
+        token in normalized
+        for token in (
+            "пожар",
+            "охран",
+            "сигнализац",
+            "извещат",
+            "оповещат",
+            "пожаротуш",
+            "адресн",
+            "орион",
+            "с2000",
+            "болид",
+        )
+    )
+
+
+def _normalize_catalog_effective_entity_type(
+    *,
+    raw_entity_type: str,
+    candidate_entity_type: str,
+    normalized_text: str,
+    rules: Mapping[str, Any],
+) -> str:
+    candidate_family = entity_family_for_type(candidate_entity_type, rules)
+    raw_family = entity_family_for_type(raw_entity_type, rules)
+    if candidate_family not in {
+        "security_interface_device",
+        "security_control_panel",
+        "security_module_device",
+        "security_control_device",
+    }:
+        return candidate_entity_type
+    if _has_strong_security_domain_signal(normalized_text):
+        return candidate_entity_type
+
+    if candidate_family == "security_interface_device" and any(
+        token in normalized_text for token in ("кабел", "провод", "шнур", "витая пара")
+    ):
+        if raw_family == "wire":
+            return "wire"
+        if raw_family == "bulk_twisted_pair":
+            return "bulk_twisted_pair"
+        return "cable"
+
+    if candidate_family in {"security_control_panel", "security_module_device", "security_control_device"}:
+        if "плавн" in normalized_text and "пуск" in normalized_text:
+            return "soft_starter"
+        if any(
+            token in normalized_text
+            for token in (
+                "авр",
+                "автоматический ввод резерва",
+                "выключатель нагрузки",
+                "выключатель разъединитель",
+                "рубильник",
+                "узо",
+            )
+        ):
+            return "breaker"
+        if any(token in normalized_text for token in ("кабел", "провод", "шнур")):
+            if raw_family == "wire":
+                return "wire"
+            return "cable"
+        if any(
+            token in normalized_text
+            for token in ("knx", "освещен", "светодиодн", "драйвер", "диммер", "котел", "кранов")
+        ):
+            return "other"
+        if raw_family and raw_family not in {
+            "security_interface_device",
+            "security_control_panel",
+            "security_module_device",
+            "security_control_device",
+            "other",
+        }:
+            return raw_entity_type
+        return "other"
+
+    return candidate_entity_type
+
+
 def derive_branch_from_text(
     *texts: str,
     keyword_routes: list[dict[str, Any]] | None = None,
     synonyms: Mapping[str, str] | None = None,
     taxonomy_rules: Mapping[str, Any] | None = None,
+    catalog_row_mode: bool = False,
 ) -> str:
     rules = taxonomy_rules if taxonomy_rules is not None else load_registry_taxonomy_rules()
     merged = normalize_text(" ".join(filter(None, texts)), synonyms=synonyms)
     if not merged:
         return "прочее"
+
+    entity_type = classify_item_type(merged, synonyms=synonyms, taxonomy_rules=rules)
+    effective_entity_type = entity_type
+    effective_family = entity_family_for_type(effective_entity_type, rules)
+    if catalog_row_mode:
+        extracted_markers = extract_item_markers(
+            merged,
+            attribute_patterns=rules.get("attribute_patterns", {}),
+            synonyms=synonyms,
+        )
+        registry_match = classify_entity_type_from_registry(merged, rules=rules, markers=extracted_markers)
+        effective_entity_type = clean_text_value((registry_match or {}).get("entity_type")) or entity_type
+        effective_entity_type = _normalize_catalog_effective_entity_type(
+            raw_entity_type=entity_type,
+            candidate_entity_type=effective_entity_type,
+            normalized_text=merged,
+            rules=rules,
+        )
+        effective_family = entity_family_for_type(effective_entity_type, rules)
+
+    if catalog_row_mode:
+        registry_defaults = registry_family_default_branches(effective_entity_type, rules, branch_hint="")
+        if registry_defaults and registry_defaults[0] != "прочее":
+            if effective_family in {"fire_detector", "fire_annunciator"}:
+                return registry_defaults[0]
+            if effective_family in {
+                "security_interface_device",
+                "security_control_panel",
+                "security_module_device",
+                "security_control_device",
+            } and _has_strong_security_domain_signal(merged):
+                return registry_defaults[0]
 
     ranked_rules = sorted(
         keyword_routes or DEFAULT_KEYWORD_ROUTES,
@@ -850,10 +971,9 @@ def derive_branch_from_text(
                 continue
             return branch_path
 
-    entity_type = classify_item_type(merged, synonyms=synonyms, taxonomy_rules=rules)
-    registry_defaults = registry_family_default_branches(entity_type, rules, branch_hint="")
+    registry_defaults = registry_family_default_branches(effective_entity_type, rules, branch_hint="")
     if registry_defaults and registry_defaults[0] != "прочее":
-        registry_family = entity_family_for_type(entity_type, rules)
+        registry_family = effective_family
         if registry_family == "box":
             if "установоч" in merged:
                 return "коробки установочные"
@@ -921,39 +1041,39 @@ def derive_branch_from_text(
             "switch_wiring",
         }:
             return registry_defaults[0]
-    if entity_type in {"pdu", "pdu_basic", "pdu_metered"}:
+    if effective_entity_type in {"pdu", "pdu_basic", "pdu_metered"}:
         if "zero u" in merged:
             return "телеком > питание > pdu > zero u"
         return "телеком > питание > pdu"
-    if entity_type == "ats_sts":
+    if effective_entity_type == "ats_sts":
         return "телеком > питание > ats"
-    if entity_type == "airflow_blanking_panel":
+    if effective_entity_type == "airflow_blanking_panel":
         return "телеком > аксессуары > шкафные аксессуары > заглушки"
-    if entity_type == "patch_panel":
+    if effective_entity_type == "patch_panel":
         return "телеком > коммутация > патч панели"
-    if entity_type == "optical_cross":
+    if effective_entity_type == "optical_cross":
         return "телеком > оптика > кроссы"
-    if entity_type == "optical_patch_cord":
+    if effective_entity_type == "optical_patch_cord":
         return "телеком > кабели > оптические патч корды"
-    if entity_type == "patch_cord":
+    if effective_entity_type == "patch_cord":
         return "телеком > кабели > патч корды"
-    if entity_type in {"keystone_module", "keystone_adapter", "rj45_connector", "rj45_outlet"}:
+    if effective_entity_type in {"keystone_module", "keystone_adapter", "rj45_connector", "rj45_outlet"}:
         return "телеком > коммутация > модули"
-    if entity_type == "rack":
+    if effective_entity_type == "rack":
         return "телеком > шкафы"
-    if entity_type in {"temperature_sensor", "temperature_humidity_sensor", "reed_sensor", "sensor"}:
+    if effective_entity_type in {"temperature_sensor", "temperature_humidity_sensor", "reed_sensor", "sensor"}:
         return "автоматика > датчики"
-    if entity_type in {"rack_blank_panel", "rack_brush_panel", "rack_shelf", "rack_rail"}:
+    if effective_entity_type in {"rack_blank_panel", "rack_brush_panel", "rack_shelf", "rack_rail"}:
         return "телеком > аксессуары > шкафные аксессуары"
-    if entity_type == "floor_box":
+    if effective_entity_type == "floor_box":
         return "телеком > аксессуары > лючки"
-    if entity_type == "ground_bar":
+    if effective_entity_type == "ground_bar":
         return "телеком > аксессуары > заземление"
-    if entity_type == "breaker":
+    if effective_entity_type == "breaker":
         return "электрика > автоматы"
-    if entity_type == "socket":
+    if effective_entity_type == "socket":
         return "электрика > розетки"
-    if entity_type in {"cable", "bulk_twisted_pair", "coax", "iec_power_cable"}:
+    if effective_entity_type in {"cable", "bulk_twisted_pair", "coax", "iec_power_cable"}:
         if _looks_like_cable_channel_box(merged):
             return "электрика > кабели > кабель-каналы"
         if "cat6" in merged:
@@ -963,7 +1083,7 @@ def derive_branch_from_text(
         if "силов" in merged:
             return "электрика > кабели > силовые"
         return "электрика > кабели"
-    if entity_type == "wire":
+    if effective_entity_type == "wire":
         return "электрика > провода"
     if "светильник" in merged:
         return "свет > светильники"
@@ -1006,6 +1126,7 @@ def normalize_catalog_branch_from_row(
         keyword_routes=list(rules.get("keyword_routes", DEFAULT_KEYWORD_ROUTES)),
         synonyms=synonyms,
         taxonomy_rules=rules,
+        catalog_row_mode=True,
     )
     if derived != "прочее":
         return derived
@@ -1213,6 +1334,12 @@ def build_search_projection_row(
         markers=item_markers,
     )
     effective_entity_type = clean_text_value((registry_match or {}).get("entity_type")) or entity_type
+    effective_entity_type = _normalize_catalog_effective_entity_type(
+        raw_entity_type=entity_type,
+        candidate_entity_type=effective_entity_type,
+        normalized_text=normalize_text(combined_text, synonyms=synonyms),
+        rules=rules,
+    )
     effective_family = entity_family_for_type(effective_entity_type or entity_type, rules)
 
     projected = {column: row.get(column, "") for column in SEARCH_BASE_COLUMNS}

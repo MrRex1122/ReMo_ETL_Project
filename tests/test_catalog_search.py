@@ -292,6 +292,42 @@ class CatalogSearchTests(unittest.TestCase):
             "firestop_material",
         )
 
+    def test_build_search_catalog_cleans_ops_branch_and_family_contamination(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;Тип исполнения кабельного изделия;Производитель\n"
+                    "Извещатель пожарный тепловой адресный без кабельных вводов;DET-1;10;Извещатели Пожарные;CLS-1;Извещатель пожарный;;ReMo\n"
+                    "Кабель интерфейсный RS-485 2х2х0,75;IFC-1;10;Кабели Интерфейсные;CLS-2;Кабель интерфейса;;ReMo\n"
+                    "Устройство плавного пуска 15кВт со съемным пультом управления;SS-1;10;Устройства Плавного Пуска;CLS-3;Устройство плавного пуска;;ReMo\n"
+                    "Блок управления внешний АВР-ATSE1-100R100/3F 100А;AVR-1;10;Моноблочные АВР На Базе Ва;CLS-4;Автоматический ввод резерва (АВР);;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+
+            detector = built.loc[built["Артикул"] == "DET-1"].iloc[0]
+            interface_cable = built.loc[built["Артикул"] == "IFC-1"].iloc[0]
+            soft_starter = built.loc[built["Артикул"] == "SS-1"].iloc[0]
+            avr = built.loc[built["Артикул"] == "AVR-1"].iloc[0]
+
+            self.assertEqual(detector["search_branch_path"], "извещатели пожарные")
+            self.assertEqual(detector["search_effective_family"], "fire_detector")
+
+            self.assertEqual(interface_cable["search_branch_path"], "электрика > кабели")
+            self.assertEqual(interface_cable["search_effective_family"], "cable")
+            self.assertEqual(interface_cable["search_effective_entity_type"], "cable")
+
+            self.assertEqual(soft_starter["search_effective_family"], "soft_starter")
+            self.assertEqual(soft_starter["search_effective_entity_type"], "soft_starter")
+
+            self.assertEqual(avr["search_effective_family"], "breaker")
+            self.assertEqual(avr["search_effective_entity_type"], "breaker")
+
     def test_classify_item_type_does_not_treat_ascii_ups_ports_as_iec_power_cable(self):
         self.assertNotEqual(
             classify_item_type("online ups 2000va input IEC-320-C20 output IEC-320-C13 IEC-320-C19"),
