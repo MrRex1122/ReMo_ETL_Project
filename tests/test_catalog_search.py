@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 import unittest
@@ -14,6 +15,8 @@ from catalog_search import (
     derive_branch_from_text,
     extract_item_markers,
     get_search_catalog_path,
+    get_search_taxonomy_branch_summary_path,
+    get_search_taxonomy_tree_path,
     get_search_catalog_csv_path,
     get_search_catalog_duckdb_path,
     get_search_catalog_readiness,
@@ -491,6 +494,37 @@ class CatalogSearchTests(unittest.TestCase):
             derive_branch_from_text("Рамка 2-местная белая"),
             "рамки",
         )
+
+    def test_build_search_catalog_writes_taxonomy_snapshot_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Коробка монтажная огнестойкая;BOX-1;120;Коробки распределительные наружные;CLS-1;Коробка;;ReMo\n"
+                    "Рамка 2-местная белая;FRAME-1;80;Рамки;CLS-2;Рамка;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            tree_path = get_search_taxonomy_tree_path(root)
+            branch_summary_path = get_search_taxonomy_branch_summary_path(root)
+
+            self.assertTrue(tree_path.exists())
+            self.assertTrue(branch_summary_path.exists())
+
+            snapshot = json.loads(tree_path.read_text(encoding="utf-8"))
+            self.assertEqual(snapshot["catalog_stats"]["rows_total"], 2)
+            self.assertIn("box", snapshot["families"])
+            self.assertIn("switch_wiring", snapshot["families"])
+            self.assertIn("рамки", snapshot["branches"])
+
+            branch_df = pd.read_csv(branch_summary_path, sep=";", encoding="utf-8")
+            self.assertIn("box", set(branch_df["effective_family"]))
+            self.assertIn("switch_wiring", set(branch_df["effective_family"]))
 
     def test_build_search_catalog_can_write_csv_explicitly(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

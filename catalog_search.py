@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 import json
 import logging
 import os
@@ -26,6 +27,7 @@ from catalog_schema import (
     canonicalize_catalog_columns,
 )
 from taxonomy_registry import (
+    build_taxonomy_tree_snapshot,
     classify_entity_type_from_registry,
     entity_family_for_type,
     family_default_branches as registry_family_default_branches,
@@ -38,6 +40,8 @@ SEARCH_CATALOG_CSV_FILENAME = "price_clean_search.csv"
 SEARCH_CATALOG_DUCKDB_FILENAME = "price_clean_search.duckdb"
 SEARCH_CATALOG_FILENAME = SEARCH_CATALOG_CSV_FILENAME
 SEARCH_CATALOG_TABLE = "search_catalog"
+SEARCH_TAXONOMY_TREE_FILENAME = "taxonomy_tree.json"
+SEARCH_TAXONOMY_BRANCH_SUMMARY_FILENAME = "taxonomy_branch_family_summary.csv"
 SEARCH_BUILD_DEFAULT_CHUNKSIZE = 50000
 BRANCH_PATH_SEPARATOR = " > "
 DEFAULT_TAXONOMY_RULES_PATH = Path(__file__).with_name("taxonomy_rules.json")
@@ -139,6 +143,14 @@ def get_search_catalog_path(clean_dir: Path) -> Path:
     if DUCKDB_AVAILABLE:
         return get_search_catalog_duckdb_path(clean_dir)
     return get_search_catalog_csv_path(clean_dir)
+
+
+def get_search_taxonomy_tree_path(clean_dir: Path) -> Path:
+    return Path(clean_dir) / SEARCH_TAXONOMY_TREE_FILENAME
+
+
+def get_search_taxonomy_branch_summary_path(clean_dir: Path) -> Path:
+    return Path(clean_dir) / SEARCH_TAXONOMY_BRANCH_SUMMARY_FILENAME
 
 
 def is_search_catalog_path(path: str | Path) -> bool:
@@ -1202,6 +1214,102 @@ def build_search_projection_row(
     return projected
 
 
+def _update_taxonomy_usage_counters(
+    output_rows: list[Mapping[str, Any]],
+    *,
+    family_counts: Counter[str],
+    branch_counts: Counter[str],
+    branch_family_counts: Counter[tuple[str, str]],
+) -> None:
+    for row in output_rows:
+        branch_path = clean_text_value(row.get("search_branch_path")).lower()
+        effective_family = clean_text_value(row.get("search_effective_family")).lower()
+        if branch_path:
+            branch_counts[branch_path] += 1
+        if effective_family:
+            family_counts[effective_family] += 1
+        if branch_path and effective_family:
+            branch_family_counts[(branch_path, effective_family)] += 1
+
+
+def _write_search_taxonomy_snapshot(
+    clean_dir: Path,
+    *,
+    taxonomy_rules: Mapping[str, Any],
+    rows_total: int,
+    family_counts: Counter[str],
+    branch_counts: Counter[str],
+    branch_family_counts: Counter[tuple[str, str]],
+) -> None:
+    clean_dir = Path(clean_dir)
+    clean_dir.mkdir(parents=True, exist_ok=True)
+
+    tree_snapshot = build_taxonomy_tree_snapshot(taxonomy_rules)
+    tree_snapshot["catalog_stats"] = {
+        "rows_total": int(rows_total),
+        "family_counts": [
+            {"family": family_name, "rows_count": int(count)}
+            for family_name, count in family_counts.most_common()
+        ],
+        "top_branches": [],
+    }
+
+    branch_rows: list[dict[str, Any]] = []
+    for branch_path, branch_total_rows in branch_counts.most_common():
+        family_items = [
+            (family_name, count)
+            for (candidate_branch, family_name), count in branch_family_counts.items()
+            if candidate_branch == branch_path
+        ]
+        family_items.sort(key=lambda item: (-item[1], item[0]))
+        top_families = [
+            {"family": family_name, "rows_count": int(count)}
+            for family_name, count in family_items[:5]
+        ]
+        tree_snapshot["catalog_stats"]["top_branches"].append(
+            {
+                "search_branch_path": branch_path,
+                "rows_total": int(branch_total_rows),
+                "top_families": top_families,
+            }
+        )
+        for family_name, count in family_items:
+            share = (float(count) / float(branch_total_rows)) if branch_total_rows else 0.0
+            branch_rows.append(
+                {
+                    "search_branch_path": branch_path,
+                    "branch_total_rows": int(branch_total_rows),
+                    "effective_family": family_name,
+                    "rows_count": int(count),
+                    "family_share_within_branch": round(share, 6),
+                }
+            )
+
+    tree_snapshot["catalog_stats"]["top_branches"] = tree_snapshot["catalog_stats"]["top_branches"][:50]
+
+    tree_path = get_search_taxonomy_tree_path(clean_dir)
+    tree_path.write_text(json.dumps(tree_snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    summary_path = get_search_taxonomy_branch_summary_path(clean_dir)
+    pd.DataFrame(
+        branch_rows,
+        columns=[
+            "search_branch_path",
+            "branch_total_rows",
+            "effective_family",
+            "rows_count",
+            "family_share_within_branch",
+        ],
+    ).to_csv(summary_path, sep=";", encoding="utf-8", index=False)
+
+    logger.info(
+        "🧭 Search taxonomy snapshot updated: tree=%s branch_summary=%s rows=%s",
+        tree_path,
+        summary_path,
+        rows_total,
+    )
+
+
 def get_search_catalog_readiness(source_path: str | Path) -> SearchCatalogReadiness:
     merged_readiness = get_catalog_readiness(source_path)
     if merged_readiness.clean_dir is None:
@@ -1389,6 +1497,9 @@ def _build_search_catalog_csv_from_merged(merged_path: Path, target_path: Path) 
     rows_total = 0
     wrote_header = False
     taxonomy_rules = load_search_taxonomy_rules()
+    family_counts: Counter[str] = Counter()
+    branch_counts: Counter[str] = Counter()
+    branch_family_counts: Counter[tuple[str, str]] = Counter()
     logger.info("Search catalog rebuild start: source=%s target=%s format=csv", merged_path, target_path)
 
     for chunk in pd.read_csv(
@@ -1407,6 +1518,12 @@ def _build_search_catalog_csv_from_merged(merged_path: Path, target_path: Path) 
             build_search_projection_row(row, taxonomy_rules=taxonomy_rules)
             for row in source_chunk.to_dict(orient="records")
         ]
+        _update_taxonomy_usage_counters(
+            output_rows,
+            family_counts=family_counts,
+            branch_counts=branch_counts,
+            branch_family_counts=branch_family_counts,
+        )
         projected_frame = pd.DataFrame(output_rows, columns=SEARCH_BASE_COLUMNS + SEARCH_DERIVED_COLUMNS)
         projected_frame.to_csv(
             part_path,
@@ -1429,6 +1546,14 @@ def _build_search_catalog_csv_from_merged(merged_path: Path, target_path: Path) 
         )
 
     part_path.replace(target_path)
+    _write_search_taxonomy_snapshot(
+        target_path.parent,
+        taxonomy_rules=taxonomy_rules,
+        rows_total=rows_total,
+        family_counts=family_counts,
+        branch_counts=branch_counts,
+        branch_family_counts=branch_family_counts,
+    )
     return target_path
 
 
@@ -1445,6 +1570,9 @@ def _build_search_catalog_duckdb_from_merged(merged_path: Path, target_path: Pat
     rows_total = 0
     created_table = False
     taxonomy_rules = load_search_taxonomy_rules()
+    family_counts: Counter[str] = Counter()
+    branch_counts: Counter[str] = Counter()
+    branch_family_counts: Counter[tuple[str, str]] = Counter()
     logger.info("Search catalog rebuild start: source=%s target=%s format=duckdb", merged_path, target_path)
 
     connection = duckdb.connect(str(part_path))
@@ -1465,6 +1593,12 @@ def _build_search_catalog_duckdb_from_merged(merged_path: Path, target_path: Pat
                 build_search_projection_row(row, taxonomy_rules=taxonomy_rules)
                 for row in source_chunk.to_dict(orient="records")
             ]
+            _update_taxonomy_usage_counters(
+                output_rows,
+                family_counts=family_counts,
+                branch_counts=branch_counts,
+                branch_family_counts=branch_family_counts,
+            )
             projected_frame = pd.DataFrame(output_rows, columns=SEARCH_BASE_COLUMNS + SEARCH_DERIVED_COLUMNS)
             connection.register("projected_frame", projected_frame)
             if not created_table:
@@ -1491,6 +1625,14 @@ def _build_search_catalog_duckdb_from_merged(merged_path: Path, target_path: Pat
         connection.close()
 
     part_path.replace(target_path)
+    _write_search_taxonomy_snapshot(
+        target_path.parent,
+        taxonomy_rules=taxonomy_rules,
+        rows_total=rows_total,
+        family_counts=family_counts,
+        branch_counts=branch_counts,
+        branch_family_counts=branch_family_counts,
+    )
     size_bytes = target_path.stat().st_size if target_path.exists() else 0
     logger.info(
         "✅ Search catalog rebuild complete: path=%s rows=%s size_bytes=%s format=duckdb",

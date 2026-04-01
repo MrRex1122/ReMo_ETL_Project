@@ -19,7 +19,13 @@ import time
 import uuid
 from typing import Any
 from cloudflare_r2_export import upload_file_to_r2
-from catalog_search import get_search_catalog_readiness, is_search_catalog_path, refresh_search_catalog
+from catalog_search import (
+    get_search_catalog_readiness,
+    get_search_taxonomy_branch_summary_path,
+    get_search_taxonomy_tree_path,
+    is_search_catalog_path,
+    refresh_search_catalog,
+)
 from catalog_coverage_audit import (
     build_catalog_coverage_audit,
     is_catalog_coverage_audit_fresh,
@@ -2117,6 +2123,116 @@ def _render_debug_run_section(run) -> None:
     _render_match_diagnostics(run, df)
 
 
+def _render_search_taxonomy_snapshot_section(clean_dir: Path | None) -> None:
+    st.subheader("🧭 Структура taxonomy")
+    st.caption(
+        "Snapshot дерева и branch-to-family mapping, собранные во время последней пересборки поисковой БД."
+    )
+    if clean_dir is None:
+        st.info("📭 Папка clean еще не определена.")
+        return
+
+    tree_path = get_search_taxonomy_tree_path(clean_dir)
+    branch_summary_path = get_search_taxonomy_branch_summary_path(clean_dir)
+
+    if not tree_path.exists():
+        st.info("📭 Snapshot дерева пока не создан. Пересоберите поисковую БД через `🪶 Обновить поисковую БД`.")
+        return
+
+    try:
+        snapshot = json.loads(tree_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        st.error(f"❌ Не удалось прочитать taxonomy snapshot: {exc}")
+        return
+
+    catalog_stats = dict(snapshot.get("catalog_stats", {}) or {})
+    family_counts = list(catalog_stats.get("family_counts", []) or [])
+    top_branches = list(catalog_stats.get("top_branches", []) or [])
+    families = dict(snapshot.get("families", {}) or {})
+    branches = dict(snapshot.get("branches", {}) or {})
+
+    metric_col1, metric_col2, metric_col3 = st.columns(3)
+    metric_col1.metric("Family", int(snapshot.get("family_count", len(families))))
+    metric_col2.metric("Registry branches", int(snapshot.get("branch_count", len(branches))))
+    metric_col3.metric("Rows in search DB", int(catalog_stats.get("rows_total", 0)))
+    st.caption(f"Snapshot: `{tree_path}`")
+
+    download_col1, download_col2 = st.columns(2)
+    with download_col1:
+        st.download_button(
+            "📥 Скачать taxonomy_tree.json",
+            tree_path.read_bytes(),
+            file_name=tree_path.name,
+            mime="application/json",
+            key="download_taxonomy_tree_json",
+            on_click="ignore",
+        )
+    with download_col2:
+        if branch_summary_path.exists():
+            st.download_button(
+                "📥 Скачать taxonomy_branch_family_summary.csv",
+                branch_summary_path.read_bytes(),
+                file_name=branch_summary_path.name,
+                mime="text/csv",
+                key="download_taxonomy_branch_summary_csv",
+                on_click="ignore",
+            )
+
+    if family_counts:
+        family_df = pd.DataFrame(family_counts)
+        st.markdown("**Family counts в поисковой БД**")
+        st.dataframe(_prepare_df_for_display(family_df.head(30)), width="stretch")
+
+    family_rows = []
+    for family_name, spec in sorted(families.items()):
+        default_branches = list(spec.get("default_branches", []) or [])
+        family_rows.append(
+            {
+                "family": family_name,
+                "entity_types": ", ".join(spec.get("entity_types", []) or []),
+                "default_branches_count": len(default_branches),
+                "default_branches": " | ".join(default_branches),
+                "retrieval_mode": spec.get("retrieval_mode", ""),
+                "strictness": spec.get("strictness", ""),
+                "audited": bool(spec.get("audited")),
+                "audit_group": spec.get("audit_group_label", "") or spec.get("audit_group", ""),
+            }
+        )
+    if family_rows:
+        with st.expander("Registry tree", expanded=False):
+            st.dataframe(_prepare_df_for_display(pd.DataFrame(family_rows)), width="stretch")
+
+    if top_branches:
+        top_branch_rows = []
+        for row in top_branches:
+            top_family_pairs = row.get("top_families", []) or []
+            top_branch_rows.append(
+                {
+                    "search_branch_path": row.get("search_branch_path", ""),
+                    "rows_total": row.get("rows_total", 0),
+                    "top_families": " | ".join(
+                        f"{item.get('family', '')} ({item.get('rows_count', 0)})"
+                        for item in top_family_pairs
+                    ),
+                }
+            )
+        st.markdown("**Top branches по наполнению**")
+        st.dataframe(_prepare_df_for_display(pd.DataFrame(top_branch_rows)), width="stretch")
+
+    if branch_summary_path.exists():
+        with st.expander("Branch-to-family summary", expanded=False):
+            try:
+                branch_df = pd.read_csv(branch_summary_path, sep=";", encoding="utf-8")
+                branch_df = branch_df.sort_values(
+                    by=["branch_total_rows", "rows_count"],
+                    ascending=[False, False],
+                    kind="stable",
+                )
+                st.dataframe(_prepare_df_for_display(branch_df.head(100)), width="stretch")
+            except Exception as exc:
+                st.error(f"❌ Не удалось прочитать branch summary: {exc}")
+
+
 # ============ MAIN UI ============
 
 def main():
@@ -2292,6 +2408,10 @@ def main():
                 search_readiness.search_path.stat().st_mtime
             ).isoformat(timespec="seconds")
             st.caption(f"Последнее обновление поисковой БД: {search_updated_at}")
+
+        st.divider()
+        _render_search_taxonomy_snapshot_section(catalog_readiness.clean_dir)
+        st.divider()
 
         if st.button("🔄 Обновить БД"):
             if catalog_readiness.clean_dir is None or catalog_readiness.clean_sources_count == 0:

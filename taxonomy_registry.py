@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping
 
@@ -2076,6 +2077,51 @@ def audit_family_group_labels(rules: Mapping[str, Any] | None) -> Dict[str, str]
         clean_registry_text(group_name).lower(): clean_registry_text(label)
         for group_name, label in raw.items()
         if clean_registry_text(group_name) and clean_registry_text(label)
+    }
+
+
+def build_taxonomy_tree_snapshot(rules: Mapping[str, Any] | None) -> Dict[str, Any]:
+    prepared_rules = dict(rules or {})
+    groups = audit_family_groups(prepared_rules)
+    labels = audit_family_group_labels(prepared_rules)
+    audited = audited_families(prepared_rules)
+
+    families_payload: Dict[str, Dict[str, Any]] = {}
+    branch_to_families: Dict[str, list[str]] = {}
+
+    for family_name in sorted(family_registry(prepared_rules).keys()):
+        default_branches = family_default_branches(family_name, prepared_rules)
+        entity_types = sorted(family_entity_types(family_name, prepared_rules))
+        spec = family_spec_for(family_name, prepared_rules)
+        group_name = groups.get(family_name, "")
+        families_payload[family_name] = {
+            "entity_types": entity_types,
+            "default_branches": default_branches,
+            "retrieval_mode": family_retrieval_mode(family_name, prepared_rules),
+            "strictness": family_strictness(family_name, prepared_rules),
+            "weak_match_policy": family_weak_match_policy(family_name, prepared_rules),
+            "same_family_gate": family_requires_same_family_gate(family_name, prepared_rules),
+            "audited": family_name in audited,
+            "audit_group": group_name,
+            "audit_group_label": labels.get(group_name, group_name),
+        }
+        for branch_path in default_branches:
+            normalized_branch = clean_registry_text(branch_path).lower()
+            if not normalized_branch or normalized_branch == "прочее":
+                continue
+            branch_to_families.setdefault(normalized_branch, []).append(family_name)
+
+    branches_payload = {
+        branch_path: {"families": sorted(set(families))}
+        for branch_path, families in sorted(branch_to_families.items())
+    }
+
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "family_count": len(families_payload),
+        "branch_count": len(branches_payload),
+        "families": families_payload,
+        "branches": branches_payload,
     }
 
 
