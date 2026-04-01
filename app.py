@@ -2207,6 +2207,106 @@ def _taxonomy_snapshot_download_filename(path: Path) -> str:
     return f"{path.stem}_{stamp}{path.suffix}"
 
 
+def _build_branch_cleanup_audit_df(branch_df: pd.DataFrame) -> pd.DataFrame:
+    if branch_df.empty:
+        return pd.DataFrame(
+            columns=[
+                "search_branch_path",
+                "branch_total_rows",
+                "family_count",
+                "top_family",
+                "top_family_rows",
+                "top_family_share",
+                "second_family",
+                "second_family_rows",
+                "second_family_share",
+                "other_rows",
+                "other_share",
+                "suspicious_score",
+                "top_families",
+            ]
+        )
+
+    prepared = branch_df.copy()
+    prepared["branch_total_rows"] = pd.to_numeric(prepared["branch_total_rows"], errors="coerce").fillna(0).astype(int)
+    prepared["rows_count"] = pd.to_numeric(prepared["rows_count"], errors="coerce").fillna(0).astype(int)
+    prepared["family_share_within_branch"] = pd.to_numeric(
+        prepared["family_share_within_branch"], errors="coerce"
+    ).fillna(0.0)
+
+    audit_rows: list[dict[str, Any]] = []
+    for branch_path, group in prepared.groupby("search_branch_path", dropna=False):
+        group = group.sort_values(["rows_count", "effective_family"], ascending=[False, True], kind="stable")
+        if group.empty:
+            continue
+
+        branch_total_rows = int(group["branch_total_rows"].iloc[0])
+        if branch_total_rows <= 0:
+            continue
+
+        family_items = [
+            {
+                "family": str(row["effective_family"]),
+                "rows_count": int(row["rows_count"]),
+                "share": float(row["family_share_within_branch"]),
+            }
+            for _, row in group.iterrows()
+        ]
+        family_count = len(family_items)
+        top = family_items[0]
+        second = family_items[1] if family_count > 1 else {"family": "", "rows_count": 0, "share": 0.0}
+        other_item = next((item for item in family_items if item["family"] == "other"), {"rows_count": 0, "share": 0.0})
+
+        suspicious = (
+            branch_total_rows >= 100
+            and (
+                top["family"] == "other"
+                or top["share"] < 0.85
+                or second["share"] >= 0.10
+                or family_count >= 5
+                or other_item["share"] >= 0.10
+            )
+        )
+        if not suspicious:
+            continue
+
+        suspicious_score = round(
+            (1.0 - top["share"]) * branch_total_rows
+            + second["share"] * branch_total_rows
+            + max(0, family_count - 2) * 25
+            + other_item["share"] * branch_total_rows,
+            3,
+        )
+        audit_rows.append(
+            {
+                "search_branch_path": branch_path,
+                "branch_total_rows": branch_total_rows,
+                "family_count": family_count,
+                "top_family": top["family"],
+                "top_family_rows": top["rows_count"],
+                "top_family_share": round(top["share"], 6),
+                "second_family": second["family"],
+                "second_family_rows": second["rows_count"],
+                "second_family_share": round(float(second["share"]), 6),
+                "other_rows": int(other_item["rows_count"]),
+                "other_share": round(float(other_item["share"]), 6),
+                "suspicious_score": suspicious_score,
+                "top_families": " | ".join(
+                    f"{item['family']} ({item['rows_count']})" for item in family_items[:5]
+                ),
+            }
+        )
+
+    audit_df = pd.DataFrame(audit_rows)
+    if audit_df.empty:
+        return audit_df
+    return audit_df.sort_values(
+        ["suspicious_score", "branch_total_rows", "search_branch_path"],
+        ascending=[False, False, True],
+        kind="stable",
+    ).reset_index(drop=True)
+
+
 def _render_search_taxonomy_snapshot_section(clean_dir: Path | None) -> None:
     st.subheader("🧭 Структура taxonomy")
     st.caption(
@@ -2309,6 +2409,34 @@ def _render_search_taxonomy_snapshot_section(clean_dir: Path | None) -> None:
                 st.dataframe(_prepare_df_for_display(branch_df.head(100)), width="stretch")
             except Exception as exc:
                 st.error(f"❌ Не удалось прочитать branch summary: {exc}")
+
+        try:
+            branch_df = pd.read_csv(branch_summary_path, sep=";", encoding="utf-8")
+            suspicious_df = _build_branch_cleanup_audit_df(branch_df)
+        except Exception as exc:
+            st.error(f"❌ Не удалось построить branch cleanup audit: {exc}")
+        else:
+            st.markdown("**Подозрительные ветки для cleanup**")
+            st.caption(
+                "На экране показывается top-20 веток с самым большим branch-family шумом. "
+                "Выгрузка ниже содержит весь список подозрительных веток."
+            )
+            if suspicious_df.empty:
+                st.success("✅ Явно подозрительных веток по текущим правилам не найдено.")
+            else:
+                metric_col1, metric_col2 = st.columns(2)
+                metric_col1.metric("Подозрительных веток", len(suspicious_df))
+                metric_col2.metric("Самая шумная ветка", suspicious_df.iloc[0]["search_branch_path"])
+                st.dataframe(_prepare_df_for_display(suspicious_df.head(20)), width="stretch")
+                suspicious_csv = suspicious_df.to_csv(index=False, sep=";", encoding="utf-8").encode("utf-8")
+                st.download_button(
+                    "📥 Скачать все подозрительные ветки",
+                    suspicious_csv,
+                    file_name=f"taxonomy_branch_cleanup_audit_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    key="download_taxonomy_branch_cleanup_audit_csv",
+                    on_click="ignore",
+                )
 
 
 # ============ MAIN UI ============

@@ -118,6 +118,16 @@ class AppUiRegressionTests(unittest.TestCase):
         self.assertNotIn("file_name=tree_path.name", app_source)
         self.assertNotIn("file_name=branch_summary_path.name", app_source)
 
+    def test_taxonomy_snapshot_ui_shows_top_20_suspicious_branches_and_exports_full_audit(self):
+        app_source = Path("app.py").read_text(encoding="utf-8")
+        self.assertIn("_build_branch_cleanup_audit_df", app_source)
+        self.assertIn("Подозрительные ветки для cleanup", app_source)
+        self.assertIn("top-20 веток", app_source)
+        self.assertIn("Выгрузка ниже содержит весь список подозрительных веток", app_source)
+        self.assertIn("suspicious_df.head(20)", app_source)
+        self.assertIn("Скачать все подозрительные ветки", app_source)
+        self.assertIn("download_taxonomy_branch_cleanup_audit_csv", app_source)
+
 
 if __name__ == "__main__":
     unittest.main()
