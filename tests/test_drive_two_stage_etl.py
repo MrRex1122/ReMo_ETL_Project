@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pandas as pd
+
 import app
 
 
@@ -333,3 +335,80 @@ def test_sync_catalogs_from_google_drive_rebuilds_merged_once_after_batch_etl(mo
             "clean_files": ["a_clean.csv", "b_clean.csv"],
         }
     ]
+
+
+def test_compute_business_run_summary_excludes_section_rows():
+    df = pd.DataFrame(
+        [
+            {
+                "Наименование оборудования, материалов и кабелей": "ОБОРУДОВАНИЕ",
+                "Найденная номенклатура": "",
+                "Причина отсутствия": "Строка-раздел, сопоставление не требуется.",
+                "Код причины": "section_row_detected",
+                "Требует проверки": "нет",
+            },
+            {
+                "Наименование оборудования, материалов и кабелей": "Позиция 1",
+                "Найденная номенклатура": "Номенклатура 1",
+                "Причина отсутствия": "",
+                "Код причины": "resolved",
+                "Требует проверки": "нет",
+            },
+            {
+                "Наименование оборудования, материалов и кабелей": "Позиция 2",
+                "Найденная номенклатура": app.MISSING_POSITION_TEXT,
+                "Причина отсутствия": "Позиция отсутствует",
+                "Код причины": "no_compatible_candidates",
+                "Требует проверки": "да",
+            },
+        ]
+    )
+
+    summary = app._compute_business_run_summary(
+        df,
+        {"input_query_column": "Наименование оборудования, материалов и кабелей"},
+    )
+
+    assert summary == {
+        "total": 2,
+        "found": 1,
+        "not_found": 1,
+        "requires_review": 1,
+        "errors": 0,
+        "skipped_non_item": 1,
+        "blank_rows": 0,
+    }
+
+
+def test_compute_business_run_summary_excludes_blank_separator_rows():
+    df = pd.DataFrame(
+        [
+            {
+                "Наименование оборудования, материалов и кабелей": "",
+                "Найденная номенклатура": "",
+                "Причина отсутствия": "",
+                "Код причины": "",
+                "Требует проверки": "",
+            },
+            {
+                "Наименование оборудования, материалов и кабелей": "Позиция 1",
+                "Найденная номенклатура": "Номенклатура 1",
+                "Причина отсутствия": "",
+                "Код причины": "resolved",
+                "Требует проверки": "нет",
+            },
+        ]
+    )
+
+    summary = app._compute_business_run_summary(
+        df,
+        {"input_query_column": "Наименование оборудования, материалов и кабелей"},
+    )
+
+    assert summary["total"] == 1
+    assert summary["found"] == 1
+    assert summary["not_found"] == 0
+    assert summary["requires_review"] == 0
+    assert summary["errors"] == 0
+    assert summary["skipped_non_item"] == 0
+    assert summary["blank_rows"] == 1

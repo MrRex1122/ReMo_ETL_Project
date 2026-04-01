@@ -567,6 +567,15 @@ def _run_processing_job(run_id: str, matcher_settings: dict[str, Any]) -> None:
         )
         stats["diagnostics_mode"] = "lite"
         stats["runtime_diagnostics_saved"] = False
+        business_summary = _compute_business_run_summary(df_result, stats)
+        stats["business_summary"] = business_summary
+        stats["business_total"] = int(business_summary.get("total", 0))
+        stats["business_found"] = int(business_summary.get("found", 0))
+        stats["business_not_found"] = int(business_summary.get("not_found", 0))
+        stats["business_requires_review"] = int(business_summary.get("requires_review", 0))
+        stats["business_errors"] = int(business_summary.get("errors", 0))
+        stats["business_skipped_non_item"] = int(business_summary.get("skipped_non_item", 0))
+        stats["business_blank_rows"] = int(business_summary.get("blank_rows", 0))
 
         try:
             _build_main_kp_result_df(df_result).to_excel(artifacts.result_xlsx_path, index=False, engine="openpyxl")
@@ -574,12 +583,10 @@ def _run_processing_job(run_id: str, matcher_settings: dict[str, Any]) -> None:
             logger.exception("Failed to save trimmed KP workbook for run %s", run_id)
 
         write_processing_run_result(run_id, df_result, stats)
-        rows_total = int(stats.get("total", len(df_result)))
-        found_count = int(stats.get("found", 0))
-        missing_count = int(stats.get("not_found", 0))
-        requires_review_count = int(
-            (df_result.get("Требует проверки", pd.Series(dtype=object)).fillna("").astype(str).str.lower() == "да").sum()
-        )
+        rows_total = int(business_summary.get("total", 0))
+        found_count = int(business_summary.get("found", 0))
+        missing_count = int(business_summary.get("not_found", 0))
+        requires_review_count = int(business_summary.get("requires_review", 0))
         mark_processing_run_completed(
             run_id,
             result_csv_path=artifacts.result_csv_path,
@@ -1171,11 +1178,12 @@ def show_statistics(stats, *, include_debug_details: bool = True):
 
 def _render_main_kp_statistics(stats: dict[str, Any], df: pd.DataFrame) -> None:
     """Операционная сводка для основного сценария заполнения КП."""
-    total = int(stats.get("total", len(df)))
-    filled = int(stats.get("found", 0))
-    not_found = int(stats.get("not_found", 0))
-    review_count = int((df.get("Требует проверки", pd.Series(dtype=object)).fillna("").astype(str).str.lower() == "да").sum())
-    errors = int(stats.get("errors", 0))
+    business_summary = dict(stats.get("business_summary", {}) or _compute_business_run_summary(df, stats))
+    total = int(business_summary.get("total", 0))
+    filled = int(business_summary.get("found", 0))
+    not_found = int(business_summary.get("not_found", 0))
+    review_count = int(business_summary.get("requires_review", 0))
+    errors = int(business_summary.get("errors", 0))
 
     col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
@@ -1965,6 +1973,75 @@ def _is_source_query_column(column_name: object) -> bool:
     if "найден" in normalized:
         return False
     return "наименован" in normalized or "номенклатур" in normalized
+
+
+def _compute_business_run_summary(df: pd.DataFrame, stats: dict[str, Any] | None = None) -> dict[str, int]:
+    if df is None or df.empty:
+        return {
+            "total": 0,
+            "found": 0,
+            "not_found": 0,
+            "requires_review": 0,
+            "errors": 0,
+            "skipped_non_item": 0,
+            "blank_rows": 0,
+        }
+
+    query_columns: list[str] = []
+    preferred_query_column = str((stats or {}).get("input_query_column") or "").strip()
+    if preferred_query_column and preferred_query_column in df.columns:
+        query_columns.append(preferred_query_column)
+    for column in df.columns:
+        if column in query_columns:
+            continue
+        if _is_source_query_column(column):
+            query_columns.append(str(column))
+
+    if query_columns:
+        nonempty_query_mask = pd.Series(False, index=df.index)
+        for column in query_columns:
+            nonempty_query_mask = nonempty_query_mask | (df[column].fillna("").astype(str).str.strip() != "")
+    else:
+        nonempty_query_mask = pd.Series(True, index=df.index)
+
+    section_mask = pd.Series(False, index=df.index)
+    if "Код причины" in df.columns:
+        section_mask = section_mask | (
+            df["Код причины"].fillna("").astype(str).str.strip().str.lower() == "section_row_detected"
+        )
+    if "Причина отсутствия" in df.columns:
+        section_mask = section_mask | (
+            df["Причина отсутствия"].fillna("").astype(str).str.contains("Строка-раздел", regex=False)
+        )
+
+    business_mask = nonempty_query_mask & ~section_mask
+
+    if "Найденная номенклатура" in df.columns:
+        missing_mask = (
+            df["Найденная номенклатура"].isna()
+            | (df["Найденная номенклатура"].astype(str).str.strip() == "")
+            | (df["Найденная номенклатура"].astype(str).str.strip() == MISSING_POSITION_TEXT)
+        )
+    else:
+        missing_mask = pd.Series(False, index=df.index)
+
+    review_mask = pd.Series(False, index=df.index)
+    if "Требует проверки" in df.columns:
+        review_mask = df["Требует проверки"].fillna("").astype(str).str.lower() == "да"
+
+    error_mask = pd.Series(False, index=df.index)
+    if "Ошибка сопоставления" in df.columns:
+        error_mask = df["Ошибка сопоставления"].fillna("").astype(str).str.strip() != ""
+
+    return {
+        "total": int(business_mask.sum()),
+        "found": int((business_mask & ~missing_mask).sum()),
+        "not_found": int((business_mask & missing_mask).sum()),
+        "requires_review": int((business_mask & review_mask).sum()),
+        "errors": int((business_mask & error_mask).sum()),
+        "skipped_non_item": int(section_mask.sum()),
+        "blank_rows": int((~nonempty_query_mask).sum()),
+    }
 
 
 def _summary_mapping_to_df(summary: dict[str, Any], *, labels: dict[str, str] | None = None) -> pd.DataFrame:
