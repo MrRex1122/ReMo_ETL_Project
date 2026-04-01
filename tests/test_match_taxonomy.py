@@ -1759,6 +1759,57 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.assertNotIn("search_entity_type", captured["where_sql"])
         self.assertEqual(captured["limit"], 25)
 
+    def test_effective_candidate_family_maps_other_box_and_switch_wiring_branches(self):
+        box_features = self.matcher._extract_query_features("Коробка монтажная огнестойкая")
+        box_features["entity_type"] = "box"
+        box_candidate = {
+            "name": "Коробка монтажная огнестойкая",
+            "normalized_name": "коробка монтажная огнестойкая",
+            "branch_path": "коробки распределительные наружные",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        switch_features = self.matcher._extract_query_features("Рамка 2-местная белая")
+        switch_features["entity_type"] = "switch_wiring"
+        switch_candidate = {
+            "name": "Рамка 2-местная белая",
+            "normalized_name": "рамка 2 местная белая",
+            "branch_path": "рамки",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(box_features, box_candidate),
+            "box",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(switch_features, switch_candidate),
+            "switch_wiring",
+        )
+
+    def test_collect_branch_candidates_relaxes_entity_filter_for_box_family(self):
+        self.matcher._uses_duckdb_query_backend = lambda: True
+        captured = {}
+
+        def fake_fetch_items(where_sql="", params=None, order_by_sql="", limit=None):
+            captured["where_sql"] = where_sql
+            captured["params"] = list(params or [])
+            captured["order_by_sql"] = order_by_sql
+            captured["limit"] = limit
+            return []
+
+        self.matcher._duckdb_fetch_items = fake_fetch_items
+
+        self.matcher._collect_branch_candidates(
+            ["коробки распределительные наружные"],
+            limit=25,
+            query_features={"entity_type": "box"},
+        )
+
+        self.assertNotIn("search_entity_type", captured["where_sql"])
+        self.assertEqual(captured["limit"], 25)
+
     def test_collect_branch_candidates_prioritizes_cable_channel_rows(self):
         self.matcher._uses_duckdb_query_backend = lambda: True
         captured = {}

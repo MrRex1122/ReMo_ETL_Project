@@ -842,9 +842,34 @@ def derive_branch_from_text(
     registry_defaults = registry_family_default_branches(entity_type, rules, branch_hint="")
     if registry_defaults and registry_defaults[0] != "прочее":
         registry_family = entity_family_for_type(entity_type, rules)
+        if registry_family == "box":
+            if "установоч" in merged:
+                return "коробки установочные"
+            if "внутрен" in merged:
+                return "коробки распределительные внутренние"
+            return "коробки распределительные наружные"
+        if registry_family == "box_accessory":
+            if "установоч" in merged:
+                return "аксессуары для установочных коробок"
+            return "аксессуары и комплектующие для коробок"
+        if registry_family == "switch_wiring":
+            if "рамк" in merged:
+                return "рамки"
+            if "розетк" in merged and "скрыт" in merged:
+                return "розетки скрытого монтажа"
+            if "розетк" in merged and "открыт" in merged:
+                return "розетки открытого монтажа"
+            if "розетк" in merged:
+                return "розетки скрытого монтажа"
+            if "переключател" in merged and "открыт" in merged:
+                return "переключатели открытого монтажа"
+            if "выключател" in merged and "скрыт" in merged:
+                return "выключатели скрытого монтажа"
         if registry_family in {
             "airflow_blanking_panel",
             "ats_sts",
+            "box",
+            "box_accessory",
             "patch_panel",
             "optical_cross",
             "optical_patch_cord",
@@ -864,6 +889,7 @@ def derive_branch_from_text(
             "security_software",
             "power_backup",
             "firestop_material",
+            "switch_wiring",
         }:
             return registry_defaults[0]
     if entity_type in {"pdu", "pdu_basic", "pdu_metered"}:

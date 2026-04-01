@@ -470,6 +470,28 @@ class CatalogSearchTests(unittest.TestCase):
             "прочее",
         )
 
+    def test_classify_item_type_splits_other_into_boxes_and_switch_wiring(self):
+        self.assertEqual(
+            classify_item_type("Коробка монтажная огнестойкая"),
+            "box",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Коробка монтажная огнестойкая"),
+            "коробки распределительные наружные",
+        )
+        self.assertEqual(
+            classify_item_type("Аксессуары для установочных коробок"),
+            "box_accessory",
+        )
+        self.assertEqual(
+            classify_item_type("Выключатель скрытого монтажа 1-клавишный"),
+            "switch_wiring",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Рамка 2-местная белая"),
+            "рамки",
+        )
+
     def test_build_search_catalog_can_write_csv_explicitly(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

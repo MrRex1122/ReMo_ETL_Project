@@ -4753,6 +4753,27 @@ class ReMoMatcher:
             and "коробка" not in search_text
         ):
             return "firestop_material"
+        if any(token in branch_path for token in ("коробки распределительные", "коробки установочные")) or (
+            "коробка" in search_text
+            and any(token in search_text for token in ("распредел", "монтажн", "установоч", "распаеч", "огнестойк"))
+            and not any(token in search_text for token in ("лючок", "кабель канал", "кабель-канал", "rj45", "keystone", "патч"))
+        ):
+            return "box"
+        if any(token in branch_path for token in ("аксессуары и комплектующие для коробок", "аксессуары для установочных коробок")) or (
+            any(token in search_text for token in ("аксессуар", "комплектующ", "принадлежн"))
+            and "короб" in search_text
+            and "rj45" not in search_text
+            and "keystone" not in search_text
+        ):
+            return "box_accessory"
+        if any(
+            token in branch_path
+            for token in ("выключатели скрытого монтажа", "переключатели открытого монтажа", "розетки скрытого монтажа", "розетки открытого монтажа", "рамки")
+        ) or (
+            any(token in search_text for token in ("выключател", "переключател", "розетк", "рамк"))
+            and not any(token in search_text for token in ("rj45", "keystone", "патч", "pdu", "блок розеток", "zero u", "лючок", "кабель канал", "кабель-канал"))
+        ):
+            return "switch_wiring"
         if (
             "листовые лотки" in branch_path
             or any(token in search_text for token in ("лоток", "крышк", "ответвител", "угол", "перегород", "ptce", "gto", "sep"))
@@ -4801,6 +4822,9 @@ class ReMoMatcher:
             "security_software",
             "power_backup",
             "firestop_material",
+            "box",
+            "box_accessory",
+            "switch_wiring",
         }
 
     def _should_cap_rack_tray_whole_category_pool(self, query_features: Dict[str, Any]) -> bool:

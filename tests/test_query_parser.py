@@ -87,6 +87,21 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(battery.entity_type, "power_backup")
         self.assertEqual(firestop.entity_type, "firestop_material")
 
+    def test_parse_query_spec_uses_subfamily_split_for_boxes_and_switch_wiring(self):
+        box_spec = parse_query_spec("Коробка монтажная огнестойкая", taxonomy_rules=self.rules)
+        box_accessory_spec = parse_query_spec("Аксессуары для установочных коробок", taxonomy_rules=self.rules)
+        switch_spec = parse_query_spec("Выключатель скрытого монтажа 1-клавишный", taxonomy_rules=self.rules)
+        frame_spec = parse_query_spec("Рамка 2-местная белая", taxonomy_rules=self.rules)
+
+        self.assertEqual(box_spec.entity_type, "box")
+        self.assertEqual(box_spec.branch_hint, "коробки распределительные наружные")
+        self.assertEqual(box_accessory_spec.entity_type, "box_accessory")
+        self.assertEqual(box_accessory_spec.branch_hint, "аксессуары для установочных коробок")
+        self.assertEqual(switch_spec.entity_type, "switch_wiring")
+        self.assertEqual(switch_spec.branch_hint, "выключатели скрытого монтажа")
+        self.assertEqual(frame_spec.entity_type, "switch_wiring")
+        self.assertEqual(frame_spec.branch_hint, "рамки")
+
 
 if __name__ == "__main__":
     unittest.main()
