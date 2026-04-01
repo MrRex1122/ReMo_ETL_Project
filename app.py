@@ -20,9 +20,8 @@ import uuid
 from typing import Any
 from cloudflare_r2_export import upload_file_to_r2
 from catalog_search import (
+    ensure_search_taxonomy_snapshot,
     get_search_catalog_readiness,
-    get_search_taxonomy_branch_summary_path,
-    get_search_taxonomy_tree_path,
     is_search_catalog_path,
     refresh_search_catalog,
 )
@@ -2200,6 +2199,14 @@ def _render_debug_run_section(run) -> None:
     _render_match_diagnostics(run, df)
 
 
+def _taxonomy_snapshot_download_filename(path: Path) -> str:
+    try:
+        stamp = datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y%m%d_%H%M%S")
+    except OSError:
+        return path.name
+    return f"{path.stem}_{stamp}{path.suffix}"
+
+
 def _render_search_taxonomy_snapshot_section(clean_dir: Path | None) -> None:
     st.subheader("🧭 Структура taxonomy")
     st.caption(
@@ -2209,14 +2216,8 @@ def _render_search_taxonomy_snapshot_section(clean_dir: Path | None) -> None:
         st.info("📭 Папка clean еще не определена.")
         return
 
-    tree_path = get_search_taxonomy_tree_path(clean_dir)
-    branch_summary_path = get_search_taxonomy_branch_summary_path(clean_dir)
-
-    if not tree_path.exists():
-        st.info("📭 Snapshot дерева пока не создан. Пересоберите поисковую БД через `🪶 Обновить поисковую БД`.")
-        return
-
     try:
+        tree_path, branch_summary_path = ensure_search_taxonomy_snapshot(clean_dir)
         snapshot = json.loads(tree_path.read_text(encoding="utf-8"))
     except Exception as exc:
         st.error(f"❌ Не удалось прочитать taxonomy snapshot: {exc}")
@@ -2239,7 +2240,7 @@ def _render_search_taxonomy_snapshot_section(clean_dir: Path | None) -> None:
         st.download_button(
             "📥 Скачать taxonomy_tree.json",
             tree_path.read_bytes(),
-            file_name=tree_path.name,
+            file_name=_taxonomy_snapshot_download_filename(tree_path),
             mime="application/json",
             key="download_taxonomy_tree_json",
             on_click="ignore",
@@ -2249,7 +2250,7 @@ def _render_search_taxonomy_snapshot_section(clean_dir: Path | None) -> None:
             st.download_button(
                 "📥 Скачать taxonomy_branch_family_summary.csv",
                 branch_summary_path.read_bytes(),
-                file_name=branch_summary_path.name,
+                file_name=_taxonomy_snapshot_download_filename(branch_summary_path),
                 mime="text/csv",
                 key="download_taxonomy_branch_summary_csv",
                 on_click="ignore",

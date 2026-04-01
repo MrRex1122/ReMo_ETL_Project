@@ -1327,6 +1327,79 @@ def _write_search_taxonomy_snapshot(
     )
 
 
+def _resolve_search_catalog_snapshot_source(clean_dir: Path) -> Path | None:
+    clean_dir = Path(clean_dir)
+    readiness = get_search_catalog_readiness(clean_dir)
+    if readiness.search_path.exists():
+        return readiness.search_path
+
+    existing_candidates: list[Path] = []
+    for storage_format in _search_preferred_formats(clean_dir):
+        candidate = _search_artifact_path(clean_dir, storage_format)
+        if candidate.exists():
+            existing_candidates.append(candidate)
+    if not existing_candidates:
+        return None
+    existing_candidates.sort(key=lambda path: (path.stat().st_mtime, path.suffix.lower() == ".duckdb"), reverse=True)
+    return existing_candidates[0]
+
+
+def ensure_search_taxonomy_snapshot(
+    clean_dir: Path,
+    *,
+    force: bool = False,
+    chunksize: int = SEARCH_BUILD_DEFAULT_CHUNKSIZE,
+) -> tuple[Path, Path]:
+    clean_dir = Path(clean_dir)
+    tree_path = get_search_taxonomy_tree_path(clean_dir)
+    summary_path = get_search_taxonomy_branch_summary_path(clean_dir)
+    search_path = _resolve_search_catalog_snapshot_source(clean_dir)
+    if search_path is None:
+        raise FileNotFoundError("Search catalog is not available yet.")
+
+    search_mtime = search_path.stat().st_mtime
+    snapshots_are_fresh = (
+        tree_path.exists()
+        and summary_path.exists()
+        and tree_path.stat().st_mtime >= search_mtime
+        and summary_path.stat().st_mtime >= search_mtime
+    )
+    if snapshots_are_fresh and not force:
+        return tree_path, summary_path
+
+    taxonomy_rules = load_search_taxonomy_rules()
+    family_counts: Counter[str] = Counter()
+    branch_counts: Counter[str] = Counter()
+    branch_family_counts: Counter[tuple[str, str]] = Counter()
+    rows_total = 0
+    for chunk in iter_search_catalog_chunks(search_path, chunksize=chunksize):
+        output_rows = chunk.to_dict("records")
+        rows_total += len(output_rows)
+        _update_taxonomy_usage_counters(
+            output_rows,
+            family_counts=family_counts,
+            branch_counts=branch_counts,
+            branch_family_counts=branch_family_counts,
+        )
+
+    _write_search_taxonomy_snapshot(
+        clean_dir,
+        taxonomy_rules=taxonomy_rules,
+        rows_total=rows_total,
+        family_counts=family_counts,
+        branch_counts=branch_counts,
+        branch_family_counts=branch_family_counts,
+    )
+    logger.info(
+        "🧭 Search taxonomy snapshot synchronized from catalog: source=%s tree=%s branch_summary=%s rows=%s",
+        search_path,
+        tree_path,
+        summary_path,
+        rows_total,
+    )
+    return tree_path, summary_path
+
+
 def get_search_catalog_readiness(source_path: str | Path) -> SearchCatalogReadiness:
     merged_readiness = get_catalog_readiness(source_path)
     if merged_readiness.clean_dir is None:

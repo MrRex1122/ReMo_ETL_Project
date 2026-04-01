@@ -13,6 +13,7 @@ from catalog_search import (
     build_search_catalog_from_merged,
     classify_item_type,
     derive_branch_from_text,
+    ensure_search_taxonomy_snapshot,
     extract_item_markers,
     get_search_catalog_path,
     get_search_taxonomy_branch_summary_path,
@@ -549,6 +550,62 @@ class CatalogSearchTests(unittest.TestCase):
             branch_df = pd.read_csv(branch_summary_path, sep=";", encoding="utf-8")
             self.assertIn("box", set(branch_df["effective_family"]))
             self.assertIn("switch_wiring", set(branch_df["effective_family"]))
+
+    def test_ensure_search_taxonomy_snapshot_rebuilds_stale_snapshot_from_catalog(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Извещатель пожарный дымовой адресный;FIRE-1;1200;Извещатели пожарные;CLS-1;Извещатель;;ReMo\n"
+                    "Пульт контроля и управления;CTRL-1;2500;Приборы приёмно-контрольные для опс;CLS-2;Пульт;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            tree_path = get_search_taxonomy_tree_path(root)
+            branch_summary_path = get_search_taxonomy_branch_summary_path(root)
+
+            tree_path.write_text(
+                json.dumps(
+                    {
+                        "generated_at": "2000-01-01T00:00:00+00:00",
+                        "family_count": 1,
+                        "branch_count": 1,
+                        "families": {"legacy": {"default_branches": []}},
+                        "branches": {},
+                        "catalog_stats": {"rows_total": 1, "family_counts": [], "top_branches": []},
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            branch_summary_path.write_text(
+                "search_branch_path;branch_total_rows;effective_family;rows_count;family_share_within_branch\nlegacy;1;legacy;1;1.0\n",
+                encoding="utf-8",
+            )
+
+            stale_mtime = search_path.stat().st_mtime - 10
+            os.utime(tree_path, (stale_mtime, stale_mtime))
+            os.utime(branch_summary_path, (stale_mtime, stale_mtime))
+
+            refreshed_tree_path, refreshed_summary_path = ensure_search_taxonomy_snapshot(root)
+
+            self.assertEqual(refreshed_tree_path, tree_path)
+            self.assertEqual(refreshed_summary_path, branch_summary_path)
+
+            snapshot = json.loads(tree_path.read_text(encoding="utf-8"))
+            self.assertIn("fire_detector", snapshot["families"])
+            self.assertIn("security_control_panel", snapshot["families"])
+            self.assertEqual(snapshot["catalog_stats"]["rows_total"], 2)
+
+            branch_df = pd.read_csv(branch_summary_path, sep=";", encoding="utf-8")
+            self.assertIn("fire_detector", set(branch_df["effective_family"]))
+            self.assertIn("security_control_panel", set(branch_df["effective_family"]))
 
     def test_build_search_catalog_can_write_csv_explicitly(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

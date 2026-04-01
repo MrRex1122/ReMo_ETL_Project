@@ -110,6 +110,14 @@ class AppUiRegressionTests(unittest.TestCase):
         self.assertIn("build_runtime_diagnostics=False", app_source)
         self.assertIn("runtime-диагностика не сохранялась автоматически", app_source)
 
+    def test_taxonomy_snapshot_ui_ensures_fresh_snapshot_and_versioned_download_names(self):
+        app_source = Path("app.py").read_text(encoding="utf-8")
+        self.assertIn("ensure_search_taxonomy_snapshot(clean_dir)", app_source)
+        self.assertIn("_taxonomy_snapshot_download_filename(tree_path)", app_source)
+        self.assertIn("_taxonomy_snapshot_download_filename(branch_summary_path)", app_source)
+        self.assertNotIn("file_name=tree_path.name", app_source)
+        self.assertNotIn("file_name=branch_summary_path.name", app_source)
+
 
 if __name__ == "__main__":
     unittest.main()
