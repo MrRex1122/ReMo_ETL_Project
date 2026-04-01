@@ -283,6 +283,36 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
             "required_any_tokens": [["табло", "выход", "exit"], ["светов", "эвакуац", "аварийн"]],
         },
     },
+    "fire_detector": {
+        "entity_types": ["fire_detector"],
+        "default_branches": [
+            "извещатели пожарные",
+            "извещатели охранные",
+        ],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 69,
+            "positive_patterns": ["извещател"],
+            "negative_patterns": ["оповещател", "комплект", "креплен", "кроншт", "табло"],
+        },
+    },
+    "fire_annunciator": {
+        "entity_types": ["fire_annunciator"],
+        "default_branches": [
+            "световой оповещатель",
+            "звуковой оповещатель",
+        ],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 68,
+            "positive_patterns": ["оповещател"],
+            "negative_patterns": ["табло", "извещател"],
+        },
+    },
     "fire_alarm_device": {
         "entity_types": ["fire_alarm_device"],
         "default_branches": [
@@ -298,6 +328,60 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
             "priority": 63,
             "positive_patterns": ["извещател", "оповещател"],
             "negative_patterns": ["комплект", "креплен", "кроншт", "табло"],
+        },
+    },
+    "security_interface_device": {
+        "entity_types": ["security_interface_device"],
+        "default_branches": [
+            "дополнительное оборудование для пс",
+            "дополнительное оборудование систем оповещения",
+            "дополнительное оборудование для ос",
+        ],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 68,
+            "required_any_tokens": [
+                ["преобразователь", "повторитель", "интерфейс"],
+                ["rs485", "modbus", "ethernet", "интерфейс", "протокол"],
+            ],
+        },
+    },
+    "security_control_panel": {
+        "entity_types": ["security_control_panel"],
+        "default_branches": [
+            "приборы приёмно-контрольные для опс",
+        ],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 67,
+            "required_any_tokens": [
+                ["пульт", "панель", "блок"],
+                ["управл", "контрол", "индикац"],
+            ],
+            "negative_patterns": ["интерфейс", "modbus", "rs485"],
+        },
+    },
+    "security_module_device": {
+        "entity_types": ["security_module_device"],
+        "default_branches": [
+            "дополнительное оборудование для пс",
+            "приборы приёмно-контрольные для опс",
+            "дополнительное оборудование для ос",
+        ],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 66,
+            "required_any_tokens": [
+                ["модуль", "блок", "устройство"],
+                ["пуск", "коммутац", "линии связи", "нагрузк", "изолир", "разветв", "адресн"],
+            ],
+            "negative_patterns": ["интерфейс", "modbus", "rs485", "пульт", "индикац"],
         },
     },
     "security_control_device": {
@@ -786,7 +870,18 @@ DEFAULT_DOMAIN_REGISTRY: Dict[str, Any] = {
         },
         "fire_alarm": {
             "patterns": ["извещател", "оповещател", "опс", "орион про", "контрольно-пуск", "с2000", "пульт", "приемно-контрольн"],
-            "families": ["fire_alarm_device", "security_control_device", "security_software", "power_backup", "firestop_material"],
+            "families": [
+                "fire_detector",
+                "fire_annunciator",
+                "fire_alarm_device",
+                "security_interface_device",
+                "security_control_panel",
+                "security_module_device",
+                "security_control_device",
+                "security_software",
+                "power_backup",
+                "firestop_material",
+            ],
         },
     },
     "conflicts": [

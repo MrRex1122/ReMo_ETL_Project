@@ -4719,14 +4719,39 @@ class ReMoMatcher:
             "табло" in search_text and any(token in search_text for token in ("светов", "эвакуац", "аварийн", "выход", "exit"))
         ):
             return "light_signage"
+        if "извещатели пожарные" in branch_path or "извещатели охранные" in branch_path or (
+            "извещател" in search_text and "оповещател" not in search_text and "табло" not in search_text
+        ):
+            return "fire_detector"
+        if "световой оповещатель" in branch_path or "звуковой оповещатель" in branch_path or (
+            "оповещател" in search_text and "табло" not in search_text and "извещател" not in search_text
+        ):
+            return "fire_annunciator"
         if any(token in branch_path for token in ("извещатели пожарные", "извещатели охранные", "световой оповещатель", "звуковой оповещатель")) or (
             any(token in search_text for token in ("извещател", "оповещател")) and "табло" not in search_text
         ):
             return "fire_alarm_device"
+        if any(token in branch_path for token in ("дополнительное оборудование для пс", "дополнительное оборудование систем оповещения", "дополнительное оборудование для ос")) and (
+            any(token in search_text for token in ("преобразоват", "повторител", "интерфейс"))
+            and any(token in search_text for token in ("rs485", "modbus", "ethernet", "интерфейс", "протокол"))
+        ):
+            return "security_interface_device"
+        if "приборы приемно контрольные для опс" in branch_path and (
+            any(token in search_text for token in ("пульт", "панель", "блок"))
+            and any(token in search_text for token in ("управл", "контрол", "индикац"))
+            and not any(token in search_text for token in ("интерфейс", "modbus", "rs485"))
+        ):
+            return "security_control_panel"
+        if any(token in branch_path for token in ("приборы приемно контрольные для опс", "дополнительное оборудование для пс", "дополнительное оборудование для ос")) and (
+            any(token in search_text for token in ("модуль", "блок", "устройство"))
+            and any(token in search_text for token in ("пуск", "коммутац", "линии связи", "нагрузк", "изолир", "разветв", "адресн"))
+            and not any(token in search_text for token in ("интерфейс", "modbus", "rs485", "пульт", "индикац"))
+        ):
+            return "security_module_device"
         if any(
             token in branch_path
             for token in (
-                "приборы приёмно-контрольные для опс",
+                "приборы приемно контрольные для опс",
                 "дополнительное оборудование для пс",
                 "дополнительное оборудование систем оповещения",
                 "дополнительное оборудование для ос",
@@ -4817,7 +4842,12 @@ class ReMoMatcher:
             "contactor_starter",
             "control_relay",
             "light_signage",
+            "fire_detector",
+            "fire_annunciator",
             "fire_alarm_device",
+            "security_interface_device",
+            "security_control_panel",
+            "security_module_device",
             "security_control_device",
             "security_software",
             "power_backup",

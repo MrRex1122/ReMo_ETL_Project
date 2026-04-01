@@ -1888,7 +1888,7 @@ class MatchTaxonomyTests(unittest.TestCase):
 
     def test_effective_candidate_family_maps_misclassified_fire_alarm_items(self):
         detector_features = self.matcher._extract_query_features("Извещатель пожарный дымовой адресный")
-        detector_features["entity_type"] = "fire_alarm_device"
+        detector_features["entity_type"] = "fire_detector"
         detector_candidate = {
             "name": "Извещатель пожарный дымовой взрывозащищенный",
             "normalized_name": "извещатель пожарный дымовой взрывозащищенный",
@@ -1896,23 +1896,36 @@ class MatchTaxonomyTests(unittest.TestCase):
             "entity_type": "cable",
             "item_markers": {},
         }
-        control_features = self.matcher._extract_query_features("Блок сигнально-пусковой адресный")
-        control_features["entity_type"] = "security_control_device"
-        control_candidate = {
+        interface_features = self.matcher._extract_query_features("Преобразователь интерфейса RS485 в Modbus RTU")
+        interface_features["entity_type"] = "security_interface_device"
+        interface_candidate = {
             "name": "Преобразователь интерфейса МС-Е",
             "normalized_name": "преобразователь интерфейса мс е",
             "branch_path": "дополнительное оборудование для пс",
             "entity_type": "other",
             "item_markers": {},
         }
+        panel_features = self.matcher._extract_query_features("Пульт контроля и управления")
+        panel_features["entity_type"] = "security_control_panel"
+        panel_candidate = {
+            "name": "Пульт управления и индикации ПУ-02",
+            "normalized_name": "пульт управления и индикации пу 02",
+            "branch_path": "приборы приёмно-контрольные для опс",
+            "entity_type": "other",
+            "item_markers": {},
+        }
 
         self.assertEqual(
             self.matcher._effective_candidate_family_for_query(detector_features, detector_candidate),
-            "fire_alarm_device",
+            "fire_detector",
         )
         self.assertEqual(
-            self.matcher._effective_candidate_family_for_query(control_features, control_candidate),
-            "security_control_device",
+            self.matcher._effective_candidate_family_for_query(interface_features, interface_candidate),
+            "security_interface_device",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(panel_features, panel_candidate),
+            "security_control_panel",
         )
 
     def test_strict_fallback_allows_fastener_like_candidate_after_family_normalization(self):

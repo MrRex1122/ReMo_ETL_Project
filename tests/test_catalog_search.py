@@ -244,15 +244,39 @@ class CatalogSearchTests(unittest.TestCase):
     def test_classify_item_type_splits_other_into_fire_alarm_control_software_power_and_firestop(self):
         self.assertEqual(
             classify_item_type("Извещатель пожарный дымовой адресный"),
-            "fire_alarm_device",
+            "fire_detector",
         )
         self.assertEqual(
             derive_branch_from_text("Извещатель пожарный дымовой адресный"),
             "извещатели пожарные",
         )
         self.assertEqual(
-            classify_item_type("Блок сигнально-пусковой адресный"),
-            "security_control_device",
+            classify_item_type("Оповещатель световой стробоскопический"),
+            "fire_annunciator",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Оповещатель световой стробоскопический"),
+            "световой оповещатель",
+        )
+        self.assertEqual(
+            classify_item_type("Пульт контроля и управления"),
+            "security_control_panel",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Пульт контроля и управления"),
+            "приборы приёмно-контрольные для опс",
+        )
+        self.assertEqual(
+            classify_item_type("Преобразователь интерфейса RS485 в Modbus RTU"),
+            "security_interface_device",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Преобразователь интерфейса RS485 в Modbus RTU"),
+            "дополнительное оборудование для пс",
+        )
+        self.assertEqual(
+            classify_item_type("Модуль подключения нагрузки"),
+            "security_module_device",
         )
         self.assertEqual(
             classify_item_type("ПО Сервер Орион Про"),

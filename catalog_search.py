@@ -877,6 +877,18 @@ def derive_branch_from_text(
                 return "переключатели открытого монтажа"
             if "выключател" in merged and "скрыт" in merged:
                 return "выключатели скрытого монтажа"
+        if registry_family == "fire_detector":
+            if "охран" in merged:
+                return "извещатели охранные"
+            return "извещатели пожарные"
+        if registry_family == "fire_annunciator":
+            if any(token in merged for token in ("звуков", "речев", "сирен")):
+                return "звуковой оповещатель"
+            return "световой оповещатель"
+        if registry_family == "security_control_panel":
+            return "приборы приёмно-контрольные для опс"
+        if registry_family in {"security_interface_device", "security_module_device"}:
+            return "дополнительное оборудование для пс"
         if registry_family in {
             "airflow_blanking_panel",
             "ats_sts",
@@ -896,7 +908,12 @@ def derive_branch_from_text(
             "contactor_starter",
             "control_relay",
             "light_signage",
+            "fire_detector",
+            "fire_annunciator",
             "fire_alarm_device",
+            "security_interface_device",
+            "security_control_panel",
+            "security_module_device",
             "security_control_device",
             "security_software",
             "power_backup",

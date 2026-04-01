@@ -76,13 +76,19 @@ class QueryParserTests(unittest.TestCase):
 
     def test_parse_query_spec_uses_other_subfamily_split_for_fire_alarm_and_supporting_items(self):
         detector = parse_query_spec("Извещатель пожарный дымовой адресный", taxonomy_rules=self.rules)
-        control = parse_query_spec("Блок сигнально-пусковой адресный", taxonomy_rules=self.rules)
+        annunciator = parse_query_spec("Оповещатель световой стробоскопический", taxonomy_rules=self.rules)
+        panel = parse_query_spec("Пульт контроля и управления", taxonomy_rules=self.rules)
+        interface = parse_query_spec("Преобразователь интерфейса RS485 в Modbus RTU", taxonomy_rules=self.rules)
+        module = parse_query_spec("Модуль подключения нагрузки", taxonomy_rules=self.rules)
         software = parse_query_spec("ПО Сервер Орион Про", taxonomy_rules=self.rules)
         battery = parse_query_spec("Аккумуляторная батарея 26 Ач", taxonomy_rules=self.rules)
         firestop = parse_query_spec("Герметик огнезащитный терморасширяющийся", taxonomy_rules=self.rules)
 
-        self.assertEqual(detector.entity_type, "fire_alarm_device")
-        self.assertEqual(control.entity_type, "security_control_device")
+        self.assertEqual(detector.entity_type, "fire_detector")
+        self.assertEqual(annunciator.entity_type, "fire_annunciator")
+        self.assertEqual(panel.entity_type, "security_control_panel")
+        self.assertEqual(interface.entity_type, "security_interface_device")
+        self.assertEqual(module.entity_type, "security_module_device")
         self.assertEqual(software.entity_type, "security_software")
         self.assertEqual(battery.entity_type, "power_backup")
         self.assertEqual(firestop.entity_type, "firestop_material")
