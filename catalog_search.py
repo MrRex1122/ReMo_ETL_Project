@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from difflib import SequenceMatcher
 import json
 import logging
 import os
@@ -2638,6 +2639,86 @@ def _parse_json_from_llm_text(raw_text: str) -> Any:
     raise ValueError("LLM did not return valid JSON")
 
 
+def _normalize_branch_match_key(branch_path: str) -> str:
+    text = clean_text_value(branch_path)
+    if not text:
+        return ""
+    segments = [segment.strip() for segment in re.split(r"\s*>\s*", text) if clean_text_value(segment)]
+    normalized_branch = normalize_branch_path(segments if segments else [text])
+    return normalize_text(normalized_branch)
+
+
+def _branch_match_score(left_branch_path: str, right_branch_path: str) -> float:
+    left_key = _normalize_branch_match_key(left_branch_path)
+    right_key = _normalize_branch_match_key(right_branch_path)
+    if not left_key or not right_key:
+        return 0.0
+    if left_key == right_key:
+        return 1.0
+
+    seq_score = SequenceMatcher(None, left_key, right_key).ratio()
+    left_tokens = set(tokenize(left_key))
+    right_tokens = set(tokenize(right_key))
+    token_score = 0.0
+    if left_tokens and right_tokens:
+        token_score = len(left_tokens & right_tokens) / len(left_tokens | right_tokens)
+    return max(seq_score, token_score)
+
+
+def _align_branch_proposals(
+    proposal_items: Iterable[Mapping[str, Any]],
+    expected_branch_paths: Iterable[str],
+) -> Dict[str, Dict[str, Any]]:
+    expected = [clean_text_value(branch) for branch in expected_branch_paths if clean_text_value(branch)]
+    normalized_expected = {branch: _normalize_branch_match_key(branch) for branch in expected}
+    aligned: Dict[str, Dict[str, Any]] = {}
+
+    for raw_item in proposal_items:
+        item = dict(raw_item or {})
+        response_branch_path = clean_text_value(item.get("search_branch_path"))
+        if not response_branch_path:
+            continue
+
+        if response_branch_path in normalized_expected:
+            item["_matched_branch_path"] = response_branch_path
+            item["_branch_match_method"] = "exact"
+            aligned[response_branch_path] = item
+            continue
+
+        response_key = _normalize_branch_match_key(response_branch_path)
+        if not response_key:
+            continue
+
+        exact_normalized_matches = [
+            branch_path for branch_path, branch_key in normalized_expected.items() if branch_key == response_key
+        ]
+        if len(exact_normalized_matches) == 1:
+            matched_branch = exact_normalized_matches[0]
+            item["_matched_branch_path"] = matched_branch
+            item["_branch_match_method"] = "normalized_exact"
+            aligned[matched_branch] = item
+            continue
+
+        scored_matches = sorted(
+            (
+                (_branch_match_score(response_branch_path, branch_path), branch_path)
+                for branch_path in expected
+            ),
+            key=lambda value: (-value[0], value[1]),
+        )
+        if not scored_matches:
+            continue
+
+        best_score, best_branch = scored_matches[0]
+        second_score = scored_matches[1][0] if len(scored_matches) > 1 else 0.0
+        if best_score >= 0.88 and (best_score - second_score) >= 0.05:
+            item["_matched_branch_path"] = best_branch
+            item["_branch_match_method"] = "fuzzy"
+            aligned[best_branch] = item
+
+    return aligned
+
+
 def _collect_branch_probe_context(
     source_path: Path,
     branch_paths: Iterable[str],
@@ -2700,6 +2781,81 @@ def _collect_branch_probe_context(
     return serializable
 
 
+def _collect_branch_probe_context_richer(
+    source_path: Path,
+    branch_paths: Iterable[str],
+    *,
+    sample_limit: int = 8,
+    chunksize: int | None = None,
+) -> Dict[str, Dict[str, Any]]:
+    branch_list = [clean_text_value(branch) for branch in branch_paths if clean_text_value(branch)]
+    branch_set = set(branch_list)
+    contexts: Dict[str, Dict[str, Any]] = {
+        branch: {
+            "sample_names": [],
+            "sample_rows": [],
+            "top_class_names": Counter(),
+            "top_item_types": Counter(),
+            "top_articles": [],
+        }
+        for branch in branch_list
+    }
+    if not branch_set:
+        return contexts
+
+    effective_chunksize = chunksize or _read_search_build_chunksize()
+    for chunk in iter_search_catalog_chunks(source_path, chunksize=effective_chunksize):
+        if "search_branch_path" not in chunk.columns:
+            continue
+        filtered = chunk[chunk["search_branch_path"].astype(str).isin(branch_set)]
+        if filtered.empty:
+            continue
+
+        for row in filtered.to_dict(orient="records"):
+            branch_path = clean_text_value(row.get("search_branch_path"))
+            if not branch_path or branch_path not in contexts:
+                continue
+            context = contexts[branch_path]
+
+            name = clean_text_value(row.get(CANONICAL_NAME_COLUMN)) or clean_text_value(row.get("search_normalized_name"))
+            class_name = clean_text_value(row.get("Название класса"))
+            item_type = clean_text_value(row.get("Тип изделия"))
+            article = clean_text_value(row.get(CANONICAL_ARTICLE_COLUMN))
+
+            if name and name not in context["sample_names"] and len(context["sample_names"]) < sample_limit:
+                context["sample_names"].append(name)
+            if class_name:
+                context["top_class_names"][class_name] += 1
+            if item_type:
+                context["top_item_types"][item_type] += 1
+            if article and article not in context["top_articles"] and len(context["top_articles"]) < sample_limit:
+                context["top_articles"].append(article)
+
+            sample_row = " | ".join(
+                part
+                for part in (
+                    name,
+                    f"class={class_name}" if class_name else "",
+                    f"type={item_type}" if item_type else "",
+                    f"article={article}" if article else "",
+                )
+                if part
+            )
+            if sample_row and sample_row not in context["sample_rows"] and len(context["sample_rows"]) < sample_limit:
+                context["sample_rows"].append(sample_row)
+
+    serializable: Dict[str, Dict[str, Any]] = {}
+    for branch_path, context in contexts.items():
+        serializable[branch_path] = {
+            "sample_names": list(context["sample_names"]),
+            "sample_rows": list(context["sample_rows"]),
+            "top_class_names": [name for name, _ in context["top_class_names"].most_common(5)],
+            "top_item_types": [name for name, _ in context["top_item_types"].most_common(5)],
+            "top_articles": list(context["top_articles"]),
+        }
+    return serializable
+
+
 def build_search_taxonomy_bootstrap_draft(
     clean_dir: Path,
     *,
@@ -2732,13 +2888,18 @@ def build_search_taxonomy_bootstrap_draft(
     if not source_path.exists():
         raise FileNotFoundError(f"Branch probe source path does not exist: {source_path}")
 
-    branch_context = _collect_branch_probe_context(
+    branch_context = _collect_branch_probe_context_richer(
         source_path,
         selected_branches,
         sample_limit=max(3, int(sample_limit)),
     )
     rules = load_search_taxonomy_rules()
     allowed_families = sorted((build_taxonomy_tree_snapshot(rules).get("families") or {}).keys())
+    audit_map = {
+        clean_text_value(row.get("search_branch_path")): row
+        for row in probe_audit_df.to_dict(orient="records")
+        if clean_text_value(row.get("search_branch_path"))
+    }
 
     branch_payloads: list[dict[str, Any]] = []
     for branch_path in selected_branches:
@@ -2758,12 +2919,18 @@ def build_search_taxonomy_bootstrap_draft(
             }
             for _, row in branch_group.head(5).iterrows()
         ]
+        audit_row = dict(audit_map.get(branch_path, {}) or {})
         branch_payloads.append(
             {
                 "search_branch_path": branch_path,
                 "branch_total_rows": int(branch_group["branch_total_rows"].iloc[0]),
+                "family_count": int(audit_row.get("family_count", len(top_families)) or len(top_families)),
+                "top_family_share": float(audit_row.get("top_family_share", top_families[0]["share"] if top_families else 0.0) or 0.0),
+                "second_family_share": float(audit_row.get("second_family_share", top_families[1]["share"] if len(top_families) > 1 else 0.0) or 0.0),
+                "other_share": float(audit_row.get("other_share", 0.0) or 0.0),
                 "current_top_families": top_families,
                 "sample_names": branch_context.get(branch_path, {}).get("sample_names", []),
+                "sample_rows": branch_context.get(branch_path, {}).get("sample_rows", []),
                 "top_class_names": branch_context.get(branch_path, {}).get("top_class_names", []),
                 "top_item_types": branch_context.get(branch_path, {}).get("top_item_types", []),
                 "top_articles": branch_context.get(branch_path, {}).get("top_articles", []),
@@ -2779,11 +2946,14 @@ def build_search_taxonomy_bootstrap_draft(
         "Для каждой ветки предложи:\n"
         "- suggested_family: одна family из списка\n"
         "- suggested_subfamily: короткая строка snake_case или пустая строка\n"
-        "- suggested_action: keep_mixed | tighten_family_mapping | new_subfamily | exclude_family_from_branch\n"
+        "- suggested_action: keep_mixed | tighten_family_mapping | new_subfamily | exclude_family_from_branch | split_branch\n"
         "- confidence: число от 0 до 1\n"
         "- rationale: короткое объяснение\n"
         "- evidence_tokens: список 2-6 ключевых слов\n"
         "- notes: короткая заметка\n\n"
+        "Если ветка слишком общая и реально содержит несколько разных товарных групп, используй suggested_action=split_branch.\n"
+        "В таком случае не пытайся натянуть одну узкую subfamily на весь branch.\n"
+        "Копируй search_branch_path из входных данных максимально точно.\n\n"
         "Верни JSON-объект вида:\n"
         "{\n"
         '  "branches": [\n'
@@ -2816,11 +2986,7 @@ def build_search_taxonomy_bootstrap_draft(
     else:
         raise ValueError("Unexpected taxonomy bootstrap draft payload")
 
-    proposal_by_branch = {
-        clean_text_value(item.get("search_branch_path")): item
-        for item in proposal_items
-        if clean_text_value(item.get("search_branch_path"))
-    }
+    proposal_by_branch = _align_branch_proposals(proposal_items, [item["search_branch_path"] for item in branch_payloads])
 
     rows: list[dict[str, Any]] = []
     for branch_payload in branch_payloads:
@@ -2839,6 +3005,12 @@ def build_search_taxonomy_bootstrap_draft(
                 "branch_total_rows": int(branch_payload.get("branch_total_rows", 0)),
                 "current_top_family": current_top_family,
                 "current_top_families": json.dumps(current_top_families, ensure_ascii=False),
+                "family_count": int(branch_payload.get("family_count", 0)),
+                "top_family_share": float(branch_payload.get("top_family_share", 0.0) or 0.0),
+                "second_family_share": float(branch_payload.get("second_family_share", 0.0) or 0.0),
+                "other_share": float(branch_payload.get("other_share", 0.0) or 0.0),
+                "response_branch_path": clean_text_value(proposal.get("search_branch_path")),
+                "branch_match_method": clean_text_value(proposal.get("_branch_match_method")),
                 "suggested_family": clean_text_value(proposal.get("suggested_family")),
                 "suggested_subfamily": clean_text_value(proposal.get("suggested_subfamily")),
                 "suggested_action": clean_text_value(proposal.get("suggested_action")),
@@ -2847,6 +3019,7 @@ def build_search_taxonomy_bootstrap_draft(
                 "evidence_tokens": json.dumps([clean_text_value(token) for token in evidence_tokens if clean_text_value(token)], ensure_ascii=False),
                 "notes": clean_text_value(proposal.get("notes")),
                 "sample_names": json.dumps(branch_payload.get("sample_names", []), ensure_ascii=False),
+                "sample_rows": json.dumps(branch_payload.get("sample_rows", []), ensure_ascii=False),
                 "top_class_names": json.dumps(branch_payload.get("top_class_names", []), ensure_ascii=False),
                 "top_item_types": json.dumps(branch_payload.get("top_item_types", []), ensure_ascii=False),
             }
