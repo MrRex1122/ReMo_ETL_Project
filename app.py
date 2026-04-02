@@ -20,6 +20,7 @@ import uuid
 from typing import Any
 from cloudflare_r2_export import upload_file_to_r2
 from catalog_search import (
+    build_search_taxonomy_bootstrap_draft,
     build_search_taxonomy_branch_probe,
     build_search_taxonomy_preview,
     ensure_search_taxonomy_snapshot,
@@ -2616,6 +2617,91 @@ def _render_search_taxonomy_preview_section(clean_dir: Path | None) -> None:
             "Полный список остается в выгрузке `taxonomy_probe_branch_cleanup_audit.csv`."
         )
         st.dataframe(_prepare_df_for_display(probe_audit_df.head(20)), width="stretch")
+
+    st.divider()
+    st.markdown("**🧠 Gemini draft для taxonomy**")
+    st.caption(
+        "Строит черновик mapping только по текущему branch probe. "
+        "Ничего не меняет в боевых правилах автоматически: это отдельный draft JSON/CSV для review."
+    )
+    gemini_api_key = _get_gemini_api_key()
+    if not gemini_api_key:
+        st.info("🔑 Gemini API key не найден. Draft пока недоступен.")
+        return
+
+    draft_json_path = clean_dir / "taxonomy_bootstrap_draft.json"
+    draft_csv_path = clean_dir / "taxonomy_bootstrap_draft.csv"
+    max_draft_branches = max(1, min(20, len(probe_audit_df) if not probe_audit_df.empty else 1))
+    default_draft_branches = max(1, min(5, max_draft_branches))
+    draft_branch_count = int(
+        st.number_input(
+            "Сколько веток отправлять в Gemini draft",
+            min_value=1,
+            max_value=max_draft_branches,
+            value=default_draft_branches,
+            step=1,
+            key="taxonomy_bootstrap_branch_count",
+            help="Рекомендуется 3-8 веток за итерацию, чтобы draft оставался понятным и дешевым.",
+        )
+    )
+    if st.button("🧠 Построить Gemini draft по branch probe", key="build_taxonomy_bootstrap_draft_btn"):
+        try:
+            draft_json_path, draft_csv_path = build_search_taxonomy_bootstrap_draft(
+                clean_dir,
+                api_key=gemini_api_key,
+                max_branches=draft_branch_count,
+            )
+            st.success(f"✓ Gemini draft обновлен: {draft_json_path.name}")
+        except Exception as exc:
+            logger.error("❌ Taxonomy bootstrap draft failed: %s", exc, exc_info=True)
+            st.error(f"❌ Не удалось построить Gemini draft: {exc}")
+
+    if not draft_json_path.exists() or not draft_csv_path.exists():
+        return
+
+    try:
+        draft_payload = json.loads(draft_json_path.read_text(encoding="utf-8"))
+        draft_df = pd.read_csv(draft_csv_path, sep=";", encoding="utf-8")
+    except Exception as exc:
+        st.error(f"❌ Не удалось прочитать Gemini draft: {exc}")
+        return
+
+    draft_metric_col1, draft_metric_col2, draft_metric_col3 = st.columns(3)
+    draft_metric_col1.metric("Веток в draft", len(draft_df))
+    draft_metric_col2.metric("Модель", str(draft_payload.get("model_name", "")))
+    draft_metric_col3.metric(
+        "Средняя confidence",
+        f"{float(pd.to_numeric(draft_df.get('confidence'), errors='coerce').fillna(0.0).mean() if not draft_df.empty else 0.0):.2f}",
+    )
+
+    draft_download_col1, draft_download_col2 = st.columns(2)
+    with draft_download_col1:
+        st.download_button(
+            "📥 Скачать Gemini draft JSON",
+            draft_json_path.read_bytes(),
+            file_name=_taxonomy_snapshot_download_filename(draft_json_path),
+            mime="application/json",
+            key="download_taxonomy_bootstrap_draft_json",
+            on_click="ignore",
+        )
+    with draft_download_col2:
+        st.download_button(
+            "📥 Скачать Gemini draft CSV",
+            draft_csv_path.read_bytes(),
+            file_name=_taxonomy_snapshot_download_filename(draft_csv_path),
+            mime="text/csv",
+            key="download_taxonomy_bootstrap_draft_csv",
+            on_click="ignore",
+        )
+
+    if draft_df.empty:
+        st.info("📭 Gemini draft пустой для текущего branch probe.")
+    else:
+        st.caption(
+            "На экране показывается top-20 предложений из Gemini draft. "
+            "Полный список остается в выгрузке `taxonomy_bootstrap_draft.csv`."
+        )
+        st.dataframe(_prepare_df_for_display(draft_df.head(20)), width="stretch")
 
 
 # ============ MAIN UI ============

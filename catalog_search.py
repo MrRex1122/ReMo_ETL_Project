@@ -7,7 +7,7 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping
+from typing import Any, Callable, Dict, Iterable, List, Mapping
 
 import pandas as pd
 
@@ -18,6 +18,24 @@ try:
 except ImportError:
     duckdb = None
     DUCKDB_AVAILABLE = False
+
+try:
+    from google import genai as genai_sdk
+    from google.genai import types as genai_types
+
+    SEARCH_GENAI_SDK_AVAILABLE = True
+except ImportError:
+    genai_sdk = None
+    genai_types = None
+    SEARCH_GENAI_SDK_AVAILABLE = False
+
+try:
+    import google.generativeai as legacy_genai_sdk
+
+    SEARCH_LEGACY_GENAI_AVAILABLE = True
+except ImportError:
+    legacy_genai_sdk = None
+    SEARCH_LEGACY_GENAI_AVAILABLE = False
 
 from catalog_merge import get_catalog_readiness, get_merged_catalog_path
 from catalog_schema import (
@@ -48,6 +66,8 @@ SEARCH_TAXONOMY_PREVIEW_AUDIT_FILENAME = "taxonomy_preview_branch_cleanup_audit.
 SEARCH_TAXONOMY_PROBE_TREE_FILENAME = "taxonomy_probe_tree.json"
 SEARCH_TAXONOMY_PROBE_BRANCH_SUMMARY_FILENAME = "taxonomy_probe_branch_family_summary.csv"
 SEARCH_TAXONOMY_PROBE_AUDIT_FILENAME = "taxonomy_probe_branch_cleanup_audit.csv"
+SEARCH_TAXONOMY_BOOTSTRAP_DRAFT_JSON_FILENAME = "taxonomy_bootstrap_draft.json"
+SEARCH_TAXONOMY_BOOTSTRAP_DRAFT_CSV_FILENAME = "taxonomy_bootstrap_draft.csv"
 SEARCH_BUILD_DEFAULT_CHUNKSIZE = 50000
 BRANCH_PATH_SEPARATOR = " > "
 DEFAULT_TAXONOMY_RULES_PATH = Path(__file__).with_name("taxonomy_rules.json")
@@ -181,6 +201,14 @@ def get_search_taxonomy_probe_branch_summary_path(clean_dir: Path) -> Path:
 
 def get_search_taxonomy_probe_audit_path(clean_dir: Path) -> Path:
     return Path(clean_dir) / SEARCH_TAXONOMY_PROBE_AUDIT_FILENAME
+
+
+def get_search_taxonomy_bootstrap_draft_json_path(clean_dir: Path) -> Path:
+    return Path(clean_dir) / SEARCH_TAXONOMY_BOOTSTRAP_DRAFT_JSON_FILENAME
+
+
+def get_search_taxonomy_bootstrap_draft_csv_path(clean_dir: Path) -> Path:
+    return Path(clean_dir) / SEARCH_TAXONOMY_BOOTSTRAP_DRAFT_CSV_FILENAME
 
 
 def is_search_catalog_path(path: str | Path) -> bool:
@@ -2549,3 +2577,299 @@ def build_search_taxonomy_branch_probe(
         len(audit_df),
     )
     return probe_tree_path, probe_summary_path, probe_audit_path
+
+
+def _init_search_gemini_backend(api_key: str) -> tuple[str, Any]:
+    if SEARCH_GENAI_SDK_AVAILABLE:
+        try:
+            return "google-genai", genai_sdk.Client(api_key=api_key)
+        except Exception as exc:
+            logger.warning("Failed to initialize google-genai for taxonomy bootstrap: %s", exc)
+
+    if SEARCH_LEGACY_GENAI_AVAILABLE:
+        try:
+            legacy_genai_sdk.configure(api_key=api_key)
+            return "google-generativeai", legacy_genai_sdk
+        except Exception as exc:
+            logger.warning("Failed to initialize google-generativeai for taxonomy bootstrap: %s", exc)
+
+    raise RuntimeError("Gemini backend is not available for taxonomy bootstrap draft")
+
+
+def _generate_search_gemini_text(prompt: str, api_key: str, *, model_name: str = "gemini-2.5-flash") -> str:
+    backend, client = _init_search_gemini_backend(api_key)
+    if backend == "google-genai":
+        request_kwargs: Dict[str, Any] = {"model": model_name, "contents": prompt}
+        if genai_types is not None:
+            request_kwargs["config"] = genai_types.GenerateContentConfig(
+                automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(disable=True),
+                tool_config=genai_types.ToolConfig(
+                    function_calling_config=genai_types.FunctionCallingConfig(mode="NONE"),
+                ),
+            )
+        response = client.models.generate_content(**request_kwargs)
+        return (getattr(response, "text", None) or "").strip()
+
+    model = client.GenerativeModel(model_name)
+    response = model.generate_content(prompt, stream=False)
+    return (response.text or "").strip()
+
+
+def _parse_json_from_llm_text(raw_text: str) -> Any:
+    text = clean_text_value(raw_text)
+    if not text:
+        raise ValueError("LLM returned empty text")
+
+    fenced_match = re.search(r"```(?:json)?\s*(.*?)```", text, flags=re.DOTALL | re.IGNORECASE)
+    candidate_texts = [text]
+    if fenced_match:
+        candidate_texts.insert(0, fenced_match.group(1).strip())
+
+    first_object = min((idx for idx in (text.find("{"), text.find("[")) if idx >= 0), default=-1)
+    if first_object >= 0:
+        candidate_texts.append(text[first_object:].strip())
+
+    for candidate in candidate_texts:
+        try:
+            return json.loads(candidate)
+        except Exception:
+            continue
+
+    raise ValueError("LLM did not return valid JSON")
+
+
+def _collect_branch_probe_context(
+    source_path: Path,
+    branch_paths: Iterable[str],
+    *,
+    sample_limit: int = 8,
+    chunksize: int | None = None,
+) -> Dict[str, Dict[str, Any]]:
+    branch_list = [clean_text_value(branch) for branch in branch_paths if clean_text_value(branch)]
+    branch_set = set(branch_list)
+    contexts: Dict[str, Dict[str, Any]] = {
+        branch: {
+            "sample_names": [],
+            "top_class_names": Counter(),
+            "top_item_types": Counter(),
+            "top_articles": [],
+        }
+        for branch in branch_list
+    }
+    if not branch_set:
+        return contexts
+
+    effective_chunksize = chunksize or _read_search_build_chunksize()
+    for chunk in iter_search_catalog_chunks(source_path, chunksize=effective_chunksize):
+        if "search_branch_path" not in chunk.columns:
+            continue
+        filtered = chunk[chunk["search_branch_path"].astype(str).isin(branch_set)]
+        if filtered.empty:
+            continue
+
+        for row in filtered.to_dict(orient="records"):
+            branch_path = clean_text_value(row.get("search_branch_path"))
+            if not branch_path or branch_path not in contexts:
+                continue
+            context = contexts[branch_path]
+
+            name = clean_text_value(row.get(CANONICAL_NAME_COLUMN))
+            if name and name not in context["sample_names"] and len(context["sample_names"]) < sample_limit:
+                context["sample_names"].append(name)
+
+            class_name = clean_text_value(row.get("Название класса"))
+            if class_name:
+                context["top_class_names"][class_name] += 1
+
+            item_type = clean_text_value(row.get("Тип изделия"))
+            if item_type:
+                context["top_item_types"][item_type] += 1
+
+            article = clean_text_value(row.get(CANONICAL_ARTICLE_COLUMN))
+            if article and article not in context["top_articles"] and len(context["top_articles"]) < sample_limit:
+                context["top_articles"].append(article)
+
+    serializable: Dict[str, Dict[str, Any]] = {}
+    for branch_path, context in contexts.items():
+        serializable[branch_path] = {
+            "sample_names": list(context["sample_names"]),
+            "top_class_names": [name for name, _ in context["top_class_names"].most_common(5)],
+            "top_item_types": [name for name, _ in context["top_item_types"].most_common(5)],
+            "top_articles": list(context["top_articles"]),
+        }
+    return serializable
+
+
+def build_search_taxonomy_bootstrap_draft(
+    clean_dir: Path,
+    *,
+    api_key: str,
+    max_branches: int = 8,
+    sample_limit: int = 8,
+    model_name: str = "gemini-2.5-flash",
+    generate_text: Callable[[str], str] | None = None,
+) -> tuple[Path, Path]:
+    clean_dir = Path(clean_dir)
+    probe_tree_path = get_search_taxonomy_probe_tree_path(clean_dir)
+    probe_summary_path = get_search_taxonomy_probe_branch_summary_path(clean_dir)
+    probe_audit_path = get_search_taxonomy_probe_audit_path(clean_dir)
+    if not all(path.exists() for path in (probe_tree_path, probe_summary_path, probe_audit_path)):
+        raise FileNotFoundError("Branch probe artifacts are required before building taxonomy bootstrap draft")
+
+    probe_snapshot = json.loads(probe_tree_path.read_text(encoding="utf-8"))
+    probe_summary_df = pd.read_csv(probe_summary_path, sep=";", encoding="utf-8")
+    probe_audit_df = pd.read_csv(probe_audit_path, sep=";", encoding="utf-8")
+    if probe_audit_df.empty:
+        raise RuntimeError("Branch probe has no suspicious branches to bootstrap")
+
+    selected_branches = (
+        probe_audit_df["search_branch_path"].astype(str).head(max(1, int(max_branches))).tolist()
+    )
+    source_path_value = clean_text_value((probe_snapshot.get("catalog_stats", {}) or {}).get("source_path"))
+    if not source_path_value:
+        raise RuntimeError("Branch probe snapshot does not contain source_path")
+    source_path = Path(source_path_value)
+    if not source_path.exists():
+        raise FileNotFoundError(f"Branch probe source path does not exist: {source_path}")
+
+    branch_context = _collect_branch_probe_context(
+        source_path,
+        selected_branches,
+        sample_limit=max(3, int(sample_limit)),
+    )
+    rules = load_search_taxonomy_rules()
+    allowed_families = sorted((build_taxonomy_tree_snapshot(rules).get("families") or {}).keys())
+
+    branch_payloads: list[dict[str, Any]] = []
+    for branch_path in selected_branches:
+        branch_group = probe_summary_df[probe_summary_df["search_branch_path"].astype(str) == branch_path].copy()
+        if branch_group.empty:
+            continue
+        branch_group["rows_count"] = pd.to_numeric(branch_group["rows_count"], errors="coerce").fillna(0).astype(int)
+        branch_group["family_share_within_branch"] = pd.to_numeric(
+            branch_group["family_share_within_branch"], errors="coerce"
+        ).fillna(0.0)
+        branch_group = branch_group.sort_values(["rows_count", "effective_family"], ascending=[False, True], kind="stable")
+        top_families = [
+            {
+                "family": str(row["effective_family"]),
+                "rows_count": int(row["rows_count"]),
+                "share": round(float(row["family_share_within_branch"]), 6),
+            }
+            for _, row in branch_group.head(5).iterrows()
+        ]
+        branch_payloads.append(
+            {
+                "search_branch_path": branch_path,
+                "branch_total_rows": int(branch_group["branch_total_rows"].iloc[0]),
+                "current_top_families": top_families,
+                "sample_names": branch_context.get(branch_path, {}).get("sample_names", []),
+                "top_class_names": branch_context.get(branch_path, {}).get("top_class_names", []),
+                "top_item_types": branch_context.get(branch_path, {}).get("top_item_types", []),
+                "top_articles": branch_context.get(branch_path, {}).get("top_articles", []),
+            }
+        )
+
+    prompt = (
+        "Ты помогаешь строить taxonomy для поисковой товарной БД.\n"
+        "Нужно предложить черновик mapping для подозрительных веток. "
+        "Не меняй данные, не объясняй общими словами, верни только JSON.\n\n"
+        "Доступные family:\n"
+        f"{json.dumps(allowed_families, ensure_ascii=False)}\n\n"
+        "Для каждой ветки предложи:\n"
+        "- suggested_family: одна family из списка\n"
+        "- suggested_subfamily: короткая строка snake_case или пустая строка\n"
+        "- suggested_action: keep_mixed | tighten_family_mapping | new_subfamily | exclude_family_from_branch\n"
+        "- confidence: число от 0 до 1\n"
+        "- rationale: короткое объяснение\n"
+        "- evidence_tokens: список 2-6 ключевых слов\n"
+        "- notes: короткая заметка\n\n"
+        "Верни JSON-объект вида:\n"
+        "{\n"
+        '  "branches": [\n'
+        "    {\n"
+        '      "search_branch_path": "...",\n'
+        '      "suggested_family": "...",\n'
+        '      "suggested_subfamily": "",\n'
+        '      "suggested_action": "tighten_family_mapping",\n'
+        '      "confidence": 0.91,\n'
+        '      "rationale": "...",\n'
+        '      "evidence_tokens": ["..."],\n'
+        '      "notes": "..."\n'
+        "    }\n"
+        "  ]\n"
+        "}\n\n"
+        "Ветки для разбора:\n"
+        f"{json.dumps(branch_payloads, ensure_ascii=False, indent=2)}"
+    )
+
+    raw_text = generate_text(prompt) if generate_text is not None else _generate_search_gemini_text(
+        prompt,
+        api_key,
+        model_name=model_name,
+    )
+    parsed = _parse_json_from_llm_text(raw_text)
+    if isinstance(parsed, dict):
+        proposal_items = parsed.get("branches", [])
+    elif isinstance(parsed, list):
+        proposal_items = parsed
+    else:
+        raise ValueError("Unexpected taxonomy bootstrap draft payload")
+
+    proposal_by_branch = {
+        clean_text_value(item.get("search_branch_path")): item
+        for item in proposal_items
+        if clean_text_value(item.get("search_branch_path"))
+    }
+
+    rows: list[dict[str, Any]] = []
+    for branch_payload in branch_payloads:
+        branch_path = branch_payload["search_branch_path"]
+        proposal = proposal_by_branch.get(branch_path, {})
+        current_top_family = ""
+        current_top_families = branch_payload.get("current_top_families", [])
+        if current_top_families:
+            current_top_family = clean_text_value(current_top_families[0].get("family"))
+        evidence_tokens = proposal.get("evidence_tokens", [])
+        if not isinstance(evidence_tokens, list):
+            evidence_tokens = []
+        rows.append(
+            {
+                "search_branch_path": branch_path,
+                "branch_total_rows": int(branch_payload.get("branch_total_rows", 0)),
+                "current_top_family": current_top_family,
+                "current_top_families": json.dumps(current_top_families, ensure_ascii=False),
+                "suggested_family": clean_text_value(proposal.get("suggested_family")),
+                "suggested_subfamily": clean_text_value(proposal.get("suggested_subfamily")),
+                "suggested_action": clean_text_value(proposal.get("suggested_action")),
+                "confidence": float(proposal.get("confidence", 0.0) or 0.0),
+                "rationale": clean_text_value(proposal.get("rationale")),
+                "evidence_tokens": json.dumps([clean_text_value(token) for token in evidence_tokens if clean_text_value(token)], ensure_ascii=False),
+                "notes": clean_text_value(proposal.get("notes")),
+                "sample_names": json.dumps(branch_payload.get("sample_names", []), ensure_ascii=False),
+                "top_class_names": json.dumps(branch_payload.get("top_class_names", []), ensure_ascii=False),
+                "top_item_types": json.dumps(branch_payload.get("top_item_types", []), ensure_ascii=False),
+            }
+        )
+
+    draft_json_path = get_search_taxonomy_bootstrap_draft_json_path(clean_dir)
+    draft_csv_path = get_search_taxonomy_bootstrap_draft_csv_path(clean_dir)
+    draft_payload = {
+        "generated_at": pd.Timestamp.utcnow().isoformat(),
+        "mode": "branch_probe_bootstrap_draft",
+        "model_name": model_name,
+        "source_path": str(source_path),
+        "selected_branches": selected_branches,
+        "allowed_families": allowed_families,
+        "branches": rows,
+        "raw_response": raw_text,
+    }
+    draft_json_path.write_text(json.dumps(draft_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    pd.DataFrame(rows).to_csv(draft_csv_path, sep=";", encoding="utf-8", index=False)
+    logger.info(
+        "🧠 Taxonomy bootstrap draft complete: json=%s csv=%s branches=%s",
+        draft_json_path,
+        draft_csv_path,
+        len(rows),
+    )
+    return draft_json_path, draft_csv_path

@@ -146,5 +146,13 @@ class AppUiRegressionTests(unittest.TestCase):
         self.assertIn("probe_audit_df.head(20)", app_source)
 
 
+    def test_taxonomy_preview_ui_supports_gemini_bootstrap_draft(self):
+        app_source = Path("app.py").read_text(encoding="utf-8")
+        self.assertIn("build_search_taxonomy_bootstrap_draft", app_source)
+        self.assertIn("Gemini draft", app_source)
+        self.assertIn("Gemini draft по branch probe", app_source)
+        self.assertIn("taxonomy_bootstrap_draft.csv", app_source)
+        self.assertIn("draft_df.head(20)", app_source)
+
 if __name__ == "__main__":
     unittest.main()

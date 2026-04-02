@@ -11,6 +11,7 @@ from catalog_merge import refresh_merged_catalog
 from catalog_search import (
     DUCKDB_AVAILABLE,
     build_search_catalog_from_merged,
+    build_search_taxonomy_bootstrap_draft,
     build_search_taxonomy_branch_probe,
     build_search_taxonomy_preview,
     classify_item_type,
@@ -26,6 +27,8 @@ from catalog_search import (
     get_search_catalog_csv_path,
     get_search_catalog_duckdb_path,
     get_search_catalog_readiness,
+    get_search_taxonomy_bootstrap_draft_csv_path,
+    get_search_taxonomy_bootstrap_draft_json_path,
     get_search_taxonomy_probe_audit_path,
     get_search_taxonomy_probe_branch_summary_path,
     get_search_taxonomy_probe_tree_path,
@@ -856,6 +859,140 @@ class CatalogSearchTests(unittest.TestCase):
                 set(summary_df["search_branch_path"]),
                 {"свет > светильники", "электрика > автоматы > модульные"},
             )
+
+    def test_build_search_taxonomy_bootstrap_draft_uses_branch_probe_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            search_path = get_search_catalog_csv_path(root)
+            pd.DataFrame(
+                [
+                    {
+                        "Наименование": "Крышка для кабельного лотка 100мм",
+                        "Артикул": "TR-1",
+                        "Цена розничная": 10,
+                        "Название класса": "Крышки Для Кабельных Лотков Оцинкованные",
+                        "Код класса": "CLS-1",
+                        "Тип изделия": "Крышка",
+                        "Тип исполнения кабельного изделия": "",
+                        "Производитель": "ReMo",
+                        "search_branch_path": "крышки для кабельных лотков оцинкованные",
+                        "search_branch_leaf": "крышки для кабельных лотков оцинкованные",
+                        "search_normalized_name": "крышка для кабельного лотка 100мм",
+                        "search_tokens_json": "[]",
+                        "search_entity_type": "tray_sheet",
+                        "search_effective_family": "rack_accessory_strict",
+                        "search_effective_entity_type": "rack_accessory_strict",
+                        "search_item_markers_json": "{}",
+                    },
+                    {
+                        "Наименование": "Лоток листовой 100х50",
+                        "Артикул": "TR-2",
+                        "Цена розничная": 10,
+                        "Название класса": "Крышки Для Кабельных Лотков Оцинкованные",
+                        "Код класса": "CLS-1",
+                        "Тип изделия": "Лоток",
+                        "Тип исполнения кабельного изделия": "",
+                        "Производитель": "ReMo",
+                        "search_branch_path": "крышки для кабельных лотков оцинкованные",
+                        "search_branch_leaf": "крышки для кабельных лотков оцинкованные",
+                        "search_normalized_name": "лоток листовой 100х50",
+                        "search_tokens_json": "[]",
+                        "search_entity_type": "tray_sheet",
+                        "search_effective_family": "tray_sheet",
+                        "search_effective_entity_type": "tray_sheet",
+                        "search_item_markers_json": "{}",
+                    },
+                ]
+            ).to_csv(search_path, sep=";", encoding="utf-8", index=False)
+
+            get_search_taxonomy_probe_tree_path(root).write_text(
+                json.dumps(
+                    {
+                        "catalog_stats": {
+                            "mode": "branch_probe",
+                            "source_path": str(search_path),
+                            "selected_branches": ["крышки для кабельных лотков оцинкованные"],
+                        }
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            pd.DataFrame(
+                [
+                    {
+                        "search_branch_path": "крышки для кабельных лотков оцинкованные",
+                        "branch_total_rows": 2,
+                        "effective_family": "rack_accessory_strict",
+                        "rows_count": 1,
+                        "family_share_within_branch": 0.5,
+                    },
+                    {
+                        "search_branch_path": "крышки для кабельных лотков оцинкованные",
+                        "branch_total_rows": 2,
+                        "effective_family": "tray_sheet",
+                        "rows_count": 1,
+                        "family_share_within_branch": 0.5,
+                    },
+                ]
+            ).to_csv(get_search_taxonomy_probe_branch_summary_path(root), sep=";", encoding="utf-8", index=False)
+            pd.DataFrame(
+                [
+                    {
+                        "search_branch_path": "крышки для кабельных лотков оцинкованные",
+                        "branch_total_rows": 2,
+                        "family_count": 2,
+                        "top_family": "rack_accessory_strict",
+                        "top_family_rows": 1,
+                        "top_family_share": 0.5,
+                        "second_family": "tray_sheet",
+                        "second_family_rows": 1,
+                        "second_family_share": 0.5,
+                        "other_rows": 0,
+                        "other_share": 0.0,
+                        "suspicious_score": 1.0,
+                        "top_families": "rack_accessory_strict (1) | tray_sheet (1)",
+                    }
+                ]
+            ).to_csv(get_search_taxonomy_probe_audit_path(root), sep=";", encoding="utf-8", index=False)
+
+            json_path, csv_path = build_search_taxonomy_bootstrap_draft(
+                root,
+                api_key="test",
+                max_branches=1,
+                generate_text=lambda _prompt: json.dumps(
+                    {
+                        "branches": [
+                            {
+                                "search_branch_path": "крышки для кабельных лотков оцинкованные",
+                                "suggested_family": "rack_accessory_strict",
+                                "suggested_subfamily": "tray_cover",
+                                "suggested_action": "tighten_family_mapping",
+                                "confidence": 0.93,
+                                "rationale": "Крышки для лотков ближе к аксессуарам трассы, а не к самому лотку.",
+                                "evidence_tokens": ["крышки", "лотков", "крышка"],
+                                "notes": "Хороший кандидат на отдельный subfamily.",
+                            }
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+
+            self.assertEqual(json_path, get_search_taxonomy_bootstrap_draft_json_path(root))
+            self.assertEqual(csv_path, get_search_taxonomy_bootstrap_draft_csv_path(root))
+            self.assertTrue(json_path.exists())
+            self.assertTrue(csv_path.exists())
+
+            draft_payload = json.loads(json_path.read_text(encoding="utf-8"))
+            self.assertEqual(draft_payload["mode"], "branch_probe_bootstrap_draft")
+            self.assertEqual(draft_payload["selected_branches"], ["крышки для кабельных лотков оцинкованные"])
+
+            draft_df = pd.read_csv(csv_path, sep=";", encoding="utf-8")
+            self.assertEqual(len(draft_df), 1)
+            self.assertEqual(draft_df.at[0, "suggested_family"], "rack_accessory_strict")
+            self.assertEqual(draft_df.at[0, "suggested_subfamily"], "tray_cover")
 
     def test_build_search_catalog_can_write_csv_explicitly(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
