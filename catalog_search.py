@@ -962,6 +962,47 @@ def _looks_like_cable_infrastructure_class_name(normalized_class_name: str) -> b
     )
 
 
+def _normalize_effective_entity_type_by_catalog_branch(
+    *,
+    branch_path: str,
+    effective_entity_type: str,
+    raw_entity_type: str,
+    rules: Mapping[str, Any],
+) -> str:
+    normalized_branch = normalize_branch_path([branch_path])
+    if not normalized_branch:
+        return effective_entity_type
+
+    tray_sheet_branch_markers = (
+        "кабельные лотки",
+        "листовые лотки",
+        "лестничные лотки",
+        "разделители и перегородки для кабельных лотков",
+    )
+    tray_accessory_branch_markers = (
+        "углы и повороты кабельных лотков",
+        "углы для кабель-каналов",
+        "тройники для кабель-каналов",
+        "крышки для кабельных лотков",
+        "ответвители для кабельных лотков",
+        "кронштейны и консоли для кабельных лотков",
+        "профили strut системы для кабельных лотков",
+        "соединители для кабельных лотков",
+        "переходники для кабельных лотков",
+        "заглушки для кабельных лотков",
+        "заглушки для кабель-каналов",
+        "фиксаторы для кабельных лотков",
+        "подвесы и крепления для кабельных лотков",
+    )
+
+    if any(marker in normalized_branch for marker in tray_accessory_branch_markers):
+        return "rack_accessory_strict"
+    if any(marker in normalized_branch for marker in tray_sheet_branch_markers):
+        return "tray_sheet"
+
+    return effective_entity_type or raw_entity_type
+
+
 def _normalize_catalog_effective_entity_type(
     *,
     raw_entity_type: str,
@@ -1480,6 +1521,12 @@ def build_search_projection_row(
         raw_entity_type=entity_type,
         candidate_entity_type=effective_entity_type,
         normalized_text=normalize_text(combined_text, synonyms=synonyms),
+        rules=rules,
+    )
+    effective_entity_type = _normalize_effective_entity_type_by_catalog_branch(
+        branch_path=branch_path,
+        effective_entity_type=effective_entity_type,
+        raw_entity_type=entity_type,
         rules=rules,
     )
     effective_family = entity_family_for_type(effective_entity_type or entity_type, rules)

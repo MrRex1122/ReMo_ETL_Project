@@ -417,6 +417,53 @@ class CatalogSearchTests(unittest.TestCase):
             )
             self.assertEqual(tray["search_effective_family"], "tray_sheet")
 
+    def test_build_search_catalog_aligns_cable_tray_leaf_branches_with_effective_family(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;Тип исполнения кабельного изделия;Производитель\n"
+                    "Лоток листовой 100х50 оцинкованный;TR-1;10;Кабельные Лотки Оцинкованные (Метод Сендзимира);CLS-1;Аксессуар для кабельной трассы;;ReMo\n"
+                    "Переходник левый 200/100 для кабельного лотка;TR-2;10;Переходники Для Кабельных Лотков Оцинкованные (Метод Сендзимира);CLS-2;Переходник;;ReMo\n"
+                    "Подвес потолочный для кабельного лотка;TR-3;10;Подвесы И Крепления Для Кабельных Лотков Оцинкованные (Метод Сендзимира);CLS-3;Подвес;;ReMo\n"
+                    "Перегородка продольная для кабельного лотка;TR-4;10;Разделители И Перегородки Для Кабельных Лотков Оцинкованные (Метод Сендзимира);CLS-4;Перегородка;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+
+            tray = built.loc[built["Артикул"] == "TR-1"].iloc[0]
+            adapter = built.loc[built["Артикул"] == "TR-2"].iloc[0]
+            hanger = built.loc[built["Артикул"] == "TR-3"].iloc[0]
+            divider = built.loc[built["Артикул"] == "TR-4"].iloc[0]
+
+            self.assertEqual(
+                tray["search_branch_path"],
+                "кабельные лотки оцинкованные (метод сендзимира)",
+            )
+            self.assertEqual(tray["search_effective_family"], "tray_sheet")
+
+            self.assertEqual(
+                adapter["search_branch_path"],
+                "переходники для кабельных лотков оцинкованные (метод сендзимира)",
+            )
+            self.assertEqual(adapter["search_effective_family"], "rack_accessory_strict")
+
+            self.assertEqual(
+                hanger["search_branch_path"],
+                "подвесы и крепления для кабельных лотков оцинкованные (метод сендзимира)",
+            )
+            self.assertEqual(hanger["search_effective_family"], "rack_accessory_strict")
+
+            self.assertEqual(
+                divider["search_branch_path"],
+                "разделители и перегородки для кабельных лотков оцинкованные (метод сендзимира)",
+            )
+            self.assertEqual(divider["search_effective_family"], "tray_sheet")
+
     def test_classify_item_type_does_not_treat_ascii_ups_ports_as_iec_power_cable(self):
         self.assertNotEqual(
             classify_item_type("online ups 2000va input IEC-320-C20 output IEC-320-C13 IEC-320-C19"),
