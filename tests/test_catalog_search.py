@@ -332,6 +332,42 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(avr["search_effective_family"], "breaker")
             self.assertEqual(avr["search_effective_entity_type"], "breaker")
 
+    def test_build_search_catalog_cleans_breaker_and_lighting_branch_contamination(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;Тип исполнения кабельного изделия;Производитель\n"
+                    "Выключатель автоматический модульный 1P 16A;BR-1;10;Автоматические выключатели модульные;CLS-1;Выключатель автоматический;;ReMo\n"
+                    "Светильник светодиодный консольный 100Вт;LGT-1;10;Светильники наружные;CLS-2;Светильник;;ReMo\n"
+                    "Светильник аварийный с держателем и кронштейном;LGT-2;10;Светильники аварийные;CLS-3;Светильник;;ReMo\n"
+                    "Светильник аварийный с RJ45 интерфейсом;LGT-3;10;Светильники аварийные;CLS-4;Светильник;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+
+            breaker = built.loc[built["Артикул"] == "BR-1"].iloc[0]
+            lighting_console = built.loc[built["Артикул"] == "LGT-1"].iloc[0]
+            lighting_holder = built.loc[built["Артикул"] == "LGT-2"].iloc[0]
+            lighting_rj45 = built.loc[built["Артикул"] == "LGT-3"].iloc[0]
+
+            self.assertTrue(str(breaker["search_branch_path"]).startswith("электрика > автоматы"))
+            self.assertEqual(breaker["search_effective_family"], "breaker")
+            self.assertEqual(breaker["search_effective_entity_type"], "breaker")
+
+            self.assertEqual(lighting_console["search_branch_path"], "свет > светильники")
+            self.assertEqual(lighting_console["search_effective_family"], "lighting_fixture")
+
+            self.assertEqual(lighting_holder["search_branch_path"], "свет > светильники")
+            self.assertEqual(lighting_holder["search_effective_family"], "lighting_fixture")
+
+            self.assertEqual(lighting_rj45["search_branch_path"], "свет > светильники")
+            self.assertEqual(lighting_rj45["search_effective_family"], "lighting_fixture")
+
     def test_classify_item_type_does_not_treat_ascii_ups_ports_as_iec_power_cable(self):
         self.assertNotEqual(
             classify_item_type("online ups 2000va input IEC-320-C20 output IEC-320-C13 IEC-320-C19"),

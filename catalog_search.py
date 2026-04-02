@@ -864,6 +864,68 @@ def _has_strong_security_domain_signal(normalized_text: str) -> bool:
     )
 
 
+def _has_strong_breaker_domain_signal(normalized_text: str) -> bool:
+    normalized = normalize_text(normalized_text)
+    if not normalized:
+        return False
+    breaker_markers = (
+        "автоматическ",
+        "автомат ",
+        " автомат",
+        "выключатель нагрузки",
+        "дифавтомат",
+        "дифф",
+        "узо",
+        "рубильник",
+        "mccb",
+        "rcbo",
+        "rcd",
+        "mcb",
+    )
+    return any(marker in normalized for marker in breaker_markers)
+
+
+def _has_wall_wiring_signal(normalized_text: str) -> bool:
+    normalized = normalize_text(normalized_text)
+    if not normalized:
+        return False
+    return any(
+        marker in normalized
+        for marker in (
+            "скрыт",
+            "открыт",
+            "клавиш",
+            "рамк",
+            "механизм",
+            "установоч",
+            "розетк",
+            "переключател",
+            "диммер",
+        )
+    )
+
+
+def _has_strong_lighting_domain_signal(normalized_text: str) -> bool:
+    normalized = normalize_text(normalized_text)
+    if not normalized:
+        return False
+    return any(
+        marker in normalized
+        for marker in (
+            "светильник",
+            "прожектор",
+            "аварийн",
+            "освещен",
+            "светодиод",
+            "дво",
+            "дсо",
+            "дсп",
+            "дпо",
+            "дку",
+        )
+    )
+
+
 def _normalize_catalog_effective_entity_type(
     *,
     raw_entity_type: str,
@@ -873,6 +935,17 @@ def _normalize_catalog_effective_entity_type(
 ) -> str:
     candidate_family = entity_family_for_type(candidate_entity_type, rules)
     raw_family = entity_family_for_type(raw_entity_type, rules)
+    if candidate_family in {
+        "rack_accessory_strict",
+        "rj45_connector",
+        "keystone",
+        "switch_wiring",
+    } and _has_strong_lighting_domain_signal(normalized_text):
+        return "lighting_fixture"
+    if candidate_family == "switch_wiring":
+        if _has_strong_breaker_domain_signal(normalized_text) and not _has_wall_wiring_signal(normalized_text):
+            return "breaker"
+        return candidate_entity_type
     if candidate_family not in {
         "security_interface_device",
         "security_control_panel",
