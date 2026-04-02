@@ -11,6 +11,7 @@ from catalog_merge import refresh_merged_catalog
 from catalog_search import (
     DUCKDB_AVAILABLE,
     build_search_catalog_from_merged,
+    build_search_taxonomy_branch_probe,
     build_search_taxonomy_preview,
     classify_item_type,
     derive_branch_from_text,
@@ -25,6 +26,9 @@ from catalog_search import (
     get_search_catalog_csv_path,
     get_search_catalog_duckdb_path,
     get_search_catalog_readiness,
+    get_search_taxonomy_probe_audit_path,
+    get_search_taxonomy_probe_branch_summary_path,
+    get_search_taxonomy_probe_tree_path,
     is_search_catalog_path,
     refresh_search_catalog,
 )
@@ -719,6 +723,47 @@ class CatalogSearchTests(unittest.TestCase):
             audit_df = pd.read_csv(audit_path, sep=";", encoding="utf-8")
             self.assertIn("search_branch_path", audit_df.columns)
             self.assertIn("suspicious_score", audit_df.columns)
+
+    def test_build_search_taxonomy_branch_probe_writes_probe_artifacts_for_selected_branches(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Выключатель автоматический модульный 1P 16A;BR-1;10;Автоматические выключатели модульные;CLS-1;Выключатель автоматический;;ReMo\n"
+                    "Светильник светодиодный консольный 100Вт;LGT-1;10;Светильники наружные;CLS-2;Светильник;;ReMo\n"
+                    "Кабель интерфейсный RS-485;IF-1;10;Кабели интерфейсные;CLS-3;Кабель;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            tree_path, summary_path, audit_path = build_search_taxonomy_branch_probe(
+                root,
+                ["свет > светильники", "электрика > автоматы > модульные"],
+            )
+
+            self.assertEqual(tree_path, get_search_taxonomy_probe_tree_path(root))
+            self.assertEqual(summary_path, get_search_taxonomy_probe_branch_summary_path(root))
+            self.assertEqual(audit_path, get_search_taxonomy_probe_audit_path(root))
+            self.assertTrue(tree_path.exists())
+            self.assertTrue(summary_path.exists())
+            self.assertTrue(audit_path.exists())
+
+            snapshot = json.loads(tree_path.read_text(encoding="utf-8"))
+            self.assertEqual(snapshot["catalog_stats"]["mode"], "branch_probe")
+            self.assertEqual(
+                set(snapshot["catalog_stats"]["selected_branches"]),
+                {"свет > светильники", "электрика > автоматы > модульные"},
+            )
+
+            summary_df = pd.read_csv(summary_path, sep=";", encoding="utf-8")
+            self.assertEqual(
+                set(summary_df["search_branch_path"]),
+                {"свет > светильники", "электрика > автоматы > модульные"},
+            )
 
     def test_build_search_catalog_can_write_csv_explicitly(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

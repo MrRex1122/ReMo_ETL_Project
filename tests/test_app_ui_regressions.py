@@ -137,6 +137,14 @@ class AppUiRegressionTests(unittest.TestCase):
         self.assertIn("taxonomy_preview_branch_cleanup_audit.csv", app_source)
         self.assertIn("preview_audit_df.head(20)", app_source)
 
+    def test_taxonomy_preview_ui_supports_branch_probe_for_selected_branches(self):
+        app_source = Path("app.py").read_text(encoding="utf-8")
+        self.assertIn("build_search_taxonomy_branch_probe", app_source)
+        self.assertIn("Branch probe по выбранным веткам", app_source)
+        self.assertIn("Построить branch probe по выбранным веткам", app_source)
+        self.assertIn("taxonomy_probe_branch_cleanup_audit.csv", app_source)
+        self.assertIn("probe_audit_df.head(20)", app_source)
+
 
 if __name__ == "__main__":
     unittest.main()

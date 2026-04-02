@@ -45,6 +45,9 @@ SEARCH_TAXONOMY_BRANCH_SUMMARY_FILENAME = "taxonomy_branch_family_summary.csv"
 SEARCH_TAXONOMY_PREVIEW_TREE_FILENAME = "taxonomy_preview_tree.json"
 SEARCH_TAXONOMY_PREVIEW_BRANCH_SUMMARY_FILENAME = "taxonomy_preview_branch_family_summary.csv"
 SEARCH_TAXONOMY_PREVIEW_AUDIT_FILENAME = "taxonomy_preview_branch_cleanup_audit.csv"
+SEARCH_TAXONOMY_PROBE_TREE_FILENAME = "taxonomy_probe_tree.json"
+SEARCH_TAXONOMY_PROBE_BRANCH_SUMMARY_FILENAME = "taxonomy_probe_branch_family_summary.csv"
+SEARCH_TAXONOMY_PROBE_AUDIT_FILENAME = "taxonomy_probe_branch_cleanup_audit.csv"
 SEARCH_BUILD_DEFAULT_CHUNKSIZE = 50000
 BRANCH_PATH_SEPARATOR = " > "
 DEFAULT_TAXONOMY_RULES_PATH = Path(__file__).with_name("taxonomy_rules.json")
@@ -166,6 +169,18 @@ def get_search_taxonomy_preview_branch_summary_path(clean_dir: Path) -> Path:
 
 def get_search_taxonomy_preview_audit_path(clean_dir: Path) -> Path:
     return Path(clean_dir) / SEARCH_TAXONOMY_PREVIEW_AUDIT_FILENAME
+
+
+def get_search_taxonomy_probe_tree_path(clean_dir: Path) -> Path:
+    return Path(clean_dir) / SEARCH_TAXONOMY_PROBE_TREE_FILENAME
+
+
+def get_search_taxonomy_probe_branch_summary_path(clean_dir: Path) -> Path:
+    return Path(clean_dir) / SEARCH_TAXONOMY_PROBE_BRANCH_SUMMARY_FILENAME
+
+
+def get_search_taxonomy_probe_audit_path(clean_dir: Path) -> Path:
+    return Path(clean_dir) / SEARCH_TAXONOMY_PROBE_AUDIT_FILENAME
 
 
 def is_search_catalog_path(path: str | Path) -> bool:
@@ -2317,3 +2332,134 @@ def build_search_taxonomy_preview(
         len(audit_df),
     )
     return preview_tree_path, preview_summary_path, preview_audit_path
+
+
+def build_search_taxonomy_branch_probe(
+    clean_dir: Path,
+    branch_paths: Iterable[str],
+    *,
+    chunksize: int | None = None,
+) -> tuple[Path, Path, Path]:
+    clean_dir = Path(clean_dir)
+    selected_branches = [
+        clean_text_value(branch)
+        for branch in branch_paths
+        if clean_text_value(branch)
+    ]
+    selected_branch_set = {branch for branch in selected_branches if branch}
+    if not selected_branch_set:
+        raise ValueError("At least one branch path must be selected for branch probe.")
+
+    source_path = _resolve_search_catalog_snapshot_source(clean_dir)
+    if source_path is None or not Path(source_path).exists():
+        readiness = get_search_catalog_readiness(clean_dir)
+        raise RuntimeError(readiness.reason or "Search catalog is not available for branch probe.")
+
+    probe_tree_path = get_search_taxonomy_probe_tree_path(clean_dir)
+    probe_summary_path = get_search_taxonomy_probe_branch_summary_path(clean_dir)
+    probe_audit_path = get_search_taxonomy_probe_audit_path(clean_dir)
+
+    effective_chunksize = chunksize or _read_search_build_chunksize()
+    rows_total = 0
+    taxonomy_rules = load_search_taxonomy_rules()
+    family_counts: Counter[str] = Counter()
+    branch_counts: Counter[str] = Counter()
+    branch_family_counts: Counter[tuple[str, str]] = Counter()
+    logger.info(
+        "⚡ Taxonomy branch probe start: source=%s clean_dir=%s branches=%s chunksize=%s",
+        source_path,
+        clean_dir,
+        len(selected_branch_set),
+        effective_chunksize,
+    )
+
+    for chunk in iter_search_catalog_chunks(source_path, chunksize=effective_chunksize):
+        if "search_branch_path" not in chunk.columns:
+            continue
+        filtered = chunk[chunk["search_branch_path"].astype(str).isin(selected_branch_set)]
+        if filtered.empty:
+            continue
+        output_rows = [
+            build_search_projection_row(row, taxonomy_rules=taxonomy_rules)
+            for row in filtered.to_dict(orient="records")
+        ]
+        _update_taxonomy_usage_counters(
+            output_rows,
+            family_counts=family_counts,
+            branch_counts=branch_counts,
+            branch_family_counts=branch_family_counts,
+        )
+        rows_total += len(output_rows)
+        logger.info("⚡ Taxonomy branch probe progress: rows=%s", rows_total)
+
+    tree_snapshot = build_taxonomy_tree_snapshot(taxonomy_rules)
+    tree_snapshot["catalog_stats"] = {
+        "rows_total": int(rows_total),
+        "family_counts": [
+            {"family": family_name, "rows_count": int(count)}
+            for family_name, count in family_counts.most_common()
+        ],
+        "top_branches": [],
+        "mode": "branch_probe",
+        "source_path": str(source_path),
+        "selected_branches": selected_branches,
+    }
+
+    branch_rows: list[dict[str, Any]] = []
+    for branch_path, branch_total_rows in branch_counts.most_common():
+        family_items = [
+            (family_name, count)
+            for (candidate_branch, family_name), count in branch_family_counts.items()
+            if candidate_branch == branch_path
+        ]
+        family_items.sort(key=lambda item: (-item[1], item[0]))
+        top_families = [
+            {"family": family_name, "rows_count": int(count)}
+            for family_name, count in family_items[:5]
+        ]
+        tree_snapshot["catalog_stats"]["top_branches"].append(
+            {
+                "search_branch_path": branch_path,
+                "rows_total": int(branch_total_rows),
+                "top_families": top_families,
+            }
+        )
+        for family_name, count in family_items:
+            share = (float(count) / float(branch_total_rows)) if branch_total_rows else 0.0
+            branch_rows.append(
+                {
+                    "search_branch_path": branch_path,
+                    "branch_total_rows": int(branch_total_rows),
+                    "effective_family": family_name,
+                    "rows_count": int(count),
+                    "family_share_within_branch": round(share, 6),
+                }
+            )
+
+    tree_snapshot["catalog_stats"]["top_branches"] = tree_snapshot["catalog_stats"]["top_branches"][:50]
+    probe_tree_path.write_text(json.dumps(tree_snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    branch_df = pd.DataFrame(
+        branch_rows,
+        columns=[
+            "search_branch_path",
+            "branch_total_rows",
+            "effective_family",
+            "rows_count",
+            "family_share_within_branch",
+        ],
+    )
+    branch_df.to_csv(probe_summary_path, sep=";", encoding="utf-8", index=False)
+
+    audit_df = _build_branch_cleanup_audit_frame(branch_df)
+    audit_df.to_csv(probe_audit_path, sep=";", encoding="utf-8", index=False)
+
+    logger.info(
+        "⚡ Taxonomy branch probe complete: tree=%s summary=%s audit=%s rows=%s suspicious_branches=%s",
+        probe_tree_path,
+        probe_summary_path,
+        probe_audit_path,
+        rows_total,
+        len(audit_df),
+    )
+    return probe_tree_path, probe_summary_path, probe_audit_path
