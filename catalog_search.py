@@ -1771,6 +1771,79 @@ def _build_branch_cleanup_audit_frame(branch_df: pd.DataFrame) -> pd.DataFrame:
     ).reset_index(drop=True)
 
 
+def _create_branch_context_bucket() -> Dict[str, Any]:
+    return {
+        "sample_names": [],
+        "sample_rows": [],
+        "top_class_names": Counter(),
+        "top_item_types": Counter(),
+        "top_articles": [],
+    }
+
+
+def _update_branch_context_from_output_rows(
+    output_rows: Iterable[Mapping[str, Any]],
+    *,
+    branch_context: Dict[str, Dict[str, Any]],
+    sample_limit: int = 8,
+) -> None:
+    for row in output_rows:
+        branch_path = clean_text_value(row.get("search_branch_path"))
+        if not branch_path:
+            continue
+        context = branch_context.setdefault(branch_path, _create_branch_context_bucket())
+
+        name = clean_text_value(row.get(CANONICAL_NAME_COLUMN)) or clean_text_value(row.get("search_normalized_name"))
+        class_name = clean_text_value(row.get("Название класса"))
+        item_type = clean_text_value(row.get("Тип изделия"))
+        article = clean_text_value(row.get(CANONICAL_ARTICLE_COLUMN))
+
+        if name and name not in context["sample_names"] and len(context["sample_names"]) < sample_limit:
+            context["sample_names"].append(name)
+        if class_name:
+            context["top_class_names"][class_name] += 1
+        if item_type:
+            context["top_item_types"][item_type] += 1
+        if article and article not in context["top_articles"] and len(context["top_articles"]) < sample_limit:
+            context["top_articles"].append(article)
+
+        sample_row = " | ".join(
+            part
+            for part in (
+                name,
+                f"class={class_name}" if class_name else "",
+                f"type={item_type}" if item_type else "",
+                f"article={article}" if article else "",
+            )
+            if part
+        )
+        if sample_row and sample_row not in context["sample_rows"] and len(context["sample_rows"]) < sample_limit:
+            context["sample_rows"].append(sample_row)
+
+
+def _serialize_branch_context_field(value: Any, *, limit: int = 5) -> str:
+    if isinstance(value, Counter):
+        payload = [name for name, _ in value.most_common(limit)]
+    elif isinstance(value, list):
+        payload = [clean_text_value(item) for item in value if clean_text_value(item)][:limit]
+    else:
+        payload = []
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _parse_json_list_field(value: Any) -> List[str]:
+    text = clean_text_value(value)
+    if not text:
+        return []
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        return [text]
+    if isinstance(parsed, list):
+        return [clean_text_value(item) for item in parsed if clean_text_value(item)]
+    return []
+
+
 def _resolve_search_catalog_snapshot_source(clean_dir: Path) -> Path | None:
     clean_dir = Path(clean_dir)
     readiness = get_search_catalog_readiness(clean_dir)
@@ -2350,6 +2423,7 @@ def build_search_taxonomy_preview(
     family_counts: Counter[str] = Counter()
     branch_counts: Counter[str] = Counter()
     branch_family_counts: Counter[tuple[str, str]] = Counter()
+    branch_context: Dict[str, Dict[str, Any]] = {}
     logger.info("⚡ Taxonomy preview build start: source=%s clean_dir=%s chunksize=%s", merged_path, clean_dir, effective_chunksize)
 
     for chunk in pd.read_csv(
@@ -2480,6 +2554,7 @@ def build_search_taxonomy_branch_probe(
     family_counts: Counter[str] = Counter()
     branch_counts: Counter[str] = Counter()
     branch_family_counts: Counter[tuple[str, str]] = Counter()
+    branch_context: Dict[str, Dict[str, Any]] = {}
     logger.info(
         "⚡ Taxonomy branch probe start: source=%s clean_dir=%s branches=%s chunksize=%s",
         source_path,
@@ -2504,6 +2579,7 @@ def build_search_taxonomy_branch_probe(
             branch_counts=branch_counts,
             branch_family_counts=branch_family_counts,
         )
+        _update_branch_context_from_output_rows(output_rows, branch_context=branch_context)
         rows_total += len(output_rows)
         logger.info("⚡ Taxonomy branch probe progress: rows=%s", rows_total)
 
@@ -2541,6 +2617,7 @@ def build_search_taxonomy_branch_probe(
         )
         for family_name, count in family_items:
             share = (float(count) / float(branch_total_rows)) if branch_total_rows else 0.0
+            context = branch_context.get(branch_path, _create_branch_context_bucket())
             branch_rows.append(
                 {
                     "search_branch_path": branch_path,
@@ -2548,6 +2625,11 @@ def build_search_taxonomy_branch_probe(
                     "effective_family": family_name,
                     "rows_count": int(count),
                     "family_share_within_branch": round(share, 6),
+                    "sample_names_json": _serialize_branch_context_field(context.get("sample_names", []), limit=8),
+                    "sample_rows_json": _serialize_branch_context_field(context.get("sample_rows", []), limit=8),
+                    "top_class_names_json": _serialize_branch_context_field(context.get("top_class_names", Counter()), limit=5),
+                    "top_item_types_json": _serialize_branch_context_field(context.get("top_item_types", Counter()), limit=5),
+                    "top_articles_json": _serialize_branch_context_field(context.get("top_articles", []), limit=8),
                 }
             )
 
@@ -2562,6 +2644,11 @@ def build_search_taxonomy_branch_probe(
             "effective_family",
             "rows_count",
             "family_share_within_branch",
+            "sample_names_json",
+            "sample_rows_json",
+            "top_class_names_json",
+            "top_item_types_json",
+            "top_articles_json",
         ],
     )
     branch_df.to_csv(probe_summary_path, sep=";", encoding="utf-8", index=False)
@@ -2881,18 +2968,42 @@ def build_search_taxonomy_bootstrap_draft(
     selected_branches = (
         probe_audit_df["search_branch_path"].astype(str).head(max(1, int(max_branches))).tolist()
     )
-    source_path_value = clean_text_value((probe_snapshot.get("catalog_stats", {}) or {}).get("source_path"))
-    if not source_path_value:
-        raise RuntimeError("Branch probe snapshot does not contain source_path")
-    source_path = Path(source_path_value)
-    if not source_path.exists():
-        raise FileNotFoundError(f"Branch probe source path does not exist: {source_path}")
+    summary_context: Dict[str, Dict[str, Any]] = {}
+    for branch_path in selected_branches:
+        branch_group = probe_summary_df[probe_summary_df["search_branch_path"].astype(str) == branch_path].copy()
+        if branch_group.empty:
+            continue
+        first_row = branch_group.iloc[0]
+        summary_context[branch_path] = {
+            "sample_names": _parse_json_list_field(first_row.get("sample_names_json")),
+            "sample_rows": _parse_json_list_field(first_row.get("sample_rows_json")),
+            "top_class_names": _parse_json_list_field(first_row.get("top_class_names_json")),
+            "top_item_types": _parse_json_list_field(first_row.get("top_item_types_json")),
+            "top_articles": _parse_json_list_field(first_row.get("top_articles_json")),
+        }
 
-    branch_context = _collect_branch_probe_context_richer(
-        source_path,
-        selected_branches,
-        sample_limit=max(3, int(sample_limit)),
-    )
+    missing_context_branches = [
+        branch_path
+        for branch_path, context in summary_context.items()
+        if not any(context.get(key) for key in ("sample_names", "sample_rows", "top_class_names", "top_item_types"))
+    ]
+    source_path_value = clean_text_value((probe_snapshot.get("catalog_stats", {}) or {}).get("source_path"))
+    source_path = Path(source_path_value) if source_path_value else None
+    if missing_context_branches:
+        if source_path is None or not source_path.exists():
+            raise FileNotFoundError("Branch probe source path is required to enrich missing branch context")
+        fallback_context = _collect_branch_probe_context_richer(
+            source_path,
+            missing_context_branches,
+            sample_limit=max(3, int(sample_limit)),
+        )
+        for branch_path, context in fallback_context.items():
+            current = summary_context.setdefault(branch_path, {})
+            for key, value in context.items():
+                if not current.get(key):
+                    current[key] = value
+
+    branch_context = summary_context
     rules = load_search_taxonomy_rules()
     allowed_families = sorted((build_taxonomy_tree_snapshot(rules).get("families") or {}).keys())
     audit_map = {
@@ -3031,7 +3142,7 @@ def build_search_taxonomy_bootstrap_draft(
         "generated_at": pd.Timestamp.utcnow().isoformat(),
         "mode": "branch_probe_bootstrap_draft",
         "model_name": model_name,
-        "source_path": str(source_path),
+        "source_path": str(source_path) if source_path is not None else "",
         "selected_branches": selected_branches,
         "allowed_families": allowed_families,
         "branches": rows,

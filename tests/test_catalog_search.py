@@ -1102,6 +1102,136 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertTrue(pd.isna(draft_df.at[0, "suggested_family"]) or draft_df.at[0, "suggested_family"] == "")
             self.assertTrue(str(draft_df.at[0, "sample_rows"]).strip())
 
+    def test_build_search_taxonomy_branch_probe_keeps_context_for_reclassified_leaf_branches(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            search_path = get_search_catalog_csv_path(root)
+            pd.DataFrame(
+                [
+                    {
+                        "Наименование": "Угол внутренний 25x17 коричневый AIM",
+                        "Артикул": "CC-1",
+                        "Цена розничная": 10,
+                        "Название класса": "Углы Для Кабель-Каналов",
+                        "Код класса": "CLS-1",
+                        "Тип изделия": "Угол внутренний",
+                        "Тип исполнения кабельного изделия": "",
+                        "Производитель": "ReMo",
+                        "search_branch_path": "электрика > кабели",
+                        "search_branch_leaf": "кабели",
+                        "search_normalized_name": "угол внутренний 25x17 коричневый aim",
+                        "search_tokens_json": "[]",
+                        "search_entity_type": "cable",
+                        "search_effective_family": "cable",
+                        "search_effective_entity_type": "cable",
+                        "search_item_markers_json": "{}",
+                    }
+                ]
+            ).to_csv(search_path, sep=";", encoding="utf-8", index=False)
+
+            _, summary_path, _ = build_search_taxonomy_branch_probe(root, ["электрика > кабели"])
+            summary_df = pd.read_csv(summary_path, sep=";", encoding="utf-8")
+
+            leaf_row = summary_df.loc[summary_df["search_branch_path"] == "углы для кабель-каналов"].iloc[0]
+            self.assertTrue(str(leaf_row["sample_names_json"]).strip())
+            self.assertTrue(str(leaf_row["sample_rows_json"]).strip())
+            self.assertTrue(str(leaf_row["top_class_names_json"]).strip())
+            self.assertTrue(str(leaf_row["top_item_types_json"]).strip())
+
+    def test_build_search_taxonomy_bootstrap_draft_can_use_probe_summary_context_without_source_db(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            get_search_taxonomy_probe_tree_path(root).write_text(
+                json.dumps(
+                    {
+                        "catalog_stats": {
+                            "mode": "branch_probe",
+                            "source_path": "",
+                            "selected_branches": ["demo > cable tray covers"],
+                        }
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            pd.DataFrame(
+                [
+                    {
+                        "search_branch_path": "demo > cable tray covers",
+                        "branch_total_rows": 100,
+                        "effective_family": "rack_accessory_strict",
+                        "rows_count": 55,
+                        "family_share_within_branch": 0.55,
+                        "sample_names_json": "[\"Demo cable tray cover 100\"]",
+                        "sample_rows_json": "[\"Demo cable tray cover 100 | class=Demo Tray Covers | type=Cover | article=D-1\"]",
+                        "top_class_names_json": "[\"Demo Tray Covers\"]",
+                        "top_item_types_json": "[\"Cover\"]",
+                        "top_articles_json": "[\"D-1\"]",
+                    },
+                    {
+                        "search_branch_path": "demo > cable tray covers",
+                        "branch_total_rows": 100,
+                        "effective_family": "tray_sheet",
+                        "rows_count": 45,
+                        "family_share_within_branch": 0.45,
+                        "sample_names_json": "[\"Demo cable tray cover 100\"]",
+                        "sample_rows_json": "[\"Demo cable tray cover 100 | class=Demo Tray Covers | type=Cover | article=D-1\"]",
+                        "top_class_names_json": "[\"Demo Tray Covers\"]",
+                        "top_item_types_json": "[\"Cover\"]",
+                        "top_articles_json": "[\"D-1\"]",
+                    },
+                ]
+            ).to_csv(get_search_taxonomy_probe_branch_summary_path(root), sep=";", encoding="utf-8", index=False)
+            pd.DataFrame(
+                [
+                    {
+                        "search_branch_path": "demo > cable tray covers",
+                        "branch_total_rows": 100,
+                        "family_count": 2,
+                        "top_family": "rack_accessory_strict",
+                        "top_family_rows": 55,
+                        "top_family_share": 0.55,
+                        "second_family": "tray_sheet",
+                        "second_family_rows": 45,
+                        "second_family_share": 0.45,
+                        "other_rows": 0,
+                        "other_share": 0.0,
+                        "suspicious_score": 45.0,
+                        "top_families": "rack_accessory_strict (55) | tray_sheet (45)",
+                    }
+                ]
+            ).to_csv(get_search_taxonomy_probe_audit_path(root), sep=";", encoding="utf-8", index=False)
+
+            _, csv_path = build_search_taxonomy_bootstrap_draft(
+                root,
+                api_key="test",
+                max_branches=1,
+                generate_text=lambda _prompt: json.dumps(
+                    {
+                        "branches": [
+                            {
+                                "search_branch_path": "demo > cable tray covers !!!",
+                                "suggested_family": "",
+                                "suggested_subfamily": "",
+                                "suggested_action": "split_branch",
+                                "confidence": 0.88,
+                                "rationale": "Branch is mixed and should be split into narrower tray cover groups.",
+                                "evidence_tokens": ["cover", "tray", "mixed"],
+                                "notes": "Do not force one family onto the full branch.",
+                            }
+                        ]
+                    }
+                ),
+            )
+
+            draft_df = pd.read_csv(csv_path, sep=";", encoding="utf-8")
+            self.assertEqual(draft_df.at[0, "response_branch_path"], "demo > cable tray covers !!!")
+            self.assertEqual(draft_df.at[0, "branch_match_method"], "normalized_exact")
+            self.assertEqual(draft_df.at[0, "suggested_action"], "split_branch")
+            self.assertTrue(pd.isna(draft_df.at[0, "suggested_family"]) or draft_df.at[0, "suggested_family"] == "")
+            self.assertTrue(str(draft_df.at[0, "sample_rows"]).strip())
+
     def test_build_search_catalog_can_write_csv_explicitly(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
