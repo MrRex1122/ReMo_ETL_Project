@@ -42,6 +42,9 @@ SEARCH_CATALOG_FILENAME = SEARCH_CATALOG_CSV_FILENAME
 SEARCH_CATALOG_TABLE = "search_catalog"
 SEARCH_TAXONOMY_TREE_FILENAME = "taxonomy_tree.json"
 SEARCH_TAXONOMY_BRANCH_SUMMARY_FILENAME = "taxonomy_branch_family_summary.csv"
+SEARCH_TAXONOMY_PREVIEW_TREE_FILENAME = "taxonomy_preview_tree.json"
+SEARCH_TAXONOMY_PREVIEW_BRANCH_SUMMARY_FILENAME = "taxonomy_preview_branch_family_summary.csv"
+SEARCH_TAXONOMY_PREVIEW_AUDIT_FILENAME = "taxonomy_preview_branch_cleanup_audit.csv"
 SEARCH_BUILD_DEFAULT_CHUNKSIZE = 50000
 BRANCH_PATH_SEPARATOR = " > "
 DEFAULT_TAXONOMY_RULES_PATH = Path(__file__).with_name("taxonomy_rules.json")
@@ -151,6 +154,18 @@ def get_search_taxonomy_tree_path(clean_dir: Path) -> Path:
 
 def get_search_taxonomy_branch_summary_path(clean_dir: Path) -> Path:
     return Path(clean_dir) / SEARCH_TAXONOMY_BRANCH_SUMMARY_FILENAME
+
+
+def get_search_taxonomy_preview_tree_path(clean_dir: Path) -> Path:
+    return Path(clean_dir) / SEARCH_TAXONOMY_PREVIEW_TREE_FILENAME
+
+
+def get_search_taxonomy_preview_branch_summary_path(clean_dir: Path) -> Path:
+    return Path(clean_dir) / SEARCH_TAXONOMY_PREVIEW_BRANCH_SUMMARY_FILENAME
+
+
+def get_search_taxonomy_preview_audit_path(clean_dir: Path) -> Path:
+    return Path(clean_dir) / SEARCH_TAXONOMY_PREVIEW_AUDIT_FILENAME
 
 
 def is_search_catalog_path(path: str | Path) -> bool:
@@ -1454,6 +1469,105 @@ def _write_search_taxonomy_snapshot(
     )
 
 
+def _build_branch_cleanup_audit_frame(branch_df: pd.DataFrame) -> pd.DataFrame:
+    audit_columns = [
+        "search_branch_path",
+        "branch_total_rows",
+        "family_count",
+        "top_family",
+        "top_family_rows",
+        "top_family_share",
+        "second_family",
+        "second_family_rows",
+        "second_family_share",
+        "other_rows",
+        "other_share",
+        "suspicious_score",
+        "top_families",
+    ]
+    if branch_df.empty:
+        return pd.DataFrame(columns=audit_columns)
+
+    prepared = branch_df.copy()
+    prepared["branch_total_rows"] = pd.to_numeric(prepared["branch_total_rows"], errors="coerce").fillna(0).astype(int)
+    prepared["rows_count"] = pd.to_numeric(prepared["rows_count"], errors="coerce").fillna(0).astype(int)
+    prepared["family_share_within_branch"] = pd.to_numeric(
+        prepared["family_share_within_branch"], errors="coerce"
+    ).fillna(0.0)
+
+    audit_rows: list[dict[str, Any]] = []
+    for branch_path, group in prepared.groupby("search_branch_path", dropna=False):
+        group = group.sort_values(["rows_count", "effective_family"], ascending=[False, True], kind="stable")
+        if group.empty:
+            continue
+
+        branch_total_rows = int(group["branch_total_rows"].iloc[0])
+        if branch_total_rows <= 0:
+            continue
+
+        family_items = [
+            {
+                "family": str(row["effective_family"]),
+                "rows_count": int(row["rows_count"]),
+                "share": float(row["family_share_within_branch"]),
+            }
+            for _, row in group.iterrows()
+        ]
+        family_count = len(family_items)
+        top = family_items[0]
+        second = family_items[1] if family_count > 1 else {"family": "", "rows_count": 0, "share": 0.0}
+        other_item = next((item for item in family_items if item["family"] == "other"), {"rows_count": 0, "share": 0.0})
+
+        suspicious = (
+            branch_total_rows >= 100
+            and (
+                top["family"] == "other"
+                or top["share"] < 0.85
+                or second["share"] >= 0.10
+                or family_count >= 5
+                or other_item["share"] >= 0.10
+            )
+        )
+        if not suspicious:
+            continue
+
+        suspicious_score = round(
+            (1.0 - top["share"]) * branch_total_rows
+            + second["share"] * branch_total_rows
+            + max(0, family_count - 2) * 25
+            + other_item["share"] * branch_total_rows,
+            3,
+        )
+        audit_rows.append(
+            {
+                "search_branch_path": branch_path,
+                "branch_total_rows": branch_total_rows,
+                "family_count": family_count,
+                "top_family": top["family"],
+                "top_family_rows": top["rows_count"],
+                "top_family_share": round(top["share"], 6),
+                "second_family": second["family"],
+                "second_family_rows": second["rows_count"],
+                "second_family_share": round(float(second["share"]), 6),
+                "other_rows": int(other_item["rows_count"]),
+                "other_share": round(float(other_item["share"]), 6),
+                "suspicious_score": suspicious_score,
+                "top_families": " | ".join(
+                    f"{item['family']} ({item['rows_count']})" for item in family_items[:5]
+                ),
+            }
+        )
+
+    audit_df = pd.DataFrame(audit_rows, columns=audit_columns)
+    if audit_df.empty:
+        return pd.DataFrame(columns=audit_columns)
+    return audit_df.sort_values(
+        ["suspicious_score", "branch_total_rows", "search_branch_path"],
+        ascending=[False, False, True],
+        kind="stable",
+    ).reset_index(drop=True)
+
+
 def _resolve_search_catalog_snapshot_source(clean_dir: Path) -> Path | None:
     clean_dir = Path(clean_dir)
     readiness = get_search_catalog_readiness(clean_dir)
@@ -1991,3 +2105,142 @@ def refresh_search_catalog(clean_dir: Path) -> Path:
             raise FileNotFoundError(merged_readiness.reason or "Merged catalog is missing")
         raise RuntimeError(merged_readiness.reason or f"Merged catalog is not ready: {merged_readiness.state}")
     return build_search_catalog_from_merged(merged_readiness.merged_path, get_search_catalog_path(clean_dir))
+
+
+def build_search_taxonomy_preview(
+    source_path: Path,
+    *,
+    chunksize: int | None = None,
+) -> tuple[Path, Path, Path]:
+    source_path = Path(source_path)
+    if source_path.is_dir():
+        direct_merged_path = get_merged_catalog_path(source_path)
+        if direct_merged_path.exists():
+            merged_path = direct_merged_path
+            clean_dir = source_path
+        else:
+            merged_readiness = get_catalog_readiness(source_path)
+            if merged_readiness.state != "ready":
+                if merged_readiness.state == "missing":
+                    raise FileNotFoundError(merged_readiness.reason or "Merged catalog is missing")
+                raise RuntimeError(merged_readiness.reason or f"Merged catalog is not ready: {merged_readiness.state}")
+            merged_path = merged_readiness.merged_path
+            clean_dir = merged_readiness.clean_dir or merged_path.parent
+    elif source_path.is_file() and source_path.name == get_merged_catalog_path(source_path.parent).name and source_path.exists():
+        merged_path = source_path
+        clean_dir = source_path.parent
+    else:
+        merged_readiness = get_catalog_readiness(source_path)
+        if merged_readiness.state != "ready":
+            if merged_readiness.state == "missing":
+                raise FileNotFoundError(merged_readiness.reason or "Merged catalog is missing")
+            raise RuntimeError(merged_readiness.reason or f"Merged catalog is not ready: {merged_readiness.state}")
+        merged_path = merged_readiness.merged_path
+        clean_dir = merged_readiness.clean_dir or merged_path.parent
+    preview_tree_path = get_search_taxonomy_preview_tree_path(clean_dir)
+    preview_summary_path = get_search_taxonomy_preview_branch_summary_path(clean_dir)
+    preview_audit_path = get_search_taxonomy_preview_audit_path(clean_dir)
+
+    effective_chunksize = chunksize or _read_search_build_chunksize()
+    rows_total = 0
+    taxonomy_rules = load_search_taxonomy_rules()
+    family_counts: Counter[str] = Counter()
+    branch_counts: Counter[str] = Counter()
+    branch_family_counts: Counter[tuple[str, str]] = Counter()
+    logger.info("⚡ Taxonomy preview build start: source=%s clean_dir=%s chunksize=%s", merged_path, clean_dir, effective_chunksize)
+
+    for chunk in pd.read_csv(
+        merged_path,
+        sep=";",
+        encoding="utf-8",
+        chunksize=effective_chunksize,
+        low_memory=False,
+    ):
+        chunk = canonicalize_catalog_columns(chunk, create_missing=True)
+        for column in SEARCH_BASE_COLUMNS:
+            if column not in chunk.columns:
+                chunk[column] = ""
+        source_chunk = chunk[SEARCH_BASE_COLUMNS].copy()
+        output_rows = [
+            build_search_projection_row(row, taxonomy_rules=taxonomy_rules)
+            for row in source_chunk.to_dict(orient="records")
+        ]
+        _update_taxonomy_usage_counters(
+            output_rows,
+            family_counts=family_counts,
+            branch_counts=branch_counts,
+            branch_family_counts=branch_family_counts,
+        )
+        rows_total += len(output_rows)
+        logger.info("⚡ Taxonomy preview progress: rows=%s", rows_total)
+
+    tree_snapshot = build_taxonomy_tree_snapshot(taxonomy_rules)
+    tree_snapshot["catalog_stats"] = {
+        "rows_total": int(rows_total),
+        "family_counts": [
+            {"family": family_name, "rows_count": int(count)}
+            for family_name, count in family_counts.most_common()
+        ],
+        "top_branches": [],
+        "mode": "preview",
+        "source_path": str(merged_path),
+    }
+
+    branch_rows: list[dict[str, Any]] = []
+    for branch_path, branch_total_rows in branch_counts.most_common():
+        family_items = [
+            (family_name, count)
+            for (candidate_branch, family_name), count in branch_family_counts.items()
+            if candidate_branch == branch_path
+        ]
+        family_items.sort(key=lambda item: (-item[1], item[0]))
+        top_families = [
+            {"family": family_name, "rows_count": int(count)}
+            for family_name, count in family_items[:5]
+        ]
+        tree_snapshot["catalog_stats"]["top_branches"].append(
+            {
+                "search_branch_path": branch_path,
+                "rows_total": int(branch_total_rows),
+                "top_families": top_families,
+            }
+        )
+        for family_name, count in family_items:
+            share = (float(count) / float(branch_total_rows)) if branch_total_rows else 0.0
+            branch_rows.append(
+                {
+                    "search_branch_path": branch_path,
+                    "branch_total_rows": int(branch_total_rows),
+                    "effective_family": family_name,
+                    "rows_count": int(count),
+                    "family_share_within_branch": round(share, 6),
+                }
+            )
+
+    tree_snapshot["catalog_stats"]["top_branches"] = tree_snapshot["catalog_stats"]["top_branches"][:50]
+    preview_tree_path.write_text(json.dumps(tree_snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    branch_df = pd.DataFrame(
+        branch_rows,
+        columns=[
+            "search_branch_path",
+            "branch_total_rows",
+            "effective_family",
+            "rows_count",
+            "family_share_within_branch",
+        ],
+    )
+    branch_df.to_csv(preview_summary_path, sep=";", encoding="utf-8", index=False)
+
+    audit_df = _build_branch_cleanup_audit_frame(branch_df)
+    audit_df.to_csv(preview_audit_path, sep=";", encoding="utf-8", index=False)
+
+    logger.info(
+        "⚡ Taxonomy preview build complete: tree=%s summary=%s audit=%s rows=%s suspicious_branches=%s",
+        preview_tree_path,
+        preview_summary_path,
+        preview_audit_path,
+        rows_total,
+        len(audit_df),
+    )
+    return preview_tree_path, preview_summary_path, preview_audit_path

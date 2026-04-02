@@ -128,6 +128,15 @@ class AppUiRegressionTests(unittest.TestCase):
         self.assertIn("Скачать все подозрительные ветки", app_source)
         self.assertIn("download_taxonomy_branch_cleanup_audit_csv", app_source)
 
+    def test_taxonomy_preview_ui_supports_dry_run_without_search_rebuild(self):
+        app_source = Path("app.py").read_text(encoding="utf-8")
+        self.assertIn("build_search_taxonomy_preview", app_source)
+        self.assertIn("_render_search_taxonomy_preview_section", app_source)
+        self.assertIn("Taxonomy preview без rebuild", app_source)
+        self.assertIn("Построить taxonomy preview без rebuild", app_source)
+        self.assertIn("taxonomy_preview_branch_cleanup_audit.csv", app_source)
+        self.assertIn("preview_audit_df.head(20)", app_source)
+
 
 if __name__ == "__main__":
     unittest.main()

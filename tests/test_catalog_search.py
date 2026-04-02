@@ -11,11 +11,15 @@ from catalog_merge import refresh_merged_catalog
 from catalog_search import (
     DUCKDB_AVAILABLE,
     build_search_catalog_from_merged,
+    build_search_taxonomy_preview,
     classify_item_type,
     derive_branch_from_text,
     ensure_search_taxonomy_snapshot,
     extract_item_markers,
     get_search_catalog_path,
+    get_search_taxonomy_preview_audit_path,
+    get_search_taxonomy_preview_branch_summary_path,
+    get_search_taxonomy_preview_tree_path,
     get_search_taxonomy_branch_summary_path,
     get_search_taxonomy_tree_path,
     get_search_catalog_csv_path,
@@ -642,6 +646,43 @@ class CatalogSearchTests(unittest.TestCase):
             branch_df = pd.read_csv(branch_summary_path, sep=";", encoding="utf-8")
             self.assertIn("fire_detector", set(branch_df["effective_family"]))
             self.assertIn("security_control_panel", set(branch_df["effective_family"]))
+
+    def test_build_search_taxonomy_preview_writes_preview_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Извещатель пожарный дымовой адресный;FIRE-1;1200;Извещатели пожарные;CLS-1;Извещатель;;ReMo\n"
+                    "Пульт контроля и управления;CTRL-1;2500;Приборы приёмно-контрольные для опс;CLS-2;Пульт;;ReMo\n"
+                    "Кабель интерфейсный RS-485;IF-1;800;Кабели интерфейсные;CLS-3;Кабель;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            tree_path, summary_path, audit_path = build_search_taxonomy_preview(root)
+
+            self.assertEqual(tree_path, get_search_taxonomy_preview_tree_path(root))
+            self.assertEqual(summary_path, get_search_taxonomy_preview_branch_summary_path(root))
+            self.assertEqual(audit_path, get_search_taxonomy_preview_audit_path(root))
+            self.assertTrue(tree_path.exists())
+            self.assertTrue(summary_path.exists())
+            self.assertTrue(audit_path.exists())
+
+            snapshot = json.loads(tree_path.read_text(encoding="utf-8"))
+            self.assertEqual(snapshot["catalog_stats"]["mode"], "preview")
+            self.assertEqual(snapshot["catalog_stats"]["rows_total"], 3)
+            self.assertIn("fire_detector", snapshot["families"])
+
+            summary_df = pd.read_csv(summary_path, sep=";", encoding="utf-8")
+            self.assertIn("effective_family", summary_df.columns)
+            self.assertIn("fire_detector", set(summary_df["effective_family"]))
+
+            audit_df = pd.read_csv(audit_path, sep=";", encoding="utf-8")
+            self.assertIn("search_branch_path", audit_df.columns)
+            self.assertIn("suspicious_score", audit_df.columns)
 
     def test_build_search_catalog_can_write_csv_explicitly(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

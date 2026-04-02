@@ -20,6 +20,7 @@ import uuid
 from typing import Any
 from cloudflare_r2_export import upload_file_to_r2
 from catalog_search import (
+    build_search_taxonomy_preview,
     ensure_search_taxonomy_snapshot,
     get_search_catalog_readiness,
     is_search_catalog_path,
@@ -2208,24 +2209,23 @@ def _taxonomy_snapshot_download_filename(path: Path) -> str:
 
 
 def _build_branch_cleanup_audit_df(branch_df: pd.DataFrame) -> pd.DataFrame:
+    audit_columns = [
+        "search_branch_path",
+        "branch_total_rows",
+        "family_count",
+        "top_family",
+        "top_family_rows",
+        "top_family_share",
+        "second_family",
+        "second_family_rows",
+        "second_family_share",
+        "other_rows",
+        "other_share",
+        "suspicious_score",
+        "top_families",
+    ]
     if branch_df.empty:
-        return pd.DataFrame(
-            columns=[
-                "search_branch_path",
-                "branch_total_rows",
-                "family_count",
-                "top_family",
-                "top_family_rows",
-                "top_family_share",
-                "second_family",
-                "second_family_rows",
-                "second_family_share",
-                "other_rows",
-                "other_share",
-                "suspicious_score",
-                "top_families",
-            ]
-        )
+        return pd.DataFrame(columns=audit_columns)
 
     prepared = branch_df.copy()
     prepared["branch_total_rows"] = pd.to_numeric(prepared["branch_total_rows"], errors="coerce").fillna(0).astype(int)
@@ -2297,9 +2297,9 @@ def _build_branch_cleanup_audit_df(branch_df: pd.DataFrame) -> pd.DataFrame:
             }
         )
 
-    audit_df = pd.DataFrame(audit_rows)
+    audit_df = pd.DataFrame(audit_rows, columns=audit_columns)
     if audit_df.empty:
-        return audit_df
+        return pd.DataFrame(columns=audit_columns)
     return audit_df.sort_values(
         ["suspicious_score", "branch_total_rows", "search_branch_path"],
         ascending=[False, False, True],
@@ -2437,6 +2437,90 @@ def _render_search_taxonomy_snapshot_section(clean_dir: Path | None) -> None:
                     key="download_taxonomy_branch_cleanup_audit_csv",
                     on_click="ignore",
                 )
+
+
+def _render_search_taxonomy_preview_section(clean_dir: Path | None) -> None:
+    st.subheader("⚡ Taxonomy preview без rebuild")
+    st.caption(
+        "Dry-run preview считает дерево и подозрительные ветки прямо из merged CSV, "
+        "не пересобирая поисковую БД. Это удобнее для быстрых taxonomy-итераций."
+    )
+    if clean_dir is None:
+        st.info("📭 Папка clean еще не определена.")
+        return
+
+    preview_tree_path = clean_dir / "taxonomy_preview_tree.json"
+    preview_summary_path = clean_dir / "taxonomy_preview_branch_family_summary.csv"
+    preview_audit_path = clean_dir / "taxonomy_preview_branch_cleanup_audit.csv"
+
+    if st.button("⚡ Построить taxonomy preview без rebuild", key="build_taxonomy_preview_btn"):
+        try:
+            preview_tree_path, preview_summary_path, preview_audit_path = build_search_taxonomy_preview(clean_dir)
+            st.success(f"✓ Taxonomy preview обновлен: {preview_tree_path.name}")
+        except Exception as exc:
+            logger.error("❌ Taxonomy preview build failed: %s", exc, exc_info=True)
+            st.error(f"❌ Не удалось построить taxonomy preview: {exc}")
+
+    preview_paths = [preview_tree_path, preview_summary_path, preview_audit_path]
+    if not all(path.exists() for path in preview_paths):
+        st.info("📭 Preview еще не построен. Нажмите `⚡ Построить taxonomy preview без rebuild`.")
+        return
+
+    preview_updated_at = datetime.fromtimestamp(
+        min(path.stat().st_mtime for path in preview_paths)
+    ).isoformat(timespec="seconds")
+    st.caption(f"Последнее обновление preview: {preview_updated_at}")
+
+    download_col1, download_col2, download_col3 = st.columns(3)
+    with download_col1:
+        st.download_button(
+            "📥 Скачать preview tree",
+            preview_tree_path.read_bytes(),
+            file_name=_taxonomy_snapshot_download_filename(preview_tree_path),
+            mime="application/json",
+            key="download_taxonomy_preview_tree_json",
+            on_click="ignore",
+        )
+    with download_col2:
+        st.download_button(
+            "📥 Скачать preview summary",
+            preview_summary_path.read_bytes(),
+            file_name=_taxonomy_snapshot_download_filename(preview_summary_path),
+            mime="text/csv",
+            key="download_taxonomy_preview_summary_csv",
+            on_click="ignore",
+        )
+    with download_col3:
+        st.download_button(
+            "📥 Скачать все подозрительные ветки preview",
+            preview_audit_path.read_bytes(),
+            file_name=_taxonomy_snapshot_download_filename(preview_audit_path),
+            mime="text/csv",
+            key="download_taxonomy_preview_audit_csv",
+            on_click="ignore",
+        )
+
+    try:
+        preview_snapshot = json.loads(preview_tree_path.read_text(encoding="utf-8"))
+        preview_audit_df = pd.read_csv(preview_audit_path, sep=";", encoding="utf-8")
+    except Exception as exc:
+        st.error(f"❌ Не удалось прочитать taxonomy preview: {exc}")
+        return
+
+    preview_stats = dict(preview_snapshot.get("catalog_stats", {}) or {})
+    metric_col1, metric_col2, metric_col3 = st.columns(3)
+    metric_col1.metric("Family в preview", int(preview_snapshot.get("family_count", 0)))
+    metric_col2.metric("Rows в preview", int(preview_stats.get("rows_total", 0)))
+    metric_col3.metric("Подозрительных веток", len(preview_audit_df))
+
+    if preview_audit_df.empty:
+        st.success("✅ В preview нет явно подозрительных веток по текущим правилам.")
+    else:
+        st.caption(
+            "На экране показывается top-20 веток из preview. "
+            "Полный список остается в выгрузке `taxonomy_preview_branch_cleanup_audit.csv`."
+        )
+        st.dataframe(_prepare_df_for_display(preview_audit_df.head(20)), width="stretch")
 
 
 # ============ MAIN UI ============
@@ -2617,6 +2701,8 @@ def main():
 
         st.divider()
         _render_search_taxonomy_snapshot_section(catalog_readiness.clean_dir)
+        st.divider()
+        _render_search_taxonomy_preview_section(catalog_readiness.clean_dir)
         st.divider()
 
         if st.button("🔄 Обновить БД"):
