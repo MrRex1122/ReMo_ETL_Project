@@ -1197,6 +1197,105 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertTrue(pd.isna(draft_df.at[0, "suggested_family"]) or draft_df.at[0, "suggested_family"] == "")
             self.assertTrue(pd.isna(draft_df.at[0, "suggested_subfamily"]) or draft_df.at[0, "suggested_subfamily"] == "")
 
+    def test_build_search_taxonomy_bootstrap_draft_supports_new_family_for_other_branch(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            get_search_taxonomy_probe_tree_path(root).write_text(
+                json.dumps(
+                    {
+                        "catalog_stats": {
+                            "mode": "branch_probe",
+                            "source_path": "",
+                            "selected_branches": ["industrial > roller bearings"],
+                        }
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            pd.DataFrame(
+                [
+                    {
+                        "search_branch_path": "industrial > roller bearings",
+                        "branch_total_rows": 14948,
+                        "effective_family": "other",
+                        "rows_count": 14484,
+                        "family_share_within_branch": 0.968959,
+                        "sample_names_json": "[\"Подшипник 32214 КМ FBC\"]",
+                        "sample_rows_json": "[\"Подшипник 32214 КМ FBC | class=Подшипники Роликовые Цилиндрические | type=Подшипник роликовый цилиндрический | article=00-1\"]",
+                        "top_class_names_json": "[\"Подшипники Роликовые Цилиндрические\"]",
+                        "top_item_types_json": "[\"Подшипник роликовый цилиндрический\", \"Подшипник корпусный\"]",
+                        "top_articles_json": "[\"00-1\"]",
+                    },
+                    {
+                        "search_branch_path": "industrial > roller bearings",
+                        "branch_total_rows": 14948,
+                        "effective_family": "fastener",
+                        "rows_count": 330,
+                        "family_share_within_branch": 0.022077,
+                        "sample_names_json": "[\"Подшипник 32214 КМ FBC\"]",
+                        "sample_rows_json": "[\"Подшипник 32214 КМ FBC | class=Подшипники Роликовые Цилиндрические | type=Подшипник роликовый цилиндрический | article=00-1\"]",
+                        "top_class_names_json": "[\"Подшипники Роликовые Цилиндрические\"]",
+                        "top_item_types_json": "[\"Подшипник роликовый цилиндрический\", \"Подшипник корпусный\"]",
+                        "top_articles_json": "[\"00-1\"]",
+                    },
+                ]
+            ).to_csv(get_search_taxonomy_probe_branch_summary_path(root), sep=";", encoding="utf-8", index=False)
+            pd.DataFrame(
+                [
+                    {
+                        "search_branch_path": "industrial > roller bearings",
+                        "branch_total_rows": 14948,
+                        "family_count": 3,
+                        "top_family": "other",
+                        "top_family_rows": 14484,
+                        "top_family_share": 0.968959,
+                        "second_family": "fastener",
+                        "second_family_rows": 330,
+                        "second_family_share": 0.022077,
+                        "other_rows": 14484,
+                        "other_share": 0.968959,
+                        "suspicious_score": 464.0,
+                        "top_families": "other (14484) | fastener (330)",
+                    }
+                ]
+            ).to_csv(get_search_taxonomy_probe_audit_path(root), sep=";", encoding="utf-8", index=False)
+
+            _, csv_path = build_search_taxonomy_bootstrap_draft(
+                root,
+                api_key="test",
+                max_branches=1,
+                generate_text=lambda _prompt: json.dumps(
+                    {
+                        "branches": [
+                            {
+                                "search_branch_path": "industrial > roller bearings",
+                                "suggested_family": "",
+                                "suggested_subfamily": "",
+                                "suggested_action": "new_family",
+                                "proposed_family_key": "bearing",
+                                "proposed_family_label": "Bearings",
+                                "proposed_subfamily_key": "roller_bearing",
+                                "confidence": 0.94,
+                                "rationale": "This branch is a coherent mechanical product group and should become its own family instead of staying in other.",
+                                "evidence_tokens": ["подшипник", "роликовый", "цилиндрический"],
+                                "notes": "Good candidate for taxonomy expansion.",
+                            }
+                        ]
+                    }
+                ),
+            )
+
+            draft_df = pd.read_csv(csv_path, sep=";", encoding="utf-8")
+            self.assertTrue(bool(draft_df.at[0, "taxonomy_gap_candidate"]))
+            self.assertIn("taxonomy_gap_candidate", str(draft_df.at[0, "taxonomy_gap_reason"]))
+            self.assertEqual(draft_df.at[0, "suggested_action"], "new_family")
+            self.assertEqual(draft_df.at[0, "proposed_family_key"], "bearing")
+            self.assertEqual(draft_df.at[0, "proposed_family_label"], "Bearings")
+            self.assertEqual(draft_df.at[0, "proposed_subfamily_key"], "roller_bearing")
+            self.assertTrue(pd.isna(draft_df.at[0, "suggested_family"]) or draft_df.at[0, "suggested_family"] == "")
+
     def test_build_search_taxonomy_branch_probe_keeps_context_for_reclassified_leaf_branches(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

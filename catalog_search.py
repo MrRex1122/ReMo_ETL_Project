@@ -3000,6 +3000,34 @@ def _apply_bootstrap_split_branch_guardrail(
     return normalized
 
 
+def _compute_bootstrap_new_family_candidate(branch_payload: Mapping[str, Any]) -> tuple[bool, str]:
+    branch_total_rows = int(branch_payload.get("branch_total_rows", 0) or 0)
+    family_count = int(branch_payload.get("family_count", 0) or 0)
+    top_family_share = float(branch_payload.get("top_family_share", 0.0) or 0.0)
+    other_share = float(branch_payload.get("other_share", 0.0) or 0.0)
+    current_top_families = list(branch_payload.get("current_top_families", []) or [])
+    current_top_family = ""
+    if current_top_families:
+        current_top_family = clean_text_value(current_top_families[0].get("family"))
+
+    should_suggest_new_family = (
+        current_top_family == "other"
+        and branch_total_rows >= 100
+        and top_family_share >= 0.6
+        and other_share >= 0.6
+        and family_count <= 6
+        and not bool(branch_payload.get("split_branch_required"))
+    )
+    if not should_suggest_new_family:
+        return False, ""
+    return (
+        True,
+        "taxonomy_gap_candidate "
+        f"rows={branch_total_rows} family_count={family_count} "
+        f"top_family_share={top_family_share:.3f} other_share={other_share:.3f}",
+    )
+
+
 def build_search_taxonomy_bootstrap_draft(
     clean_dir: Path,
     *,
@@ -3104,6 +3132,8 @@ def build_search_taxonomy_bootstrap_draft(
                 "top_articles": branch_context.get(branch_path, {}).get("top_articles", []),
                 "split_branch_required": False,
                 "split_branch_reason": "",
+                "taxonomy_gap_candidate": False,
+                "taxonomy_gap_reason": "",
             }
         )
 
@@ -3111,27 +3141,33 @@ def build_search_taxonomy_bootstrap_draft(
         split_branch_required, split_branch_reason = _compute_bootstrap_split_branch_guardrail(branch_payload)
         branch_payload["split_branch_required"] = split_branch_required
         branch_payload["split_branch_reason"] = split_branch_reason
+        taxonomy_gap_candidate, taxonomy_gap_reason = _compute_bootstrap_new_family_candidate(branch_payload)
+        branch_payload["taxonomy_gap_candidate"] = taxonomy_gap_candidate
+        branch_payload["taxonomy_gap_reason"] = taxonomy_gap_reason
 
     prompt = (
-        "Ты помогаешь строить taxonomy для поисковой товарной БД.\n"
-        "Нужно предложить черновик mapping для подозрительных веток. "
-        "Не меняй данные, не объясняй общими словами, верни только JSON.\n\n"
-        "Доступные family:\n"
+        "You are helping build taxonomy mapping for a search catalog.\n"
+        "Return JSON only. Do not rewrite the input data. Do not explain outside JSON.\n\n"
+        "Allowed existing families:\n"
         f"{json.dumps(allowed_families, ensure_ascii=False)}\n\n"
-        "Для каждой ветки предложи:\n"
-        "- suggested_family: одна family из списка\n"
-        "- suggested_subfamily: короткая строка snake_case или пустая строка\n"
-        "- suggested_action: keep_mixed | tighten_family_mapping | new_subfamily | exclude_family_from_branch | split_branch\n"
-        "- confidence: число от 0 до 1\n"
-        "- rationale: короткое объяснение\n"
-        "- evidence_tokens: список 2-6 ключевых слов\n"
-        "- notes: короткая заметка\n\n"
-        "Если у ветки split_branch_required=true, обязательно верни suggested_action=split_branch "
-        "и оставь suggested_family/suggested_subfamily пустыми.\n"
-        "Если ветка слишком общая и реально содержит несколько разных товарных групп, используй suggested_action=split_branch.\n"
-        "В таком случае не пытайся натянуть одну узкую subfamily на весь branch.\n"
-        "Копируй search_branch_path из входных данных максимально точно.\n\n"
-        "Верни JSON-объект вида:\n"
+        "For each branch, propose:\n"
+        "- suggested_action: keep_mixed | tighten_family_mapping | new_subfamily | exclude_family_from_branch | split_branch | new_family | keep_other\n"
+        "- suggested_family: one family from the allowed list, or empty string\n"
+        "- suggested_subfamily: short snake_case string or empty string\n"
+        "- proposed_family_key: snake_case string for a new family, or empty string\n"
+        "- proposed_family_label: short human-readable label for a new family, or empty string\n"
+        "- proposed_subfamily_key: snake_case string for a new subfamily under the proposed family, or empty string\n"
+        "- confidence: number from 0 to 1\n"
+        "- rationale: short explanation\n"
+        "- evidence_tokens: list of 2-6 important tokens\n"
+        "- notes: short note\n\n"
+        "Rules:\n"
+        "- If split_branch_required=true, return suggested_action=split_branch and keep suggested_family, suggested_subfamily, proposed_family_key, proposed_family_label, proposed_subfamily_key empty.\n"
+        "- If taxonomy_gap_candidate=true, prefer suggested_action=new_family or keep_other. Do not force one of the existing families unless there is a very strong semantic fit.\n"
+        "- Use suggested_family only when mapping into an already existing family.\n"
+        "- Use proposed_family_key/proposed_family_label when the branch should become a new family instead of staying in other.\n"
+        "- Copy search_branch_path from the input as accurately as possible.\n\n"
+        "Return JSON in this shape:\n"
         "{\n"
         '  "branches": [\n'
         "    {\n"
@@ -3139,6 +3175,9 @@ def build_search_taxonomy_bootstrap_draft(
         '      "suggested_family": "...",\n'
         '      "suggested_subfamily": "",\n'
         '      "suggested_action": "tighten_family_mapping",\n'
+        '      "proposed_family_key": "",\n'
+        '      "proposed_family_label": "",\n'
+        '      "proposed_subfamily_key": "",\n'
         '      "confidence": 0.91,\n'
         '      "rationale": "...",\n'
         '      "evidence_tokens": ["..."],\n'
@@ -3146,7 +3185,7 @@ def build_search_taxonomy_bootstrap_draft(
         "    }\n"
         "  ]\n"
         "}\n\n"
-        "Ветки для разбора:\n"
+        "Branches to review:\n"
         f"{json.dumps(branch_payloads, ensure_ascii=False, indent=2)}"
     )
 
@@ -3191,12 +3230,17 @@ def build_search_taxonomy_bootstrap_draft(
                 "other_share": float(branch_payload.get("other_share", 0.0) or 0.0),
                 "split_branch_required": bool(branch_payload.get("split_branch_required")),
                 "split_branch_reason": clean_text_value(branch_payload.get("split_branch_reason")),
+                "taxonomy_gap_candidate": bool(branch_payload.get("taxonomy_gap_candidate")),
+                "taxonomy_gap_reason": clean_text_value(branch_payload.get("taxonomy_gap_reason")),
                 "response_branch_path": clean_text_value(proposal.get("search_branch_path")),
                 "branch_match_method": clean_text_value(proposal.get("_branch_match_method")),
                 "backend_guardrail": clean_text_value(proposal.get("_backend_guardrail")),
                 "suggested_family": clean_text_value(proposal.get("suggested_family")),
                 "suggested_subfamily": clean_text_value(proposal.get("suggested_subfamily")),
                 "suggested_action": clean_text_value(proposal.get("suggested_action")),
+                "proposed_family_key": clean_text_value(proposal.get("proposed_family_key")),
+                "proposed_family_label": clean_text_value(proposal.get("proposed_family_label")),
+                "proposed_subfamily_key": clean_text_value(proposal.get("proposed_subfamily_key")),
                 "confidence": float(proposal.get("confidence", 0.0) or 0.0),
                 "rationale": clean_text_value(proposal.get("rationale")),
                 "evidence_tokens": json.dumps([clean_text_value(token) for token in evidence_tokens if clean_text_value(token)], ensure_ascii=False),
