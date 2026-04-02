@@ -924,19 +924,40 @@ def _has_strong_lighting_domain_signal(normalized_text: str) -> bool:
     normalized = normalize_text(normalized_text)
     if not normalized:
         return False
+    token_patterns = (
+        r"\bсветильник\b",
+        r"\bпрожектор\b",
+        r"аварийн",
+        r"освещен",
+        r"светодиод",
+        r"\bдво(?:[\s\-]|\d|\b)",
+        r"\bдсо(?:[\s\-]|\d|\b)",
+        r"\bдсп(?:[\s\-]|\d|\b)",
+        r"\bдпо(?:[\s\-]|\d|\b)",
+        r"\bдку(?:[\s\-]|\d|\b)",
+    )
+    return any(re.search(pattern, normalized, flags=re.IGNORECASE) for pattern in token_patterns)
+
+
+def _looks_like_cable_infrastructure_class_name(normalized_class_name: str) -> bool:
+    if not normalized_class_name:
+        return False
     return any(
-        marker in normalized
-        for marker in (
-            "светильник",
-            "прожектор",
-            "аварийн",
-            "освещен",
-            "светодиод",
-            "дво",
-            "дсо",
-            "дсп",
-            "дпо",
-            "дку",
+        token in normalized_class_name
+        for token in (
+            "кабель канал",
+            "кабель-канал",
+            "кабельных лотков",
+            "лотки",
+            "лоток",
+            "лестничн",
+            "перегород",
+            "разделител",
+            "ответвител",
+            "заглушки для кабель",
+            "углы для кабель",
+            "крышки для кабель",
+            "суппорты и адаптеры",
         )
     )
 
@@ -950,6 +971,18 @@ def _normalize_catalog_effective_entity_type(
 ) -> str:
     candidate_family = entity_family_for_type(candidate_entity_type, rules)
     raw_family = entity_family_for_type(raw_entity_type, rules)
+    if candidate_family == "lighting_fixture":
+        if _has_strong_lighting_domain_signal(normalized_text):
+            return candidate_entity_type
+        if raw_entity_type:
+            return raw_entity_type
+        return "other"
+    if candidate_family == "optical_cross":
+        if "кросс" in normalized_text:
+            return candidate_entity_type
+        if raw_family in {"cable", "bulk_twisted_pair", "coax", "iec_power_cable"} or "кабель" in normalized_text:
+            return raw_entity_type
+        return "other"
     if candidate_family in {
         "rack_accessory_strict",
         "rj45_connector",
@@ -1051,6 +1084,10 @@ def derive_branch_from_text(
     if catalog_row_mode:
         registry_defaults = registry_family_default_branches(effective_entity_type, rules, branch_hint="")
         if registry_defaults and registry_defaults[0] != "прочее":
+            if effective_family == "lighting_fixture":
+                return registry_defaults[0]
+            if extracted_markers.get("installation_kind") == "cable_channel":
+                return "электрика > кабели > кабель-каналы"
             if effective_family in {"fire_detector", "fire_annunciator"}:
                 return registry_defaults[0]
             if effective_family in {
@@ -1220,6 +1257,8 @@ def normalize_catalog_branch_from_row(
     normalized_class_name = normalize_text(class_name, synonyms=synonyms)
     if normalized_class_name and normalized_class_name in class_name_map:
         return class_name_map[normalized_class_name]
+    if _looks_like_cable_infrastructure_class_name(normalized_class_name):
+        return normalize_branch_path([class_name]) or "прочее"
 
     derived = derive_branch_from_text(
         class_name,

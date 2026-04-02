@@ -372,6 +372,51 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(lighting_rj45["search_branch_path"], "свет > светильники")
             self.assertEqual(lighting_rj45["search_effective_family"], "lighting_fixture")
 
+    def test_build_search_catalog_cleans_cable_branch_contamination(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;Тип исполнения кабельного изделия;Производитель\n"
+                    "Угол внутренний 25x17 коричневый AIM;CC-1;10;Углы Для Кабель-Каналов;CLS-1;Угол внутренний;;ReMo\n"
+                    "Ввод кабельный для бронированного кабеля с двойным уплотнением;CG-1;10;Дополнительное Оборудование Для Пс;CLS-2;Ввод кабельный;;ReMo\n"
+                    "Оптический кабель HDMI 2.1 19М на 19М, 20 м.;OPT-1;10;Видеокабель;CLS-3;Кабель HDMI;;ReMo\n"
+                    "Лента LED герметичная в силиконовой оболочке 220В 13х8мм IP65 60 диодов/метр (бухта 50м);LED-1;10;Ленты Светодиодные 220В;CLS-4;Лента светодиодная;;ReMo\n"
+                    "Кабельная лестница, 3 м KS20-600 L=3000 PG;TRAY-1;10;Лестничные Лотки Оцинкованные (Метод Сендзимира);CLS-5;Лоток лестничный;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+
+            cable_channel_angle = built.loc[built["Артикул"] == "CC-1"].iloc[0]
+            cable_gland = built.loc[built["Артикул"] == "CG-1"].iloc[0]
+            optical_hdmi = built.loc[built["Артикул"] == "OPT-1"].iloc[0]
+            led_strip = built.loc[built["Артикул"] == "LED-1"].iloc[0]
+            tray = built.loc[built["Артикул"] == "TRAY-1"].iloc[0]
+
+            self.assertEqual(cable_channel_angle["search_branch_path"], "углы для кабель-каналов")
+            self.assertEqual(cable_channel_angle["search_effective_family"], "rack_accessory_strict")
+
+            self.assertEqual(cable_gland["search_effective_family"], "cable")
+            self.assertEqual(cable_gland["search_effective_entity_type"], "cable")
+            self.assertEqual(cable_gland["search_branch_path"], "электрика > кабели")
+
+            self.assertEqual(optical_hdmi["search_effective_family"], "cable")
+            self.assertEqual(optical_hdmi["search_effective_entity_type"], "cable")
+            self.assertEqual(optical_hdmi["search_branch_path"], "электрика > кабели")
+
+            self.assertEqual(led_strip["search_effective_family"], "lighting_fixture")
+            self.assertEqual(led_strip["search_branch_path"], "свет > светильники")
+
+            self.assertEqual(
+                tray["search_branch_path"],
+                "лестничные лотки оцинкованные (метод сендзимира)",
+            )
+            self.assertEqual(tray["search_effective_family"], "tray_sheet")
+
     def test_classify_item_type_does_not_treat_ascii_ups_ports_as_iec_power_cable(self):
         self.assertNotEqual(
             classify_item_type("online ups 2000va input IEC-320-C20 output IEC-320-C13 IEC-320-C19"),
