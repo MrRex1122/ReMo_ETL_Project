@@ -1102,6 +1102,101 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertTrue(pd.isna(draft_df.at[0, "suggested_family"]) or draft_df.at[0, "suggested_family"] == "")
             self.assertTrue(str(draft_df.at[0, "sample_rows"]).strip())
 
+    def test_build_search_taxonomy_bootstrap_draft_forces_split_branch_for_wide_mixed_branch(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            get_search_taxonomy_probe_tree_path(root).write_text(
+                json.dumps(
+                    {
+                        "catalog_stats": {
+                            "mode": "branch_probe",
+                            "source_path": "",
+                            "selected_branches": ["electrics > cables"],
+                        }
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            pd.DataFrame(
+                [
+                    {
+                        "search_branch_path": "electrics > cables",
+                        "branch_total_rows": 52000,
+                        "effective_family": "cable",
+                        "rows_count": 44720,
+                        "family_share_within_branch": 0.86,
+                        "sample_names_json": "[\"Power cable 3x2.5\"]",
+                        "sample_rows_json": "[\"Power cable 3x2.5 | class=Power Cables | type=Cable | article=C-1\"]",
+                        "top_class_names_json": "[\"Power Cables\", \"Cable Tray Angles\"]",
+                        "top_item_types_json": "[\"Cable\", \"Angle\"]",
+                        "top_articles_json": "[\"C-1\"]",
+                    },
+                    {
+                        "search_branch_path": "electrics > cables",
+                        "branch_total_rows": 52000,
+                        "effective_family": "rack_accessory_strict",
+                        "rows_count": 2080,
+                        "family_share_within_branch": 0.04,
+                        "sample_names_json": "[\"Power cable 3x2.5\"]",
+                        "sample_rows_json": "[\"Power cable 3x2.5 | class=Power Cables | type=Cable | article=C-1\"]",
+                        "top_class_names_json": "[\"Power Cables\", \"Cable Tray Angles\"]",
+                        "top_item_types_json": "[\"Cable\", \"Angle\"]",
+                        "top_articles_json": "[\"C-1\"]",
+                    },
+                ]
+            ).to_csv(get_search_taxonomy_probe_branch_summary_path(root), sep=";", encoding="utf-8", index=False)
+            pd.DataFrame(
+                [
+                    {
+                        "search_branch_path": "electrics > cables",
+                        "branch_total_rows": 52000,
+                        "family_count": 7,
+                        "top_family": "cable",
+                        "top_family_rows": 44720,
+                        "top_family_share": 0.86,
+                        "second_family": "rack_accessory_strict",
+                        "second_family_rows": 2080,
+                        "second_family_share": 0.04,
+                        "other_rows": 520,
+                        "other_share": 0.01,
+                        "suspicious_score": 14.0,
+                        "top_families": "cable (44720) | rack_accessory_strict (2080)",
+                    }
+                ]
+            ).to_csv(get_search_taxonomy_probe_audit_path(root), sep=";", encoding="utf-8", index=False)
+
+            _, csv_path = build_search_taxonomy_bootstrap_draft(
+                root,
+                api_key="test",
+                max_branches=1,
+                generate_text=lambda _prompt: json.dumps(
+                    {
+                        "branches": [
+                            {
+                                "search_branch_path": "electrics > cables",
+                                "suggested_family": "cable",
+                                "suggested_subfamily": "power_cable",
+                                "suggested_action": "tighten_family_mapping",
+                                "confidence": 0.9,
+                                "rationale": "Most rows are power cables.",
+                                "evidence_tokens": ["cable", "power", "3x2.5"],
+                                "notes": "Looks mostly like one cable family.",
+                            }
+                        ]
+                    }
+                ),
+            )
+
+            draft_df = pd.read_csv(csv_path, sep=";", encoding="utf-8")
+            self.assertEqual(draft_df.at[0, "suggested_action"], "split_branch")
+            self.assertEqual(draft_df.at[0, "backend_guardrail"], "force_split_branch")
+            self.assertTrue(bool(draft_df.at[0, "split_branch_required"]))
+            self.assertIn("wide_mixed_branch", str(draft_df.at[0, "split_branch_reason"]))
+            self.assertTrue(pd.isna(draft_df.at[0, "suggested_family"]) or draft_df.at[0, "suggested_family"] == "")
+            self.assertTrue(pd.isna(draft_df.at[0, "suggested_subfamily"]) or draft_df.at[0, "suggested_subfamily"] == "")
+
     def test_build_search_taxonomy_branch_probe_keeps_context_for_reclassified_leaf_branches(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

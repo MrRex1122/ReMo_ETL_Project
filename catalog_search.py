@@ -2943,6 +2943,63 @@ def _collect_branch_probe_context_richer(
     return serializable
 
 
+def _compute_bootstrap_split_branch_guardrail(branch_payload: Mapping[str, Any]) -> tuple[bool, str]:
+    branch_total_rows = int(branch_payload.get("branch_total_rows", 0) or 0)
+    family_count = int(branch_payload.get("family_count", 0) or 0)
+    top_family_share = float(branch_payload.get("top_family_share", 0.0) or 0.0)
+    second_family_share = float(branch_payload.get("second_family_share", 0.0) or 0.0)
+    other_share = float(branch_payload.get("other_share", 0.0) or 0.0)
+
+    is_wide_and_mixed = branch_total_rows >= 20000 and family_count >= 5 and top_family_share < 0.9
+    is_very_mixed = branch_total_rows >= 5000 and family_count >= 6 and top_family_share < 0.8
+    is_high_entropy = branch_total_rows >= 1000 and family_count >= 8 and top_family_share < 0.7
+    has_strong_secondary_signal = second_family_share >= 0.03 or other_share >= 0.08
+
+    should_force_split = has_strong_secondary_signal and (is_wide_and_mixed or is_very_mixed or is_high_entropy)
+    if not should_force_split:
+        return False, ""
+    return (
+        True,
+        "wide_mixed_branch "
+        f"rows={branch_total_rows} family_count={family_count} "
+        f"top_family_share={top_family_share:.3f} second_family_share={second_family_share:.3f} other_share={other_share:.3f}",
+    )
+
+
+def _apply_bootstrap_split_branch_guardrail(
+    proposal: Mapping[str, Any],
+    branch_payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    normalized = dict(proposal or {})
+    should_force_split, reason = _compute_bootstrap_split_branch_guardrail(branch_payload)
+    normalized["_split_branch_required"] = should_force_split
+    normalized["_split_branch_reason"] = reason
+    if not should_force_split:
+        return normalized
+
+    current_action = clean_text_value(normalized.get("suggested_action"))
+    backend_guardrail = clean_text_value(normalized.get("_backend_guardrail"))
+    if current_action != "split_branch":
+        normalized["suggested_action"] = "split_branch"
+        normalized["suggested_family"] = ""
+        normalized["suggested_subfamily"] = ""
+        rationale = clean_text_value(normalized.get("rationale"))
+        rationale_prefix = "Ветка слишком широкая и смешанная, поэтому требует split_branch."
+        normalized["rationale"] = f"{rationale_prefix} {rationale}".strip() if rationale else rationale_prefix
+        notes = clean_text_value(normalized.get("notes"))
+        notes_prefix = f"Backend guardrail: {reason}"
+        normalized["notes"] = f"{notes_prefix}. {notes}".strip() if notes else notes_prefix
+        normalized["_backend_guardrail"] = "force_split_branch"
+        logger.info(
+            "🧠 Taxonomy bootstrap guardrail forced split_branch for %s (%s)",
+            clean_text_value(branch_payload.get("search_branch_path")),
+            reason,
+        )
+    elif not backend_guardrail:
+        normalized["_backend_guardrail"] = "split_branch_confirmed"
+    return normalized
+
+
 def build_search_taxonomy_bootstrap_draft(
     clean_dir: Path,
     *,
@@ -3045,8 +3102,15 @@ def build_search_taxonomy_bootstrap_draft(
                 "top_class_names": branch_context.get(branch_path, {}).get("top_class_names", []),
                 "top_item_types": branch_context.get(branch_path, {}).get("top_item_types", []),
                 "top_articles": branch_context.get(branch_path, {}).get("top_articles", []),
+                "split_branch_required": False,
+                "split_branch_reason": "",
             }
         )
+
+    for branch_payload in branch_payloads:
+        split_branch_required, split_branch_reason = _compute_bootstrap_split_branch_guardrail(branch_payload)
+        branch_payload["split_branch_required"] = split_branch_required
+        branch_payload["split_branch_reason"] = split_branch_reason
 
     prompt = (
         "Ты помогаешь строить taxonomy для поисковой товарной БД.\n"
@@ -3062,6 +3126,8 @@ def build_search_taxonomy_bootstrap_draft(
         "- rationale: короткое объяснение\n"
         "- evidence_tokens: список 2-6 ключевых слов\n"
         "- notes: короткая заметка\n\n"
+        "Если у ветки split_branch_required=true, обязательно верни suggested_action=split_branch "
+        "и оставь suggested_family/suggested_subfamily пустыми.\n"
         "Если ветка слишком общая и реально содержит несколько разных товарных групп, используй suggested_action=split_branch.\n"
         "В таком случае не пытайся натянуть одну узкую subfamily на весь branch.\n"
         "Копируй search_branch_path из входных данных максимально точно.\n\n"
@@ -3102,7 +3168,10 @@ def build_search_taxonomy_bootstrap_draft(
     rows: list[dict[str, Any]] = []
     for branch_payload in branch_payloads:
         branch_path = branch_payload["search_branch_path"]
-        proposal = proposal_by_branch.get(branch_path, {})
+        proposal = _apply_bootstrap_split_branch_guardrail(
+            proposal_by_branch.get(branch_path, {}),
+            branch_payload,
+        )
         current_top_family = ""
         current_top_families = branch_payload.get("current_top_families", [])
         if current_top_families:
@@ -3120,8 +3189,11 @@ def build_search_taxonomy_bootstrap_draft(
                 "top_family_share": float(branch_payload.get("top_family_share", 0.0) or 0.0),
                 "second_family_share": float(branch_payload.get("second_family_share", 0.0) or 0.0),
                 "other_share": float(branch_payload.get("other_share", 0.0) or 0.0),
+                "split_branch_required": bool(branch_payload.get("split_branch_required")),
+                "split_branch_reason": clean_text_value(branch_payload.get("split_branch_reason")),
                 "response_branch_path": clean_text_value(proposal.get("search_branch_path")),
                 "branch_match_method": clean_text_value(proposal.get("_branch_match_method")),
+                "backend_guardrail": clean_text_value(proposal.get("_backend_guardrail")),
                 "suggested_family": clean_text_value(proposal.get("suggested_family")),
                 "suggested_subfamily": clean_text_value(proposal.get("suggested_subfamily")),
                 "suggested_action": clean_text_value(proposal.get("suggested_action")),
