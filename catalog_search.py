@@ -265,6 +265,74 @@ def normalize_text(text: str, synonyms: Mapping[str, str] | None = None) -> str:
     return " ".join(normalized.split())
 
 
+def _branch_probe_token_keys(text: str) -> set[str]:
+    normalized = normalize_text(text)
+    if not normalized:
+        return set()
+    token_keys: set[str] = set()
+    for token in re.findall(r"[a-zа-я0-9]+", normalized, flags=re.IGNORECASE):
+        if len(token) < 4:
+            continue
+        stemmed = re.sub(
+            r"(иями|ями|ами|ого|ему|ому|ыми|ими|иях|иях|ией|ией|ий|ый|ой|ая|ое|ые|ие|ов|ев|ам|ям|ах|ях|ы|и|а|я|о|е|у|ю)$",
+            "",
+            token,
+        )
+        normalized_token = stemmed if len(stemmed) >= 4 else token
+        token_keys.add(normalized_token[:5])
+    return token_keys
+
+
+def _prepare_branch_probe_selection(branch_paths: Iterable[str]) -> list[dict[str, Any]]:
+    prepared: list[dict[str, Any]] = []
+    for branch_path in branch_paths:
+        normalized_path = normalize_branch_path([branch_path])
+        if not normalized_path:
+            continue
+        segments = normalized_path.split(BRANCH_PATH_SEPARATOR)
+        prepared.append(
+            {
+                "path": normalized_path,
+                "prefix": f"{normalized_path}{BRANCH_PATH_SEPARATOR}",
+                "has_hierarchy": BRANCH_PATH_SEPARATOR in normalized_path,
+                "first_segment": segments[0] if segments else "",
+                "last_segment_keys": _branch_probe_token_keys(segments[-1] if segments else normalized_path),
+            }
+        )
+    return prepared
+
+
+def _branch_matches_probe_selection(candidate_branch: str, selections: Sequence[Mapping[str, Any]]) -> bool:
+    normalized_candidate = normalize_branch_path([candidate_branch])
+    if not normalized_candidate:
+        return False
+    candidate_has_hierarchy = BRANCH_PATH_SEPARATOR in normalized_candidate
+    candidate_first_segment = normalized_candidate.split(BRANCH_PATH_SEPARATOR)[0]
+    candidate_token_keys = _branch_probe_token_keys(normalized_candidate)
+    for selection in selections:
+        selection_path = clean_text_value(selection.get("path"))
+        if not selection_path:
+            continue
+        if (
+            normalized_candidate == selection_path
+            or normalized_candidate.startswith(clean_text_value(selection.get("prefix")))
+            or selection_path.startswith(f"{normalized_candidate}{BRANCH_PATH_SEPARATOR}")
+        ):
+            return True
+        selected_last_segment_keys = set(selection.get("last_segment_keys") or set())
+        if not selected_last_segment_keys or not candidate_token_keys:
+            continue
+        if not candidate_has_hierarchy:
+            if candidate_token_keys & selected_last_segment_keys:
+                return True
+            continue
+        if clean_text_value(selection.get("first_segment")) == candidate_first_segment and (
+            candidate_token_keys & selected_last_segment_keys
+        ):
+            return True
+    return False
+
+
 def tokenize(
     text: str,
     synonyms: Mapping[str, str] | None = None,
@@ -2554,9 +2622,10 @@ def build_search_taxonomy_branch_probe(
         for branch in branch_paths
         if clean_text_value(branch)
     ]
-    selected_branch_set = {branch for branch in selected_branches if branch}
+    selected_branch_set = {normalize_branch_path([branch]) for branch in selected_branches if branch}
     if not selected_branch_set:
         raise ValueError("At least one branch path must be selected for branch probe.")
+    prepared_probe_selection = _prepare_branch_probe_selection(selected_branch_set)
 
     source_path = _resolve_search_catalog_snapshot_source(clean_dir)
     if source_path is None or not Path(source_path).exists():
@@ -2585,7 +2654,11 @@ def build_search_taxonomy_branch_probe(
     for chunk in iter_search_catalog_chunks(source_path, chunksize=effective_chunksize):
         if "search_branch_path" not in chunk.columns:
             continue
-        filtered = chunk[chunk["search_branch_path"].astype(str).isin(selected_branch_set)]
+        filtered = chunk[
+            chunk["search_branch_path"].astype(str).map(
+                lambda value: _branch_matches_probe_selection(value, prepared_probe_selection)
+            )
+        ]
         if filtered.empty:
             continue
         output_rows = [

@@ -1459,6 +1459,57 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertTrue(str(leaf_row["top_class_names_json"]).strip())
             self.assertTrue(str(leaf_row["top_item_types_json"]).strip())
 
+    def test_build_search_taxonomy_branch_probe_includes_related_leaf_branches_for_selected_root_branch(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            search_path = get_search_catalog_csv_path(root)
+            pd.DataFrame(
+                [
+                    {
+                        "Наименование": "Короб перфорированный 40x40 серый",
+                        "Артикул": "DUCT-1",
+                        "Цена розничная": 10,
+                        "Название класса": "Перфорированные Кабель-Каналы",
+                        "Код класса": "CLS-1",
+                        "Тип изделия": "Короб перфорированный",
+                        "Тип исполнения кабельного изделия": "",
+                        "Производитель": "ReMo",
+                        "search_branch_path": "перфорированные кабель-каналы",
+                        "search_branch_leaf": "перфорированные кабель-каналы",
+                        "search_normalized_name": "короб перфорированный 40x40 серый",
+                        "search_tokens_json": "[]",
+                        "search_entity_type": "cable_channel",
+                        "search_effective_family": "cable_channel",
+                        "search_effective_entity_type": "cable_channel",
+                        "search_item_markers_json": "{\"installation_kind\": \"cable_channel\"}",
+                    },
+                    {
+                        "Наименование": "Патч-корд UTP cat6 1м",
+                        "Артикул": "PATCH-1",
+                        "Цена розничная": 10,
+                        "Название класса": "Патч-Корды",
+                        "Код класса": "CLS-2",
+                        "Тип изделия": "Патч-корд",
+                        "Тип исполнения кабельного изделия": "",
+                        "Производитель": "ReMo",
+                        "search_branch_path": "телеком > кабели > патч корды",
+                        "search_branch_leaf": "патч корды",
+                        "search_normalized_name": "патч корд utp cat6 1м",
+                        "search_tokens_json": "[]",
+                        "search_entity_type": "patch_cord",
+                        "search_effective_family": "patch_cord",
+                        "search_effective_entity_type": "patch_cord",
+                        "search_item_markers_json": "{}",
+                    },
+                ]
+            ).to_csv(search_path, sep=";", encoding="utf-8", index=False)
+
+            _, summary_path, _ = build_search_taxonomy_branch_probe(root, ["электрика > кабели"])
+            summary_df = pd.read_csv(summary_path, sep=";", encoding="utf-8")
+
+            self.assertIn("перфорированные кабель-каналы", summary_df["search_branch_path"].tolist())
+            self.assertNotIn("телеком > кабели > патч корды", summary_df["search_branch_path"].tolist())
+
     def test_build_search_taxonomy_bootstrap_draft_can_use_probe_summary_context_without_source_db(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
