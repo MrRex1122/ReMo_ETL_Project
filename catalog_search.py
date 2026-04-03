@@ -67,6 +67,7 @@ SEARCH_TAXONOMY_PREVIEW_AUDIT_FILENAME = "taxonomy_preview_branch_cleanup_audit.
 SEARCH_TAXONOMY_PROBE_TREE_FILENAME = "taxonomy_probe_tree.json"
 SEARCH_TAXONOMY_PROBE_BRANCH_SUMMARY_FILENAME = "taxonomy_probe_branch_family_summary.csv"
 SEARCH_TAXONOMY_PROBE_AUDIT_FILENAME = "taxonomy_probe_branch_cleanup_audit.csv"
+SEARCH_TAXONOMY_PROBE_REPORT_FILENAME = "taxonomy_probe_report.json"
 SEARCH_TAXONOMY_BOOTSTRAP_DRAFT_JSON_FILENAME = "taxonomy_bootstrap_draft.json"
 SEARCH_TAXONOMY_BOOTSTRAP_DRAFT_CSV_FILENAME = "taxonomy_bootstrap_draft.csv"
 SEARCH_BUILD_DEFAULT_CHUNKSIZE = 50000
@@ -202,6 +203,10 @@ def get_search_taxonomy_probe_branch_summary_path(clean_dir: Path) -> Path:
 
 def get_search_taxonomy_probe_audit_path(clean_dir: Path) -> Path:
     return Path(clean_dir) / SEARCH_TAXONOMY_PROBE_AUDIT_FILENAME
+
+
+def get_search_taxonomy_probe_report_path(clean_dir: Path) -> Path:
+    return Path(clean_dir) / SEARCH_TAXONOMY_PROBE_REPORT_FILENAME
 
 
 def get_search_taxonomy_bootstrap_draft_json_path(clean_dir: Path) -> Path:
@@ -1933,6 +1938,111 @@ def _parse_json_list_field(value: Any) -> List[str]:
     return []
 
 
+def _build_branch_probe_report_payload(
+    *,
+    tree_snapshot: Mapping[str, Any],
+    branch_df: pd.DataFrame,
+    audit_df: pd.DataFrame,
+) -> Dict[str, Any]:
+    report_stats = dict((tree_snapshot.get("catalog_stats", {}) or {}))
+    report_stats["branch_count"] = int(branch_df["search_branch_path"].nunique()) if not branch_df.empty else 0
+    report_stats["family_count"] = int(branch_df["effective_family"].nunique()) if not branch_df.empty else 0
+    report_stats["suspicious_branch_count"] = int(len(audit_df))
+
+    audit_lookup: Dict[str, Dict[str, Any]] = {}
+    if not audit_df.empty:
+        for row in audit_df.to_dict(orient="records"):
+            branch_path = clean_text_value(row.get("search_branch_path"))
+            if not branch_path:
+                continue
+            audit_lookup[branch_path] = {
+                key: (
+                    int(value)
+                    if key in {"branch_total_rows", "family_count", "top_family_rows", "second_family_rows", "other_rows"}
+                    and pd.notna(value)
+                    else float(value)
+                    if key in {"top_family_share", "second_family_share", "other_share", "suspicious_score"}
+                    and pd.notna(value)
+                    else clean_text_value(value)
+                )
+                for key, value in row.items()
+            }
+
+    branches_payload: list[dict[str, Any]] = []
+    if not branch_df.empty:
+        prepared = branch_df.copy()
+        prepared["branch_total_rows"] = pd.to_numeric(prepared["branch_total_rows"], errors="coerce").fillna(0).astype(int)
+        prepared["rows_count"] = pd.to_numeric(prepared["rows_count"], errors="coerce").fillna(0).astype(int)
+        prepared["family_share_within_branch"] = pd.to_numeric(
+            prepared["family_share_within_branch"], errors="coerce"
+        ).fillna(0.0)
+        for branch_path, group in prepared.groupby("search_branch_path", dropna=False):
+            cleaned_branch = clean_text_value(branch_path)
+            if not cleaned_branch:
+                continue
+            group = group.sort_values(["rows_count", "effective_family"], ascending=[False, True], kind="stable")
+            first_row = group.iloc[0]
+            families = [
+                {
+                    "effective_family": clean_text_value(row.get("effective_family")),
+                    "rows_count": int(row.get("rows_count", 0) or 0),
+                    "family_share_within_branch": round(float(row.get("family_share_within_branch", 0.0) or 0.0), 6),
+                }
+                for _, row in group.iterrows()
+            ]
+            branches_payload.append(
+                {
+                    "search_branch_path": cleaned_branch,
+                    "branch_total_rows": int(first_row.get("branch_total_rows", 0) or 0),
+                    "family_count": len(families),
+                    "top_family": families[0]["effective_family"] if families else "",
+                    "top_family_rows": families[0]["rows_count"] if families else 0,
+                    "top_family_share": families[0]["family_share_within_branch"] if families else 0.0,
+                    "sample_names": _parse_json_list_field(first_row.get("sample_names_json")),
+                    "sample_rows": _parse_json_list_field(first_row.get("sample_rows_json")),
+                    "top_class_names": _parse_json_list_field(first_row.get("top_class_names_json")),
+                    "top_item_types": _parse_json_list_field(first_row.get("top_item_types_json")),
+                    "top_articles": _parse_json_list_field(first_row.get("top_articles_json")),
+                    "families": families,
+                    "cleanup_audit": audit_lookup.get(cleaned_branch, {}),
+                }
+            )
+    branches_payload.sort(key=lambda item: (-int(item.get("branch_total_rows", 0)), item.get("search_branch_path", "")))
+
+    suspicious_payload = [
+        {
+            key: (
+                int(value)
+                if key in {"branch_total_rows", "family_count", "top_family_rows", "second_family_rows", "other_rows"}
+                and pd.notna(value)
+                else float(value)
+                if key in {"top_family_share", "second_family_share", "other_share", "suspicious_score"}
+                and pd.notna(value)
+                else clean_text_value(value)
+            )
+            for key, value in row.items()
+        }
+        for row in audit_df.to_dict(orient="records")
+    ] if not audit_df.empty else []
+
+    summary_lines = [
+        f"Selected branches: {len(report_stats.get('selected_branches', []) or [])}",
+        f"Rows in probe: {int(report_stats.get('rows_total', 0) or 0)}",
+        f"Branches in probe: {int(report_stats.get('branch_count', 0) or 0)}",
+        f"Families in probe: {int(report_stats.get('family_count', 0) or 0)}",
+        f"Suspicious branches: {int(report_stats.get('suspicious_branch_count', 0) or 0)}",
+    ]
+
+    return {
+        "mode": "branch_probe_report",
+        "catalog_stats": report_stats,
+        "summary_lines": summary_lines,
+        "taxonomy_tree": tree_snapshot,
+        "branches": branches_payload,
+        "suspicious_branches": suspicious_payload,
+    }
+
+
 def _resolve_search_catalog_snapshot_source(clean_dir: Path) -> Path | None:
     clean_dir = Path(clean_dir)
     readiness = get_search_catalog_readiness(clean_dir)
@@ -2637,6 +2747,7 @@ def build_search_taxonomy_branch_probe(
     probe_tree_path = get_search_taxonomy_probe_tree_path(clean_dir)
     probe_summary_path = get_search_taxonomy_probe_branch_summary_path(clean_dir)
     probe_audit_path = get_search_taxonomy_probe_audit_path(clean_dir)
+    probe_report_path = get_search_taxonomy_probe_report_path(clean_dir)
 
     effective_chunksize = chunksize or _read_search_build_chunksize()
     rows_total = 0
@@ -2680,6 +2791,8 @@ def build_search_taxonomy_branch_probe(
     tree_snapshot = build_taxonomy_tree_snapshot(taxonomy_rules)
     tree_snapshot["catalog_stats"] = {
         "rows_total": int(rows_total),
+        "branch_count": int(len(branch_counts)),
+        "family_count": int(len(family_counts)),
         "family_counts": [
             {"family": family_name, "rows_count": int(count)}
             for family_name, count in family_counts.most_common()
@@ -2749,12 +2862,19 @@ def build_search_taxonomy_branch_probe(
 
     audit_df = _build_branch_cleanup_audit_frame(branch_df)
     audit_df.to_csv(probe_audit_path, sep=";", encoding="utf-8", index=False)
+    probe_report_payload = _build_branch_probe_report_payload(
+        tree_snapshot=tree_snapshot,
+        branch_df=branch_df,
+        audit_df=audit_df,
+    )
+    probe_report_path.write_text(json.dumps(probe_report_payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     logger.info(
-        "⚡ Taxonomy branch probe complete: tree=%s summary=%s audit=%s rows=%s suspicious_branches=%s",
+        "⚡ Taxonomy branch probe complete: tree=%s summary=%s audit=%s report=%s rows=%s suspicious_branches=%s",
         probe_tree_path,
         probe_summary_path,
         probe_audit_path,
+        probe_report_path,
         rows_total,
         len(audit_df),
     )

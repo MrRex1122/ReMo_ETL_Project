@@ -26,6 +26,7 @@ from catalog_search import (
     build_search_taxonomy_preview,
     ensure_search_taxonomy_snapshot,
     get_search_catalog_readiness,
+    get_search_taxonomy_probe_report_path,
     is_search_catalog_path,
     refresh_search_catalog,
 )
@@ -2574,6 +2575,7 @@ def _render_search_taxonomy_preview_section(clean_dir: Path | None) -> None:
     probe_tree_path = clean_dir / "taxonomy_probe_tree.json"
     probe_summary_path = clean_dir / "taxonomy_probe_branch_family_summary.csv"
     probe_audit_path = clean_dir / "taxonomy_probe_branch_cleanup_audit.csv"
+    probe_report_path = get_search_taxonomy_probe_report_path(clean_dir)
 
     if st.button("⚡ Построить branch probe по выбранным веткам", key="build_taxonomy_branch_probe_btn"):
         if not selected_branches:
@@ -2589,11 +2591,12 @@ def _render_search_taxonomy_preview_section(clean_dir: Path | None) -> None:
                 logger.error("❌ Taxonomy branch probe failed: %s", exc, exc_info=True)
                 st.error(f"❌ Не удалось построить branch probe: {exc}")
 
-    probe_paths = [probe_tree_path, probe_summary_path, probe_audit_path]
+    probe_paths = [probe_tree_path, probe_summary_path, probe_audit_path, probe_report_path]
     if not all(path.exists() for path in probe_paths):
         return
 
     try:
+        probe_report = json.loads(probe_report_path.read_text(encoding="utf-8"))
         probe_snapshot = json.loads(probe_tree_path.read_text(encoding="utf-8"))
         probe_summary_df = pd.read_csv(probe_summary_path, sep=";", encoding="utf-8")
         probe_audit_df = pd.read_csv(probe_audit_path, sep=";", encoding="utf-8")
@@ -2607,34 +2610,56 @@ def _render_search_taxonomy_preview_section(clean_dir: Path | None) -> None:
     probe_metric_col2.metric("Выбранных веток", len(probe_stats.get("selected_branches", []) or []))
     probe_metric_col3.metric("Подозрительных веток в probe", len(probe_audit_df))
 
-    probe_download_col1, probe_download_col2, probe_download_col3 = st.columns(3)
+    st.caption("Для анализа Codex обычно достаточно одного файла `taxonomy_probe_report.json`.")
+
+    probe_download_col1, probe_download_col2 = st.columns([1.4, 1])
     with probe_download_col1:
         st.download_button(
-            "📥 Скачать branch probe tree",
-            probe_tree_path.read_bytes(),
-            file_name=_taxonomy_snapshot_download_filename(probe_tree_path),
+            "📥 Скачать единый branch probe report",
+            probe_report_path.read_bytes(),
+            file_name=_taxonomy_snapshot_download_filename(probe_report_path),
             mime="application/json",
-            key="download_taxonomy_probe_tree_json",
+            key="download_taxonomy_probe_report_json",
             on_click="ignore",
         )
     with probe_download_col2:
-        st.download_button(
-            "📥 Скачать branch probe summary",
-            probe_summary_path.read_bytes(),
-            file_name=_taxonomy_snapshot_download_filename(probe_summary_path),
-            mime="text/csv",
-            key="download_taxonomy_probe_summary_csv",
-            on_click="ignore",
+        st.caption(
+            f"В отчете уже есть: {len(probe_report.get('branches', []) or [])} веток и "
+            f"{len(probe_report.get('suspicious_branches', []) or [])} suspicious branches."
         )
-    with probe_download_col3:
-        st.download_button(
-            "📥 Скачать все подозрительные ветки branch probe",
-            probe_audit_path.read_bytes(),
-            file_name=_taxonomy_snapshot_download_filename(probe_audit_path),
-            mime="text/csv",
-            key="download_taxonomy_probe_audit_csv",
-            on_click="ignore",
-        )
+
+    with st.expander("Технические файлы branch probe", expanded=False):
+        probe_download_col1, probe_download_col2, probe_download_col3 = st.columns(3)
+        with probe_download_col1:
+            st.download_button(
+                "📥 Скачать branch probe tree",
+                probe_tree_path.read_bytes(),
+                file_name=_taxonomy_snapshot_download_filename(probe_tree_path),
+                mime="application/json",
+                key="download_taxonomy_probe_tree_json",
+                on_click="ignore",
+            )
+        with probe_download_col2:
+            st.download_button(
+                "📥 Скачать branch probe summary",
+                probe_summary_path.read_bytes(),
+                file_name=_taxonomy_snapshot_download_filename(probe_summary_path),
+                mime="text/csv",
+                key="download_taxonomy_probe_summary_csv",
+                on_click="ignore",
+            )
+        with probe_download_col3:
+            st.download_button(
+                "📥 Скачать все подозрительные ветки branch probe",
+                probe_audit_path.read_bytes(),
+                file_name=_taxonomy_snapshot_download_filename(probe_audit_path),
+                mime="text/csv",
+                key="download_taxonomy_probe_audit_csv",
+                on_click="ignore",
+            )
+
+    if probe_report.get("summary_lines"):
+        st.caption(" | ".join(str(item) for item in probe_report.get("summary_lines", [])[:5]))
 
     if probe_audit_df.empty:
         st.success("✅ В branch probe нет явно подозрительных веток по текущим правилам.")

@@ -31,6 +31,7 @@ from catalog_search import (
     get_search_taxonomy_bootstrap_draft_json_path,
     get_search_taxonomy_probe_audit_path,
     get_search_taxonomy_probe_branch_summary_path,
+    get_search_taxonomy_probe_report_path,
     get_search_taxonomy_probe_tree_path,
     is_search_catalog_path,
     refresh_search_catalog,
@@ -866,9 +867,11 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(tree_path, get_search_taxonomy_probe_tree_path(root))
             self.assertEqual(summary_path, get_search_taxonomy_probe_branch_summary_path(root))
             self.assertEqual(audit_path, get_search_taxonomy_probe_audit_path(root))
+            report_path = get_search_taxonomy_probe_report_path(root)
             self.assertTrue(tree_path.exists())
             self.assertTrue(summary_path.exists())
             self.assertTrue(audit_path.exists())
+            self.assertTrue(report_path.exists())
 
             snapshot = json.loads(tree_path.read_text(encoding="utf-8"))
             self.assertEqual(snapshot["catalog_stats"]["mode"], "branch_probe")
@@ -882,6 +885,11 @@ class CatalogSearchTests(unittest.TestCase):
                 set(summary_df["search_branch_path"]),
                 {"свет > светильники", "электрика > автоматы > модульные"},
             )
+
+            report_payload = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertEqual(report_payload["mode"], "branch_probe_report")
+            self.assertIn("branches", report_payload)
+            self.assertIn("suspicious_branches", report_payload)
 
     def test_build_search_taxonomy_bootstrap_draft_uses_branch_probe_artifacts(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

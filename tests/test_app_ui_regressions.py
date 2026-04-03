@@ -149,6 +149,11 @@ class AppUiRegressionTests(unittest.TestCase):
         self.assertIn("taxonomy_branch_probe_manual_branches", app_source)
 
 
+        self.assertIn("get_search_taxonomy_probe_report_path", app_source)
+        self.assertIn("download_taxonomy_probe_report_json", app_source)
+        self.assertIn("probe_report.get(\"summary_lines\")", app_source)
+        self.assertIn("probe_report_path", app_source)
+
     def test_taxonomy_preview_ui_supports_gemini_bootstrap_draft(self):
         app_source = Path("app.py").read_text(encoding="utf-8")
         self.assertIn("build_search_taxonomy_bootstrap_draft", app_source)
