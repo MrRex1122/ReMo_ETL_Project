@@ -2569,6 +2569,7 @@ def _render_search_taxonomy_preview_section(clean_dir: Path | None) -> None:
 
     try:
         probe_snapshot = json.loads(probe_tree_path.read_text(encoding="utf-8"))
+        probe_summary_df = pd.read_csv(probe_summary_path, sep=";", encoding="utf-8")
         probe_audit_df = pd.read_csv(probe_audit_path, sep=";", encoding="utf-8")
     except Exception as exc:
         st.error(f"❌ Не удалось прочитать branch probe: {exc}")
@@ -2631,7 +2632,22 @@ def _render_search_taxonomy_preview_section(clean_dir: Path | None) -> None:
 
     draft_json_path = clean_dir / "taxonomy_bootstrap_draft.json"
     draft_csv_path = clean_dir / "taxonomy_bootstrap_draft.csv"
-    max_draft_branches = max(1, min(20, len(probe_audit_df) if not probe_audit_df.empty else 1))
+    probe_summary_branch_count = (
+        int(probe_summary_df["search_branch_path"].astype(str).nunique())
+        if not probe_summary_df.empty and "search_branch_path" in probe_summary_df.columns
+        else 0
+    )
+    max_draft_branches = max(
+        1,
+        min(
+            20,
+            probe_summary_branch_count
+            if probe_summary_branch_count > 0
+            else len(probe_audit_df)
+            if not probe_audit_df.empty
+            else 1,
+        ),
+    )
     default_draft_branches = max(1, min(5, max_draft_branches))
     draft_branch_count = int(
         st.number_input(

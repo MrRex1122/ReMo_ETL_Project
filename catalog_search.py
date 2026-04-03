@@ -3066,12 +3066,49 @@ def build_search_taxonomy_bootstrap_draft(
     probe_snapshot = json.loads(probe_tree_path.read_text(encoding="utf-8"))
     probe_summary_df = pd.read_csv(probe_summary_path, sep=";", encoding="utf-8")
     probe_audit_df = pd.read_csv(probe_audit_path, sep=";", encoding="utf-8")
-    if probe_audit_df.empty:
-        raise RuntimeError("Branch probe has no suspicious branches to bootstrap")
+    summary_branch_rows: Dict[str, int] = {}
+    if not probe_summary_df.empty:
+        prepared_summary = probe_summary_df.copy()
+        prepared_summary["branch_total_rows"] = pd.to_numeric(
+            prepared_summary.get("branch_total_rows"), errors="coerce"
+        ).fillna(0).astype(int)
+        for branch_path, group in prepared_summary.groupby("search_branch_path", dropna=False):
+            cleaned_branch = clean_text_value(branch_path)
+            if not cleaned_branch:
+                continue
+            summary_branch_rows[cleaned_branch] = int(group["branch_total_rows"].max())
 
-    selected_branches = (
-        probe_audit_df["search_branch_path"].astype(str).head(max(1, int(max_branches))).tolist()
-    )
+    candidate_branches: list[str] = []
+    seen_candidate_branches: set[str] = set()
+
+    def _append_branch(branch_path: object) -> None:
+        cleaned_branch = clean_text_value(branch_path)
+        if not cleaned_branch or cleaned_branch in seen_candidate_branches:
+            return
+        seen_candidate_branches.add(cleaned_branch)
+        candidate_branches.append(cleaned_branch)
+
+    if not probe_audit_df.empty:
+        for branch_path in probe_audit_df["search_branch_path"].astype(str).tolist():
+            _append_branch(branch_path)
+
+    selected_probe_roots = [
+        clean_text_value(item)
+        for item in ((probe_snapshot.get("catalog_stats", {}) or {}).get("selected_branches", []) or [])
+        if clean_text_value(item)
+    ]
+    for branch_path in selected_probe_roots:
+        _append_branch(branch_path)
+
+    for branch_path, _rows_total in sorted(
+        summary_branch_rows.items(),
+        key=lambda item: (-int(item[1]), item[0]),
+    ):
+        _append_branch(branch_path)
+
+    selected_branches = candidate_branches[: max(1, int(max_branches))]
+    if not selected_branches:
+        raise RuntimeError("Branch probe has no branches to bootstrap")
     summary_context: Dict[str, Dict[str, Any]] = {}
     for branch_path in selected_branches:
         branch_group = probe_summary_df[probe_summary_df["search_branch_path"].astype(str) == branch_path].copy()

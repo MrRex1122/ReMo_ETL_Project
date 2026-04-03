@@ -1319,6 +1319,110 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(draft_df.at[0, "proposed_subfamily_key"], "roller_bearing")
             self.assertTrue(pd.isna(draft_df.at[0, "suggested_family"]) or draft_df.at[0, "suggested_family"] == "")
 
+    def test_build_search_taxonomy_bootstrap_draft_includes_clean_leaf_branches_from_probe_summary(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            get_search_taxonomy_probe_tree_path(root).write_text(
+                json.dumps(
+                    {
+                        "catalog_stats": {
+                            "mode": "branch_probe",
+                            "source_path": "",
+                            "selected_branches": ["электрика > кабели"],
+                        }
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            pd.DataFrame(
+                [
+                    {
+                        "search_branch_path": "электрика > кабели",
+                        "branch_total_rows": 52000,
+                        "effective_family": "cable",
+                        "rows_count": 44720,
+                        "family_share_within_branch": 0.86,
+                        "sample_names_json": "[\"Кабель ВВГнг-LS 3x2.5\"]",
+                        "sample_rows_json": "[\"Кабель ВВГнг-LS 3x2.5 | class=Силовые кабели | type=Кабель | article=C-1\"]",
+                        "top_class_names_json": "[\"Силовые кабели\"]",
+                        "top_item_types_json": "[\"Кабель\"]",
+                        "top_articles_json": "[\"C-1\"]",
+                    },
+                    {
+                        "search_branch_path": "перфорированные кабель-каналы",
+                        "branch_total_rows": 4200,
+                        "effective_family": "cable_channel",
+                        "rows_count": 4090,
+                        "family_share_within_branch": 0.9738,
+                        "sample_names_json": "[\"Короб перфорированный 40x40 серый\"]",
+                        "sample_rows_json": "[\"Короб перфорированный 40x40 серый | class=Перфорированные Кабель-Каналы | type=Короб перфорированный | article=DUCT-1\"]",
+                        "top_class_names_json": "[\"Перфорированные Кабель-Каналы\"]",
+                        "top_item_types_json": "[\"Короб перфорированный\"]",
+                        "top_articles_json": "[\"DUCT-1\"]",
+                    },
+                ]
+            ).to_csv(get_search_taxonomy_probe_branch_summary_path(root), sep=";", encoding="utf-8", index=False)
+            pd.DataFrame(
+                [
+                    {
+                        "search_branch_path": "электрика > кабели",
+                        "branch_total_rows": 52000,
+                        "family_count": 7,
+                        "top_family": "cable",
+                        "top_family_rows": 44720,
+                        "top_family_share": 0.86,
+                        "second_family": "rack_accessory_strict",
+                        "second_family_rows": 2080,
+                        "second_family_share": 0.04,
+                        "other_rows": 520,
+                        "other_share": 0.01,
+                        "suspicious_score": 14.0,
+                        "top_families": "cable (44720) | rack_accessory_strict (2080)",
+                    }
+                ]
+            ).to_csv(get_search_taxonomy_probe_audit_path(root), sep=";", encoding="utf-8", index=False)
+
+            _, csv_path = build_search_taxonomy_bootstrap_draft(
+                root,
+                api_key="test",
+                max_branches=2,
+                generate_text=lambda _prompt: json.dumps(
+                    {
+                        "branches": [
+                            {
+                                "search_branch_path": "электрика > кабели",
+                                "suggested_family": "",
+                                "suggested_subfamily": "",
+                                "suggested_action": "split_branch",
+                                "confidence": 0.9,
+                                "rationale": "Wide mixed branch.",
+                                "evidence_tokens": ["кабель", "mixed"],
+                                "notes": "",
+                            },
+                            {
+                                "search_branch_path": "перфорированные кабель-каналы",
+                                "suggested_family": "cable_channel",
+                                "suggested_subfamily": "perforated_cable_channel",
+                                "suggested_action": "tighten_family_mapping",
+                                "confidence": 0.94,
+                                "rationale": "Clean cable channel branch.",
+                                "evidence_tokens": ["перфорированный", "кабель-канал"],
+                                "notes": "",
+                            },
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+
+            draft_df = pd.read_csv(csv_path, sep=";", encoding="utf-8")
+            self.assertEqual(
+                draft_df["search_branch_path"].tolist(),
+                ["электрика > кабели", "перфорированные кабель-каналы"],
+            )
+
     def test_build_search_taxonomy_branch_probe_keeps_context_for_reclassified_leaf_branches(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
