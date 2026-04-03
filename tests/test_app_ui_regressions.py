@@ -144,6 +144,9 @@ class AppUiRegressionTests(unittest.TestCase):
         self.assertIn("Построить branch probe по выбранным веткам", app_source)
         self.assertIn("taxonomy_probe_branch_cleanup_audit.csv", app_source)
         self.assertIn("probe_audit_df.head(20)", app_source)
+        self.assertIn("preview_summary_df", app_source)
+        self.assertIn("Или добавьте ветки вручную", app_source)
+        self.assertIn("taxonomy_branch_probe_manual_branches", app_source)
 
 
     def test_taxonomy_preview_ui_supports_gemini_bootstrap_draft(self):

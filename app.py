@@ -2504,6 +2504,7 @@ def _render_search_taxonomy_preview_section(clean_dir: Path | None) -> None:
 
     try:
         preview_snapshot = json.loads(preview_tree_path.read_text(encoding="utf-8"))
+        preview_summary_df = pd.read_csv(preview_summary_path, sep=";", encoding="utf-8")
         preview_audit_df = pd.read_csv(preview_audit_path, sep=";", encoding="utf-8")
     except Exception as exc:
         st.error(f"❌ Не удалось прочитать taxonomy preview: {exc}")
@@ -2531,19 +2532,43 @@ def _render_search_taxonomy_preview_section(clean_dir: Path | None) -> None:
         "не гоняя весь preview по всему каталогу."
     )
 
-    branch_options = (
-        preview_audit_df["search_branch_path"].astype(str).tolist()
-        if not preview_audit_df.empty
-        else []
-    )
+    branch_options: list[str] = []
+    seen_branch_options: set[str] = set()
+
+    def _append_branch_option(value: object) -> None:
+        branch_path = str(value or "").strip()
+        if not branch_path or branch_path in seen_branch_options:
+            return
+        seen_branch_options.add(branch_path)
+        branch_options.append(branch_path)
+
+    if not preview_audit_df.empty and "search_branch_path" in preview_audit_df.columns:
+        for value in preview_audit_df["search_branch_path"].astype(str).tolist():
+            _append_branch_option(value)
+    if not preview_summary_df.empty and "search_branch_path" in preview_summary_df.columns:
+        for value in preview_summary_df["search_branch_path"].astype(str).drop_duplicates().tolist():
+            _append_branch_option(value)
+
     default_branches = branch_options[:3]
     selected_branches = st.multiselect(
         "Выберите ветки для branch probe",
         options=branch_options,
         default=default_branches,
         key="taxonomy_branch_probe_selector",
-        help="Рекомендуется брать 1-3 самых шумных ветки за итерацию.",
+        help="Сначала идут подозрительные ветки из audit, дальше доступны все ветки из preview summary.",
     )
+    manual_branch_text = st.text_input(
+        "Или добавьте ветки вручную",
+        value="",
+        key="taxonomy_branch_probe_manual_branches",
+        help="Можно вставить точные branch path через `;` или с новой строки, если их неудобно искать в списке.",
+    )
+    manual_branches = [
+        branch.strip()
+        for branch in re.split(r"[;\r\n]+", manual_branch_text or "")
+        if branch.strip()
+    ]
+    selected_branches = selected_branches + [branch for branch in manual_branches if branch not in selected_branches]
 
     probe_tree_path = clean_dir / "taxonomy_probe_tree.json"
     probe_summary_path = clean_dir / "taxonomy_probe_branch_family_summary.csv"
