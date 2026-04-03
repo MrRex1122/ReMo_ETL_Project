@@ -319,6 +319,8 @@ def _branch_matches_probe_selection(candidate_branch: str, selections: Sequence[
             or selection_path.startswith(f"{normalized_candidate}{BRANCH_PATH_SEPARATOR}")
         ):
             return True
+        if not bool(selection.get("has_hierarchy")):
+            continue
         selected_last_segment_keys = set(selection.get("last_segment_keys") or set())
         if not selected_last_segment_keys or not candidate_token_keys:
             continue
@@ -3161,10 +3163,6 @@ def build_search_taxonomy_bootstrap_draft(
         seen_candidate_branches.add(cleaned_branch)
         candidate_branches.append(cleaned_branch)
 
-    if not probe_audit_df.empty:
-        for branch_path in probe_audit_df["search_branch_path"].astype(str).tolist():
-            _append_branch(branch_path)
-
     selected_probe_roots = [
         clean_text_value(item)
         for item in ((probe_snapshot.get("catalog_stats", {}) or {}).get("selected_branches", []) or [])
@@ -3172,6 +3170,10 @@ def build_search_taxonomy_bootstrap_draft(
     ]
     for branch_path in selected_probe_roots:
         _append_branch(branch_path)
+
+    if not probe_audit_df.empty:
+        for branch_path in probe_audit_df["search_branch_path"].astype(str).tolist():
+            _append_branch(branch_path)
 
     for branch_path, _rows_total in sorted(
         summary_branch_rows.items(),

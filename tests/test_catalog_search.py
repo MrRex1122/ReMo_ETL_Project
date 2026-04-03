@@ -1423,6 +1423,97 @@ class CatalogSearchTests(unittest.TestCase):
                 ["электрика > кабели", "перфорированные кабель-каналы"],
             )
 
+    def test_build_search_taxonomy_bootstrap_draft_prioritizes_selected_probe_roots_before_audit_tail(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            get_search_taxonomy_probe_tree_path(root).write_text(
+                json.dumps(
+                    {
+                        "catalog_stats": {
+                            "mode": "branch_probe",
+                            "source_path": "",
+                            "selected_branches": ["Ð¿ÐµÑ€Ñ„Ð¾Ñ€Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð½Ñ‹Ðµ ÐºÐ°Ð±ÐµÐ»ÑŒ-ÐºÐ°Ð½Ð°Ð»Ñ‹"],
+                        }
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            pd.DataFrame(
+                [
+                    {
+                        "search_branch_path": "Ð¿ÐµÑ€Ñ„Ð¾Ñ€Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð½Ñ‹Ðµ ÐºÐ°Ð±ÐµÐ»ÑŒ-ÐºÐ°Ð½Ð°Ð»Ñ‹",
+                        "branch_total_rows": 4200,
+                        "effective_family": "cable_channel",
+                        "rows_count": 4090,
+                        "family_share_within_branch": 0.9738,
+                        "sample_names_json": "[\"ÐšÐ¾Ñ€Ð¾Ð± Ð¿ÐµÑ€Ñ„Ð¾Ñ€Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð½Ñ‹Ð¹ 40x40 ÑÐµÑ€Ñ‹Ð¹\"]",
+                        "sample_rows_json": "[\"ÐšÐ¾Ñ€Ð¾Ð± Ð¿ÐµÑ€Ñ„Ð¾Ñ€Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð½Ñ‹Ð¹ 40x40 ÑÐµÑ€Ñ‹Ð¹ | class=ÐŸÐµÑ€Ñ„Ð¾Ñ€Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð½Ñ‹Ðµ ÐšÐ°Ð±ÐµÐ»ÑŒ-ÐšÐ°Ð½Ð°Ð»Ñ‹ | type=ÐšÐ¾Ñ€Ð¾Ð± Ð¿ÐµÑ€Ñ„Ð¾Ñ€Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð½Ñ‹Ð¹ | article=DUCT-1\"]",
+                        "top_class_names_json": "[\"ÐŸÐµÑ€Ñ„Ð¾Ñ€Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð½Ñ‹Ðµ ÐšÐ°Ð±ÐµÐ»ÑŒ-ÐšÐ°Ð½Ð°Ð»Ñ‹\"]",
+                        "top_item_types_json": "[\"ÐšÐ¾Ñ€Ð¾Ð± Ð¿ÐµÑ€Ñ„Ð¾Ñ€Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð½Ñ‹Ð¹\"]",
+                        "top_articles_json": "[\"DUCT-1\"]",
+                    },
+                    {
+                        "search_branch_path": "ÐºÑ€Ð°Ð½Ñ‹ ÑˆÐ°Ñ€Ð¾Ð²Ñ‹Ðµ ÑÑ‚Ð°Ð»ÑŒÐ½Ñ‹Ðµ",
+                        "branch_total_rows": 19008,
+                        "effective_family": "other",
+                        "rows_count": 18950,
+                        "family_share_within_branch": 0.997,
+                        "sample_names_json": "[\"ÐšÑ€Ð°Ð½ ÑˆÐ°Ñ€Ð¾Ð²Ð¾Ð¹ ÑÑ‚Ð°Ð»ÑŒÐ½Ð¾Ð¹ DN50\"]",
+                        "sample_rows_json": "[\"ÐšÑ€Ð°Ð½ ÑˆÐ°Ñ€Ð¾Ð²Ð¾Ð¹ ÑÑ‚Ð°Ð»ÑŒÐ½Ð¾Ð¹ DN50 | class=ÐšÑ€Ð°Ð½Ñ‹ Ð¨Ð°Ñ€Ð¾Ð²Ñ‹Ðµ Ð¡Ñ‚Ð°Ð»ÑŒÐ½Ñ‹Ðµ | type=ÐšÑ€Ð°Ð½ | article=VALVE-2\"]",
+                        "top_class_names_json": "[\"ÐšÑ€Ð°Ð½Ñ‹ Ð¨Ð°Ñ€Ð¾Ð²Ñ‹Ðµ Ð¡Ñ‚Ð°Ð»ÑŒÐ½Ñ‹Ðµ\"]",
+                        "top_item_types_json": "[\"ÐšÑ€Ð°Ð½\"]",
+                        "top_articles_json": "[\"VALVE-2\"]",
+                    },
+                ]
+            ).to_csv(get_search_taxonomy_probe_branch_summary_path(root), sep=";", encoding="utf-8", index=False)
+            pd.DataFrame(
+                [
+                    {
+                        "search_branch_path": "Ð·Ð°Ñ‚Ð²Ð¾Ñ€Ñ‹ Ð¿Ð¾Ð²Ð¾Ñ€Ð¾Ñ‚Ð½Ñ‹Ðµ Ð´Ð¸ÑÐºÐ¾Ð²Ñ‹Ðµ ÑÑ‚Ð°Ð»ÑŒÐ½Ñ‹Ðµ",
+                        "branch_total_rows": 20000,
+                        "family_count": 1,
+                        "top_family": "other",
+                        "top_family_rows": 19999,
+                        "top_family_share": 0.999,
+                        "second_family": "",
+                        "second_family_rows": 0,
+                        "second_family_share": 0.0,
+                        "other_rows": 19999,
+                        "other_share": 0.999,
+                        "suspicious_score": 999.0,
+                        "top_families": "other (19999)",
+                    }
+                ]
+            ).to_csv(get_search_taxonomy_probe_audit_path(root), sep=";", encoding="utf-8", index=False)
+
+            _, csv_path = build_search_taxonomy_bootstrap_draft(
+                root,
+                api_key="test",
+                max_branches=1,
+                generate_text=lambda _prompt: json.dumps(
+                    {
+                        "branches": [
+                            {
+                                "search_branch_path": "Ð¿ÐµÑ€Ñ„Ð¾Ñ€Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð½Ñ‹Ðµ ÐºÐ°Ð±ÐµÐ»ÑŒ-ÐºÐ°Ð½Ð°Ð»Ñ‹",
+                                "suggested_family": "cable_channel",
+                                "suggested_subfamily": "perforated_cable_channel",
+                                "suggested_action": "tighten_family_mapping",
+                                "confidence": 0.96,
+                                "rationale": "Selected clean probe root must be kept ahead of audit tail.",
+                                "evidence_tokens": ["Ð¿ÐµÑ€Ñ„Ð¾Ñ€Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð½Ñ‹Ð¹", "ÐºÐ°Ð±ÐµÐ»ÑŒ-ÐºÐ°Ð½Ð°Ð»"],
+                                "notes": "",
+                            }
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+
+            draft_df = pd.read_csv(csv_path, sep=";", encoding="utf-8")
+            self.assertEqual(draft_df["search_branch_path"].tolist(), ["Ð¿ÐµÑ€Ñ„Ð¾Ñ€Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð½Ñ‹Ðµ ÐºÐ°Ð±ÐµÐ»ÑŒ-ÐºÐ°Ð½Ð°Ð»Ñ‹"])
+
     def test_build_search_taxonomy_branch_probe_keeps_context_for_reclassified_leaf_branches(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
@@ -1509,6 +1600,57 @@ class CatalogSearchTests(unittest.TestCase):
 
             self.assertIn("перфорированные кабель-каналы", summary_df["search_branch_path"].tolist())
             self.assertNotIn("телеком > кабели > патч корды", summary_df["search_branch_path"].tolist())
+
+    def test_build_search_taxonomy_branch_probe_does_not_overexpand_flat_industrial_branches(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            search_path = get_search_catalog_csv_path(root)
+            pd.DataFrame(
+                [
+                    {
+                        "ÐÐ°Ð¸Ð¼ÐµÐ½Ð¾Ð²Ð°Ð½Ð¸Ðµ": "Ð—Ð°Ñ‚Ð²Ð¾Ñ€ Ð¿Ð¾Ð²Ð¾Ñ€Ð¾Ñ‚Ð½Ñ‹Ð¹ Ð´Ð¸ÑÐºÐ¾Ð²Ñ‹Ð¹ ÑÑ‚Ð°Ð»ÑŒÐ½Ð¾Ð¹ DN100",
+                        "ÐÑ€Ñ‚Ð¸ÐºÑƒÐ»": "VALVE-1",
+                        "Ð¦ÐµÐ½Ð° Ñ€Ð¾Ð·Ð½Ð¸Ñ‡Ð½Ð°Ñ": 10,
+                        "ÐÐ°Ð·Ð²Ð°Ð½Ð¸Ðµ ÐºÐ»Ð°ÑÑÐ°": "Ð—Ð°Ñ‚Ð²Ð¾Ñ€Ñ‹ ÐŸÐ¾Ð²Ð¾Ñ€Ð¾Ñ‚Ð½Ñ‹Ðµ Ð”Ð¸ÑÐºÐ¾Ð²Ñ‹Ðµ Ð¡Ñ‚Ð°Ð»ÑŒÐ½Ñ‹Ðµ",
+                        "ÐšÐ¾Ð´ ÐºÐ»Ð°ÑÑÐ°": "CLS-1",
+                        "Ð¢Ð¸Ð¿ Ð¸Ð·Ð´ÐµÐ»Ð¸Ñ": "Ð—Ð°Ñ‚Ð²Ð¾Ñ€",
+                        "Ð¢Ð¸Ð¿ Ð¸ÑÐ¿Ð¾Ð»Ð½ÐµÐ½Ð¸Ñ ÐºÐ°Ð±ÐµÐ»ÑŒÐ½Ð¾Ð³Ð¾ Ð¸Ð·Ð´ÐµÐ»Ð¸Ñ": "",
+                        "ÐŸÑ€Ð¾Ð¸Ð·Ð²Ð¾Ð´Ð¸Ñ‚ÐµÐ»ÑŒ": "ReMo",
+                        "search_branch_path": "Ð·Ð°Ñ‚Ð²Ð¾Ñ€Ñ‹ Ð¿Ð¾Ð²Ð¾Ñ€Ð¾Ñ‚Ð½Ñ‹Ðµ Ð´Ð¸ÑÐºÐ¾Ð²Ñ‹Ðµ ÑÑ‚Ð°Ð»ÑŒÐ½Ñ‹Ðµ",
+                        "search_branch_leaf": "Ð·Ð°Ñ‚Ð²Ð¾Ñ€Ñ‹ Ð¿Ð¾Ð²Ð¾Ñ€Ð¾Ñ‚Ð½Ñ‹Ðµ Ð´Ð¸ÑÐºÐ¾Ð²Ñ‹Ðµ ÑÑ‚Ð°Ð»ÑŒÐ½Ñ‹Ðµ",
+                        "search_normalized_name": "Ð·Ð°Ñ‚Ð²Ð¾Ñ€ Ð¿Ð¾Ð²Ð¾Ñ€Ð¾Ñ‚Ð½Ñ‹Ð¹ Ð´Ð¸ÑÐºÐ¾Ð²Ñ‹Ð¹ ÑÑ‚Ð°Ð»ÑŒÐ½Ð¾Ð¹ dn100",
+                        "search_tokens_json": "[]",
+                        "search_entity_type": "other",
+                        "search_effective_family": "other",
+                        "search_effective_entity_type": "other",
+                        "search_item_markers_json": "{}",
+                    },
+                    {
+                        "ÐÐ°Ð¸Ð¼ÐµÐ½Ð¾Ð²Ð°Ð½Ð¸Ðµ": "ÐšÑ€Ð°Ð½ ÑˆÐ°Ñ€Ð¾Ð²Ð¾Ð¹ ÑÑ‚Ð°Ð»ÑŒÐ½Ð¾Ð¹ DN50",
+                        "ÐÑ€Ñ‚Ð¸ÐºÑƒÐ»": "VALVE-2",
+                        "Ð¦ÐµÐ½Ð° Ñ€Ð¾Ð·Ð½Ð¸Ñ‡Ð½Ð°Ñ": 10,
+                        "ÐÐ°Ð·Ð²Ð°Ð½Ð¸Ðµ ÐºÐ»Ð°ÑÑÐ°": "ÐšÑ€Ð°Ð½Ñ‹ Ð¨Ð°Ñ€Ð¾Ð²Ñ‹Ðµ Ð¡Ñ‚Ð°Ð»ÑŒÐ½Ñ‹Ðµ",
+                        "ÐšÐ¾Ð´ ÐºÐ»Ð°ÑÑÐ°": "CLS-2",
+                        "Ð¢Ð¸Ð¿ Ð¸Ð·Ð´ÐµÐ»Ð¸Ñ": "ÐšÑ€Ð°Ð½",
+                        "Ð¢Ð¸Ð¿ Ð¸ÑÐ¿Ð¾Ð»Ð½ÐµÐ½Ð¸Ñ ÐºÐ°Ð±ÐµÐ»ÑŒÐ½Ð¾Ð³Ð¾ Ð¸Ð·Ð´ÐµÐ»Ð¸Ñ": "",
+                        "ÐŸÑ€Ð¾Ð¸Ð·Ð²Ð¾Ð´Ð¸Ñ‚ÐµÐ»ÑŒ": "ReMo",
+                        "search_branch_path": "ÐºÑ€Ð°Ð½Ñ‹ ÑˆÐ°Ñ€Ð¾Ð²Ñ‹Ðµ ÑÑ‚Ð°Ð»ÑŒÐ½Ñ‹Ðµ",
+                        "search_branch_leaf": "ÐºÑ€Ð°Ð½Ñ‹ ÑˆÐ°Ñ€Ð¾Ð²Ñ‹Ðµ ÑÑ‚Ð°Ð»ÑŒÐ½Ñ‹Ðµ",
+                        "search_normalized_name": "ÐºÑ€Ð°Ð½ ÑˆÐ°Ñ€Ð¾Ð²Ð¾Ð¹ ÑÑ‚Ð°Ð»ÑŒÐ½Ð¾Ð¹ dn50",
+                        "search_tokens_json": "[]",
+                        "search_entity_type": "other",
+                        "search_effective_family": "other",
+                        "search_effective_entity_type": "other",
+                        "search_item_markers_json": "{}",
+                    },
+                ]
+            ).to_csv(search_path, sep=";", encoding="utf-8", index=False)
+
+            _, summary_path, _ = build_search_taxonomy_branch_probe(root, ["Ð·Ð°Ñ‚Ð²Ð¾Ñ€Ñ‹ Ð¿Ð¾Ð²Ð¾Ñ€Ð¾Ñ‚Ð½Ñ‹Ðµ Ð´Ð¸ÑÐºÐ¾Ð²Ñ‹Ðµ ÑÑ‚Ð°Ð»ÑŒÐ½Ñ‹Ðµ"])
+            summary_df = pd.read_csv(summary_path, sep=";", encoding="utf-8")
+
+            self.assertEqual(len(summary_df), 1)
+            self.assertNotIn("ÐºÑ€Ð°Ð½Ñ‹ ÑˆÐ°Ñ€Ð¾Ð²Ñ‹Ðµ ÑÑ‚Ð°Ð»ÑŒÐ½Ñ‹Ðµ", summary_df["search_branch_path"].tolist())
 
     def test_build_search_taxonomy_bootstrap_draft_can_use_probe_summary_context_without_source_db(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
