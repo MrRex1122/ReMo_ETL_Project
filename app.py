@@ -14,6 +14,7 @@ import sqlite3
 import logging
 import io
 import json
+import re
 import threading
 import time
 import uuid
