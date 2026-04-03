@@ -659,13 +659,36 @@ class CatalogSearchTests(unittest.TestCase):
         query = "Короб с крышкой 80x40 (3 м.)"
         markers = extract_item_markers(query)
 
-        self.assertEqual(classify_item_type(query), "cable")
+        self.assertEqual(classify_item_type(query), "cable_channel")
         self.assertEqual(markers.get("installation_kind"), "cable_channel")
         self.assertEqual(markers.get("length_m"), "3")
         self.assertEqual(
             derive_branch_from_text(query),
             "электрика > кабели > кабель-каналы",
         )
+
+    def test_build_search_catalog_maps_perforated_cable_channels_to_cable_channel_family(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Короб перфорированный 40x40 серый;DUCT-1;120;Перфорированные Кабель-Каналы;CLS-1;"
+                    "Короб перфорированный;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+            cable_channel = built.loc[built["Артикул"] == "DUCT-1"].iloc[0]
+
+            self.assertEqual(cable_channel["search_branch_path"], "перфорированные кабель-каналы")
+            self.assertEqual(cable_channel["search_entity_type"], "cable_channel")
+            self.assertEqual(cable_channel["search_effective_entity_type"], "cable_channel")
+            self.assertEqual(cable_channel["search_effective_family"], "cable_channel")
 
     def test_derive_branch_from_text_skips_telecom_rack_for_control_cabinet(self):
         self.assertEqual(

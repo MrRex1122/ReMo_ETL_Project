@@ -4710,6 +4710,19 @@ class ReMoMatcher:
         branch_path = self._normalize_text(self._clean_text_value(item.get("branch_path")))
         if not search_text and not branch_path:
             return ""
+        cable_channel_accessory_tokens = (
+            "углы",
+            "тройники",
+            "заглушки",
+            "переходники",
+            "ответвители",
+            "крышки",
+            "подвесы",
+            "крепления",
+            "накладки",
+            "соединители",
+            "аксессуары",
+        )
         if branch_path.startswith("свет > светильники") or any(
             token in search_text for token in ("светильник", "прожектор", "светодиодн", "дсо", "дсп", "дпо", "дку")
         ):
@@ -4778,6 +4791,22 @@ class ReMoMatcher:
             and "коробка" not in search_text
         ):
             return "firestop_material"
+        if (
+            "перфорированные кабель каналы" in branch_path
+            or (
+                "кабель каналы" in branch_path
+                and not any(token in branch_path for token in cable_channel_accessory_tokens)
+            )
+            or (
+                (
+                    shared_looks_like_cable_channel_box(search_text)
+                    or "перфокороб" in search_text
+                    or "перфорированный короб" in search_text
+                )
+                and not any(token in search_text for token in ("коробка", "лючок", "rj45", "keystone", "патч"))
+            )
+        ):
+            return "cable_channel"
         if any(token in branch_path for token in ("коробки распределительные", "коробки установочные")) or (
             "коробка" in search_text
             and any(token in search_text for token in ("распредел", "монтажн", "установоч", "распаеч", "огнестойк"))
@@ -4854,6 +4883,7 @@ class ReMoMatcher:
             "firestop_material",
             "box",
             "box_accessory",
+            "cable_channel",
             "switch_wiring",
         }
 
@@ -5906,6 +5936,8 @@ class ReMoMatcher:
                 scores[branch] += 1.0
             elif entity_type == "cable" and "кабел" in branch_norm:
                 scores[branch] += 0.8
+            elif entity_type == "cable_channel" and ("кабель канал" in branch_norm or "перфорирован" in branch_norm):
+                scores[branch] += 1.0
             elif entity_type == "wire" and "провод" in branch_norm:
                 scores[branch] += 0.8
 

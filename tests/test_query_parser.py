@@ -57,7 +57,7 @@ class QueryParserTests(unittest.TestCase):
     def test_parse_query_spec_detects_cable_channel_box_query(self):
         spec = parse_query_spec("Короб с крышкой 80x40 (3 м.)", taxonomy_rules=self.rules)
 
-        self.assertEqual(spec.entity_type, "cable")
+        self.assertEqual(spec.entity_type, "cable_channel")
         self.assertEqual(spec.branch_hint, "электрика > кабели > кабель-каналы")
         self.assertEqual(spec.markers.get("installation_kind"), "cable_channel")
         self.assertEqual(spec.markers.get("length_m"), "3")

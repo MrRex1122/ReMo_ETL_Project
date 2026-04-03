@@ -844,7 +844,7 @@ def classify_item_type(
     if _looks_like_rj45_outlet(normalized):
         return "rj45_outlet"
     if _looks_like_cable_channel_box(normalized, extracted_markers=extracted_markers):
-        return "cable"
+        return "cable_channel"
     if "лючок" in normalized or ("напольн" in normalized and "короб" in normalized):
         return "floor_box"
     if "щеточ" in normalized:
@@ -1008,6 +1008,10 @@ def _normalize_effective_entity_type_by_catalog_branch(
         "лестничные лотки",
         "разделители и перегородки для кабельных лотков",
     )
+    cable_channel_body_branch_markers = (
+        "перфорированные кабель-каналы",
+        "кабель-каналы",
+    )
     tray_accessory_branch_markers = (
         "углы и повороты кабельных лотков",
         "углы для кабель-каналов",
@@ -1028,6 +1032,8 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "rack_accessory_strict"
     if any(marker in normalized_branch for marker in tray_sheet_branch_markers):
         return "tray_sheet"
+    if any(marker in normalized_branch for marker in cable_channel_body_branch_markers):
+        return "cable_channel"
 
     return effective_entity_type or raw_entity_type
 
@@ -1156,6 +1162,10 @@ def derive_branch_from_text(
         if registry_defaults and registry_defaults[0] != "прочее":
             if effective_family == "lighting_fixture":
                 return registry_defaults[0]
+            if effective_family == "cable_channel":
+                if "перфор" in merged and any(token in merged for token in ("кабель", "канал", "короб")):
+                    return "перфорированные кабель-каналы"
+                return "электрика > кабели > кабель-каналы"
             if extracted_markers.get("installation_kind") == "cable_channel":
                 return "электрика > кабели > кабель-каналы"
             if effective_family in {"fire_detector", "fire_annunciator"}:
@@ -1194,6 +1204,10 @@ def derive_branch_from_text(
             if "установоч" in merged:
                 return "аксессуары для установочных коробок"
             return "аксессуары и комплектующие для коробок"
+        if registry_family == "cable_channel":
+            if "перфор" in merged and any(token in merged for token in ("кабель", "канал", "короб")):
+                return "перфорированные кабель-каналы"
+            return "электрика > кабели > кабель-каналы"
         if registry_family == "switch_wiring":
             if "рамк" in merged:
                 return "рамки"
@@ -1224,6 +1238,7 @@ def derive_branch_from_text(
             "ats_sts",
             "box",
             "box_accessory",
+            "cable_channel",
             "patch_panel",
             "optical_cross",
             "optical_patch_cord",
@@ -1283,6 +1298,10 @@ def derive_branch_from_text(
         return "электрика > автоматы"
     if effective_entity_type == "socket":
         return "электрика > розетки"
+    if effective_entity_type == "cable_channel":
+        if "перфор" in merged and any(token in merged for token in ("кабель", "канал", "короб")):
+            return "перфорированные кабель-каналы"
+        return "электрика > кабели > кабель-каналы"
     if effective_entity_type in {"cable", "bulk_twisted_pair", "coax", "iec_power_cable"}:
         if _looks_like_cable_channel_box(merged):
             return "электрика > кабели > кабель-каналы"

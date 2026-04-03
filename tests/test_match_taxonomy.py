@@ -1575,7 +1575,7 @@ class MatchTaxonomyTests(unittest.TestCase):
     def test_cable_channel_box_query_extracts_cable_channel_features(self):
         features = self.matcher._extract_query_features("Короб с крышкой 80x40 (3 м.)")
 
-        self.assertEqual(features.get("entity_type"), "cable")
+        self.assertEqual(features.get("entity_type"), "cable_channel")
         self.assertEqual(features.get("markers", {}).get("installation_kind"), "cable_channel")
         self.assertEqual(features.get("branch_hint"), "электрика > кабели > кабель-каналы")
         self.assertEqual(self.matcher._extract_cable_designation_signature("Короб с крышкой 80x40 (3 м.)"), {})
@@ -1788,6 +1788,22 @@ class MatchTaxonomyTests(unittest.TestCase):
             "switch_wiring",
         )
 
+    def test_effective_candidate_family_maps_other_cable_channel_branch(self):
+        features = self.matcher._extract_query_features("Короб с крышкой 80x40 (3 м.)")
+        features["entity_type"] = "cable_channel"
+        candidate = {
+            "name": "Короб перфорированный 40x40 серый",
+            "normalized_name": "короб перфорированный 40x40 серый",
+            "branch_path": "перфорированные кабель-каналы",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(features, candidate),
+            "cable_channel",
+        )
+
     def test_collect_branch_candidates_relaxes_entity_filter_for_box_family(self):
         self.matcher._uses_duckdb_query_backend = lambda: True
         captured = {}
@@ -1827,13 +1843,13 @@ class MatchTaxonomyTests(unittest.TestCase):
             ["электрика > кабели > кабель-каналы", "электрика > кабели"],
             limit=120,
             query_features={
-                "entity_type": "cable",
+                "entity_type": "cable_channel",
                 "tokens": ["короб", "крышкой", "80x40"],
                 "markers": {"installation_kind": "cable_channel", "length_m": "3"},
             },
         )
 
-        self.assertIn("search_entity_type", captured["where_sql"])
+        self.assertNotIn("search_entity_type", captured["where_sql"])
         self.assertIn("search_item_markers_json", captured["order_by_sql"])
         self.assertIn("search_normalized_name", captured["order_by_sql"])
         self.assertIn('%"installation_kind": "cable_channel"%', captured["params"])

@@ -189,6 +189,44 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
             "required_any_tokens": [["аксессуар", "комплектующ", "принадлежн"], ["короб"]],
         },
     },
+    "cable_channel": {
+        "entity_types": ["cable_channel"],
+        "default_branches": [
+            "электрика > кабели > кабель-каналы",
+            "перфорированные кабель-каналы",
+        ],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "audited": True,
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 61,
+            "positive_patterns": [
+                "кабель-канал",
+                "кабель канал",
+                "перфорированный короб",
+                "перфокороб",
+                "перфорированные кабель-каналы",
+            ],
+            "negative_patterns": [
+                "коробка",
+                "лючок",
+                "rj45",
+                "keystone",
+                "патч",
+                "угол",
+                "тройник",
+                "заглуш",
+                "крышк",
+                "ответвител",
+                "переходник",
+                "соединител",
+                "накладк",
+                "подвес",
+                "креплен",
+            ],
+        },
+    },
     "switch_wiring": {
         "entity_types": ["switch_wiring", "socket"],
         "default_branches": [
@@ -863,6 +901,10 @@ DEFAULT_DOMAIN_REGISTRY: Dict[str, Any] = {
         "rack_accessory": {
             "patterns": ["полк", "рельс", "направля", "щеточ", "заглуш"],
             "families": ["rack_accessory_strict", "rack_shelf", "rack_rail"],
+        },
+        "cable_channel": {
+            "patterns": ["кабель-канал", "кабель канал", "перфокороб", "перфорированный короб"],
+            "families": ["cable_channel"],
         },
         "cable": {
             "patterns": ["кабель", "провод", "ввг", "кгв", "кипэ", "сгпм"],
@@ -1912,6 +1954,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "bulk_twisted_pair",
         "box",
         "box_accessory",
+        "cable_channel",
         "cable",
         "coax",
         "floor_box",
@@ -1936,6 +1979,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
     "family_groups": {
         "box": "box",
         "box_accessory": "box_accessory",
+        "cable_channel": "cable_channel",
         "patch_panel": "patch_panel",
         "patch_cord": "patch_cord",
         "keystone": "keystone_rj45",
@@ -1964,6 +2008,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
     "family_group_labels": {
         "box": "box",
         "box_accessory": "box_accessory",
+        "cable_channel": "cable_channel",
         "patch_panel": "patch_panel",
         "patch_cord": "patch_cord",
         "keystone_rj45": "keystone/rj45",
