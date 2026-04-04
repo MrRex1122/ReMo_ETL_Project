@@ -4791,6 +4791,13 @@ class ReMoMatcher:
             and "коробка" not in search_text
         ):
             return "firestop_material"
+        if any(token in branch_path for token in ("затворы поворотные дисковые", "краны шаровые стальные")) or (
+            "затвор" in search_text
+            or ("кран" in search_text and "шар" in search_text)
+            or "butterfly valve" in search_text
+            or "ball valve" in search_text
+        ):
+            return "industrial_valve"
         if (
             "перфорированные кабель каналы" in branch_path
             or (
@@ -4884,6 +4891,7 @@ class ReMoMatcher:
             "box",
             "box_accessory",
             "cable_channel",
+            "industrial_valve",
             "switch_wiring",
         }
 

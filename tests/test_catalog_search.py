@@ -668,6 +668,24 @@ class CatalogSearchTests(unittest.TestCase):
             "электрика > кабели > кабель-каналы",
         )
 
+    def test_classify_item_type_detects_industrial_valve_queries(self):
+        self.assertEqual(
+            classify_item_type("Затвор дисковый поворотный DN100"),
+            "industrial_valve",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Затвор дисковый поворотный DN100"),
+            "затворы поворотные дисковые стальные",
+        )
+        self.assertEqual(
+            classify_item_type("Кран шаровой стальной DN50"),
+            "industrial_valve",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Кран шаровой стальной DN50"),
+            "краны шаровые стальные",
+        )
+
     def test_build_search_catalog_maps_perforated_cable_channels_to_cable_channel_family(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
@@ -690,6 +708,35 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(cable_channel["search_entity_type"], "cable_channel")
             self.assertEqual(cable_channel["search_effective_entity_type"], "cable_channel")
             self.assertEqual(cable_channel["search_effective_family"], "cable_channel")
+
+    def test_build_search_catalog_maps_industrial_valves_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Затвор дисковый поворотный DN100;VALVE-1;10;Затворы Поворотные Дисковые Стальные;CLS-1;Затвор дисковый поворотный;;ReMo\n"
+                    "Кран шаровой стальной DN50;VALVE-2;10;Краны Шаровые Стальные;CLS-2;Кран шаровой стальной;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+            disc_valve = built.loc[built["Артикул"] == "VALVE-1"].iloc[0]
+            ball_valve = built.loc[built["Артикул"] == "VALVE-2"].iloc[0]
+
+            self.assertEqual(disc_valve["search_branch_path"], "затворы поворотные дисковые стальные")
+            self.assertEqual(disc_valve["search_entity_type"], "industrial_valve")
+            self.assertEqual(disc_valve["search_effective_entity_type"], "industrial_valve")
+            self.assertEqual(disc_valve["search_effective_family"], "industrial_valve")
+
+            self.assertEqual(ball_valve["search_branch_path"], "краны шаровые стальные")
+            self.assertEqual(ball_valve["search_entity_type"], "industrial_valve")
+            self.assertEqual(ball_valve["search_effective_entity_type"], "industrial_valve")
+            self.assertEqual(ball_valve["search_effective_family"], "industrial_valve")
 
     def test_derive_branch_from_text_skips_telecom_rack_for_control_cabinet(self):
         self.assertEqual(

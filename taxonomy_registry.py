@@ -500,6 +500,21 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
             "required_any_tokens": [["заземл"], ["шин"]],
         },
     },
+    "industrial_valve": {
+        "entity_types": ["industrial_valve"],
+        "default_branches": [
+            "затворы поворотные дисковые стальные",
+            "краны шаровые стальные",
+        ],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "audited": True,
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 54,
+            "positive_patterns": ["затвор", "butterfly valve", "ball valve", "кран шаров", "краны шаров"],
+        },
+    },
     "iec_power_cable": {
         "entity_types": ["iec_power_cable"],
         "default_branches": ["электрика > кабели"],
@@ -897,6 +912,10 @@ DEFAULT_DOMAIN_REGISTRY: Dict[str, Any] = {
         "grounding": {
             "patterns": ["заземл", "шина", "стержень"],
             "families": ["ground_bar"],
+        },
+        "industrial_valve": {
+            "patterns": ["затвор", "кран шаров", "краны шаров", "butterfly valve", "ball valve"],
+            "families": ["industrial_valve"],
         },
         "rack_accessory": {
             "patterns": ["полк", "рельс", "направля", "щеточ", "заглуш"],
@@ -1960,6 +1979,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "floor_box",
         "fastener",
         "ground_bar",
+        "industrial_valve",
         "iec_power_cable",
         "keystone",
         "optical_cross",
@@ -2000,6 +2020,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "coax": "electrical_cable",
         "fastener": "fastener",
         "ground_bar": "grounding",
+        "industrial_valve": "industrial_valve",
         "floor_box": "floor_box",
         "rack": "rack",
         "sensor": "sensor",
@@ -2022,6 +2043,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "electrical_cable": "electrical cable",
         "fastener": "fastener",
         "grounding": "grounding",
+        "industrial_valve": "industrial valve",
         "floor_box": "floor_box",
         "rack": "rack",
         "sensor": "sensor",

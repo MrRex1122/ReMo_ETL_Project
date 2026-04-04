@@ -1804,6 +1804,22 @@ class MatchTaxonomyTests(unittest.TestCase):
             "cable_channel",
         )
 
+    def test_effective_candidate_family_maps_other_industrial_valve_branch(self):
+        features = self.matcher._extract_query_features("Затвор дисковый поворотный DN100")
+        features["entity_type"] = "industrial_valve"
+        candidate = {
+            "name": "Затвор дисковый поворотный DN100",
+            "normalized_name": "затвор дисковый поворотный dn100",
+            "branch_path": "затворы поворотные дисковые стальные",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(features, candidate),
+            "industrial_valve",
+        )
+
     def test_collect_branch_candidates_relaxes_entity_filter_for_box_family(self):
         self.matcher._uses_duckdb_query_backend = lambda: True
         captured = {}

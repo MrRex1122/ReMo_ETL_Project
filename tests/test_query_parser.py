@@ -109,5 +109,14 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(frame_spec.branch_hint, "рамки")
 
 
+    def test_parse_query_spec_detects_industrial_valve_queries(self):
+        disc_valve = parse_query_spec("Затвор дисковый поворотный DN100", taxonomy_rules=self.rules)
+        ball_valve = parse_query_spec("Кран шаровой стальной DN50", taxonomy_rules=self.rules)
+
+        self.assertEqual(disc_valve.entity_type, "industrial_valve")
+        self.assertEqual(disc_valve.branch_hint, "затворы поворотные дисковые стальные")
+        self.assertEqual(ball_valve.entity_type, "industrial_valve")
+        self.assertEqual(ball_valve.branch_hint, "краны шаровые стальные")
+
 if __name__ == "__main__":
     unittest.main()

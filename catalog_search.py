@@ -930,6 +930,13 @@ def classify_item_type(
         return "rack_shelf"
     if "рельс" in normalized or "rail" in normalized or "направляющ" in normalized:
         return "rack_rail"
+    if (
+        "затвор" in normalized
+        or ("кран" in normalized and "шар" in normalized)
+        or "butterfly valve" in normalized
+        or "ball valve" in normalized
+    ):
+        return "industrial_valve"
     if any(token in normalized for token in ("анкер", "болт", "шуруп", "шпильк", "дюбел", "гайк", "шайб")):
         return "fastener"
     if "заземл" in normalized and "шин" in normalized:
@@ -1109,6 +1116,8 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "tray_sheet"
     if any(marker in normalized_branch for marker in cable_channel_body_branch_markers):
         return "cable_channel"
+    if any(marker in normalized_branch for marker in ("затворы поворотные дисковые", "краны шаровые стальные")):
+        return "industrial_valve"
 
     return effective_entity_type or raw_entity_type
 
@@ -1241,6 +1250,10 @@ def derive_branch_from_text(
                 if "перфор" in merged and any(token in merged for token in ("кабель", "канал", "короб")):
                     return "перфорированные кабель-каналы"
                 return "электрика > кабели > кабель-каналы"
+            if effective_family == "industrial_valve":
+                if "кран" in merged and "шар" in merged:
+                    return "краны шаровые стальные"
+                return "затворы поворотные дисковые стальные"
             if extracted_markers.get("installation_kind") == "cable_channel":
                 return "электрика > кабели > кабель-каналы"
             if effective_family in {"fire_detector", "fire_annunciator"}:
@@ -1283,6 +1296,10 @@ def derive_branch_from_text(
             if "перфор" in merged and any(token in merged for token in ("кабель", "канал", "короб")):
                 return "перфорированные кабель-каналы"
             return "электрика > кабели > кабель-каналы"
+        if registry_family == "industrial_valve":
+            if "кран" in merged and "шар" in merged:
+                return "краны шаровые стальные"
+            return "затворы поворотные дисковые стальные"
         if registry_family == "switch_wiring":
             if "рамк" in merged:
                 return "рамки"
@@ -1314,6 +1331,7 @@ def derive_branch_from_text(
             "box",
             "box_accessory",
             "cable_channel",
+            "industrial_valve",
             "patch_panel",
             "optical_cross",
             "optical_patch_cord",
