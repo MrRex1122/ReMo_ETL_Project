@@ -521,6 +521,7 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
         "default_branches": [
             "подшипники роликовые цилиндрические",
             "подшипники шариковые радиальные",
+            "подшипники шариковые радиально-упорные",
         ],
         "retrieval_mode": "branch_limited",
         "strictness": "semi_strict",

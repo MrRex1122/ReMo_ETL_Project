@@ -711,6 +711,14 @@ class CatalogSearchTests(unittest.TestCase):
             derive_branch_from_text("Подшипник шариковый радиальный 6205"),
             "подшипники шариковые радиальные",
         )
+        self.assertEqual(
+            classify_item_type("Подшипник шариковый радиально-упорный 7205"),
+            "bearing",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Подшипник шариковый радиально-упорный 7205"),
+            "подшипники шариковые радиально-упорные",
+        )
 
     def test_classify_item_type_detects_radiator_queries(self):
         self.assertEqual(
@@ -801,6 +809,7 @@ class CatalogSearchTests(unittest.TestCase):
                     "Тип исполнения кабельного изделия;Производитель\n"
                     "Подшипник роликовый цилиндрический 22210;BEARING-1;10;Подшипники Роликовые Цилиндрические;CLS-1;Подшипник роликовый цилиндрический;;ReMo\n"
                     "Подшипник шариковый радиальный 6205;BEARING-2;10;Подшипники Шариковые Радиальные;CLS-2;Подшипник шариковый радиальный;;ReMo\n"
+                    "Подшипник шариковый радиально-упорный 7205;BEARING-3;10;Подшипники Шариковые Радиально-Упорные;CLS-3;Подшипник шариковый радиально-упорный;;ReMo\n"
                 ),
                 encoding="utf-8",
             )
@@ -809,6 +818,7 @@ class CatalogSearchTests(unittest.TestCase):
             built = pd.read_csv(search_path, sep=";", encoding="utf-8")
             roller_bearing = built.loc[built["Артикул"] == "BEARING-1"].iloc[0]
             ball_bearing = built.loc[built["Артикул"] == "BEARING-2"].iloc[0]
+            thrust_bearing = built.loc[built["Артикул"] == "BEARING-3"].iloc[0]
 
             self.assertEqual(roller_bearing["search_branch_path"], "подшипники роликовые цилиндрические")
             self.assertEqual(roller_bearing["search_entity_type"], "bearing")
@@ -819,6 +829,11 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(ball_bearing["search_entity_type"], "bearing")
             self.assertEqual(ball_bearing["search_effective_entity_type"], "bearing")
             self.assertEqual(ball_bearing["search_effective_family"], "bearing")
+
+            self.assertEqual(thrust_bearing["search_branch_path"], "подшипники шариковые радиально-упорные")
+            self.assertEqual(thrust_bearing["search_entity_type"], "bearing")
+            self.assertEqual(thrust_bearing["search_effective_entity_type"], "bearing")
+            self.assertEqual(thrust_bearing["search_effective_family"], "bearing")
 
     def test_build_search_catalog_maps_radiators_out_of_other(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

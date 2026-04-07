@@ -1124,7 +1124,7 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "cable_channel"
     if any(marker in normalized_branch for marker in ("затворы поворотные дисковые", "краны шаровые стальные")):
         return "industrial_valve"
-    if any(marker in normalized_branch for marker in ("подшипники роликовые цилиндрические", "подшипники шариковые радиальные")):
+    if any(marker in normalized_branch for marker in ("подшипники роликовые цилиндрические", "подшипники шариковые радиальные", "подшипники шариковые радиально-упорные")):
         return "bearing"
     if "радиаторы стальные панельные" in normalized_branch:
         return "radiator"
@@ -1269,6 +1269,8 @@ def derive_branch_from_text(
                     return "затворы поворотные дисковые чугунные"
                 return "затворы поворотные дисковые стальные"
             if effective_family == "bearing":
+                if "упор" in merged:
+                    return "подшипники шариковые радиально-упорные"
                 if "шарик" in merged or "радиальн" in merged:
                     return "подшипники шариковые радиальные"
                 return "подшипники роликовые цилиндрические"
@@ -1325,6 +1327,8 @@ def derive_branch_from_text(
                 return "затворы поворотные дисковые чугунные"
             return "затворы поворотные дисковые стальные"
         if registry_family == "bearing":
+            if "упор" in merged:
+                return "подшипники шариковые радиально-упорные"
             if "шарик" in merged or "радиальн" in merged:
                 return "подшипники шариковые радиальные"
             return "подшипники роликовые цилиндрические"

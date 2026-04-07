@@ -124,11 +124,14 @@ class QueryParserTests(unittest.TestCase):
     def test_parse_query_spec_detects_bearing_queries(self):
         roller_bearing = parse_query_spec("Подшипник роликовый цилиндрический 22210", taxonomy_rules=self.rules)
         ball_bearing = parse_query_spec("Подшипник шариковый радиальный 6205", taxonomy_rules=self.rules)
+        thrust_bearing = parse_query_spec("Подшипник шариковый радиально-упорный 7205", taxonomy_rules=self.rules)
 
         self.assertEqual(roller_bearing.entity_type, "bearing")
         self.assertEqual(roller_bearing.branch_hint, "подшипники роликовые цилиндрические")
         self.assertEqual(ball_bearing.entity_type, "bearing")
         self.assertEqual(ball_bearing.branch_hint, "подшипники шариковые радиальные")
+        self.assertEqual(thrust_bearing.entity_type, "bearing")
+        self.assertEqual(thrust_bearing.branch_hint, "подшипники шариковые радиально-упорные")
 
     def test_parse_query_spec_detects_radiator_queries(self):
         radiator = parse_query_spec("Радиатор стальной панельный 22 500x1000", taxonomy_rules=self.rules)

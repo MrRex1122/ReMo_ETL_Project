@@ -1851,6 +1851,21 @@ class MatchTaxonomyTests(unittest.TestCase):
             "bearing",
         )
 
+        thrust_features = self.matcher._extract_query_features("Подшипник шариковый радиально-упорный 7205")
+        thrust_features["entity_type"] = "bearing"
+        thrust_candidate = {
+            "name": "Подшипник шариковый радиально-упорный 7205",
+            "normalized_name": "подшипник шариковый радиально упорный 7205",
+            "branch_path": "подшипники шариковые радиально-упорные",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(thrust_features, thrust_candidate),
+            "bearing",
+        )
+
     def test_effective_candidate_family_maps_other_radiator_branch(self):
         features = self.matcher._extract_query_features("Радиатор стальной панельный 22 500x1000")
         features["entity_type"] = "radiator"
