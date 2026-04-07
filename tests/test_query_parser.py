@@ -127,5 +127,11 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(ball_bearing.entity_type, "bearing")
         self.assertEqual(ball_bearing.branch_hint, "подшипники шариковые радиальные")
 
+    def test_parse_query_spec_detects_radiator_queries(self):
+        radiator = parse_query_spec("Радиатор стальной панельный 22 500x1000", taxonomy_rules=self.rules)
+
+        self.assertEqual(radiator.entity_type, "radiator")
+        self.assertEqual(radiator.branch_hint, "радиаторы стальные панельные")
+
 if __name__ == "__main__":
     unittest.main()

@@ -1836,6 +1836,22 @@ class MatchTaxonomyTests(unittest.TestCase):
             "bearing",
         )
 
+    def test_effective_candidate_family_maps_other_radiator_branch(self):
+        features = self.matcher._extract_query_features("Радиатор стальной панельный 22 500x1000")
+        features["entity_type"] = "radiator"
+        candidate = {
+            "name": "Радиатор стальной панельный 22 500x1000",
+            "normalized_name": "радиатор стальной панельный 22 500x1000",
+            "branch_path": "радиаторы стальные панельные",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(features, candidate),
+            "radiator",
+        )
+
     def test_collect_branch_candidates_relaxes_entity_filter_for_box_family(self):
         self.matcher._uses_duckdb_query_backend = lambda: True
         captured = {}

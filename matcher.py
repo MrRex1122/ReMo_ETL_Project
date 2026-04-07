@@ -4803,6 +4803,8 @@ class ReMoMatcher:
             or "bearing" in search_text
         ):
             return "bearing"
+        if "радиаторы стальные панельные" in branch_path or "радиатор" in search_text or "radiator" in search_text:
+            return "radiator"
         if (
             "перфорированные кабель каналы" in branch_path
             or (
@@ -4898,6 +4900,7 @@ class ReMoMatcher:
             "cable_channel",
             "industrial_valve",
             "bearing",
+            "radiator",
             "switch_wiring",
         }
 

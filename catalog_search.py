@@ -939,6 +939,8 @@ def classify_item_type(
         return "industrial_valve"
     if "подшип" in normalized or "bearing" in normalized:
         return "bearing"
+    if "радиатор" in normalized or "radiator" in normalized:
+        return "radiator"
     if any(token in normalized for token in ("анкер", "болт", "шуруп", "шпильк", "дюбел", "гайк", "шайб")):
         return "fastener"
     if "заземл" in normalized and "шин" in normalized:
@@ -1122,6 +1124,8 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "industrial_valve"
     if any(marker in normalized_branch for marker in ("подшипники роликовые цилиндрические", "подшипники шариковые радиальные")):
         return "bearing"
+    if "радиаторы стальные панельные" in normalized_branch:
+        return "radiator"
 
     return effective_entity_type or raw_entity_type
 
@@ -1262,6 +1266,8 @@ def derive_branch_from_text(
                 if "шарик" in merged or "радиальн" in merged:
                     return "подшипники шариковые радиальные"
                 return "подшипники роликовые цилиндрические"
+            if effective_family == "radiator":
+                return "радиаторы стальные панельные"
             if extracted_markers.get("installation_kind") == "cable_channel":
                 return "электрика > кабели > кабель-каналы"
             if effective_family in {"fire_detector", "fire_annunciator"}:
@@ -1312,6 +1318,8 @@ def derive_branch_from_text(
             if "шарик" in merged or "радиальн" in merged:
                 return "подшипники шариковые радиальные"
             return "подшипники роликовые цилиндрические"
+        if registry_family == "radiator":
+            return "радиаторы стальные панельные"
         if registry_family == "switch_wiring":
             if "рамк" in merged:
                 return "рамки"
@@ -1345,6 +1353,7 @@ def derive_branch_from_text(
             "cable_channel",
             "industrial_valve",
             "bearing",
+            "radiator",
             "patch_panel",
             "optical_cross",
             "optical_patch_cord",

@@ -704,6 +704,16 @@ class CatalogSearchTests(unittest.TestCase):
             "подшипники шариковые радиальные",
         )
 
+    def test_classify_item_type_detects_radiator_queries(self):
+        self.assertEqual(
+            classify_item_type("Радиатор стальной панельный 22 500x1000"),
+            "radiator",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Радиатор стальной панельный 22 500x1000"),
+            "радиаторы стальные панельные",
+        )
+
     def test_build_search_catalog_maps_perforated_cable_channels_to_cable_channel_family(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
@@ -784,6 +794,28 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(ball_bearing["search_entity_type"], "bearing")
             self.assertEqual(ball_bearing["search_effective_entity_type"], "bearing")
             self.assertEqual(ball_bearing["search_effective_family"], "bearing")
+
+    def test_build_search_catalog_maps_radiators_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Радиатор стальной панельный 22 500x1000;RAD-1;10;Радиаторы Стальные Панельные;CLS-1;Радиатор стальной панельный;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+            radiator = built.loc[built["Артикул"] == "RAD-1"].iloc[0]
+
+            self.assertEqual(radiator["search_branch_path"], "радиаторы стальные панельные")
+            self.assertEqual(radiator["search_entity_type"], "radiator")
+            self.assertEqual(radiator["search_effective_entity_type"], "radiator")
+            self.assertEqual(radiator["search_effective_family"], "radiator")
 
     def test_derive_branch_from_text_skips_telecom_rack_for_control_cabinet(self):
         self.assertEqual(
