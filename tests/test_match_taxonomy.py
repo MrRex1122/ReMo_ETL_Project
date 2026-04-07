@@ -2239,6 +2239,22 @@ class MatchTaxonomyTests(unittest.TestCase):
             "concrete_hole_saw",
         )
 
+    def test_effective_candidate_family_maps_other_sds_chisel_branch(self):
+        features = self.matcher._extract_query_features("Зубило SDS-Plus плоское 20x250 мм")
+        features["entity_type"] = "sds_chisel"
+        candidate = {
+            "name": "Зубило SDS-Plus плоское 20x250 мм",
+            "normalized_name": "зубило sds plus плоское 20x250 мм",
+            "branch_path": "зубила sds-plus",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(features, candidate),
+            "sds_chisel",
+        )
+
     def test_effective_candidate_family_maps_other_distribution_enclosure_branches(self):
         metal_features = self.matcher._extract_query_features("Щит распределительный встраиваемый металлический на 36 модулей")
         metal_features["entity_type"] = "distribution_enclosure"
@@ -2900,6 +2916,28 @@ class MatchTaxonomyTests(unittest.TestCase):
             ["коронки по бетону"],
             limit=25,
             query_features={"entity_type": "concrete_hole_saw"},
+        )
+
+        self.assertNotIn("search_entity_type", captured["where_sql"])
+        self.assertEqual(captured["limit"], 25)
+
+    def test_collect_branch_candidates_relaxes_entity_filter_for_sds_chisel_family(self):
+        self.matcher._uses_duckdb_query_backend = lambda: True
+        captured = {}
+
+        def fake_fetch_items(where_sql="", params=None, order_by_sql="", limit=None):
+            captured["where_sql"] = where_sql
+            captured["params"] = list(params or [])
+            captured["order_by_sql"] = order_by_sql
+            captured["limit"] = limit
+            return []
+
+        self.matcher._duckdb_fetch_items = fake_fetch_items
+
+        self.matcher._collect_branch_candidates(
+            ["зубила sds-plus"],
+            limit=25,
+            query_features={"entity_type": "sds_chisel"},
         )
 
         self.assertNotIn("search_entity_type", captured["where_sql"])

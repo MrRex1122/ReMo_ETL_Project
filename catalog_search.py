@@ -997,6 +997,14 @@ def classify_item_type(
         and not any(token in normalized for token in ("металл", "metal", "дерев", "wood", "bi-metal", "бур", "sds", "drill bit", "сверло"))
     ):
         return "concrete_hole_saw"
+    if (
+        any(
+            token in normalized
+            for token in ("зубило sds-plus", "зубило sds plus", "зубило sds-max", "зубило sds max", "пика sds-plus", "пика sds plus", "пика sds-max", "пика sds max", "sds chisel", "sds point")
+        )
+        and not any(token in normalized for token in ("бур", "сверл", "коронк", "drill", "hole saw", "core bit", "металл", "metal", "дерев", "wood"))
+    ):
+        return "sds_chisel"
     if "подшип" in normalized or "bearing" in normalized:
         return "bearing"
     if "радиатор" in normalized or "radiator" in normalized:
@@ -1320,6 +1328,8 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "masonry_drill_bit"
     if "коронки по бетону" in normalized_branch:
         return "concrete_hole_saw"
+    if any(marker in normalized_branch for marker in ("зубила sds-plus", "зубила sds-max")):
+        return "sds_chisel"
     if any(marker in normalized_branch for marker in ("подшипники роликовые цилиндрические", "подшипники роликовые сферические", "подшипники роликовые конические", "подшипники шариковые радиальные", "подшипники шариковые радиально-упорные", "упорные подшипники", "самоустанавливающиеся шарикоподшипники", "игольчатые подшипники")):
         return "bearing"
     if "радиаторы стальные панельные" in normalized_branch:
@@ -1598,6 +1608,10 @@ def derive_branch_from_text(
                 return "сверла по бетону"
             if effective_family == "concrete_hole_saw":
                 return "коронки по бетону"
+            if effective_family == "sds_chisel":
+                if "sds-max" in merged or "sds max" in merged:
+                    return "зубила sds-max"
+                return "зубила sds-plus"
             if effective_family == "bearing":
                 if "игольчат" in merged:
                     return "игольчатые подшипники"
@@ -1746,6 +1760,10 @@ def derive_branch_from_text(
             return "сверла по бетону"
         if registry_family == "concrete_hole_saw":
             return "коронки по бетону"
+        if registry_family == "sds_chisel":
+            if "sds-max" in merged or "sds max" in merged:
+                return "зубила sds-max"
+            return "зубила sds-plus"
         if registry_family == "bearing":
             if "игольчат" in merged:
                 return "игольчатые подшипники"
@@ -1860,6 +1878,7 @@ def derive_branch_from_text(
             "drill_bit_metal",
             "masonry_drill_bit",
             "concrete_hole_saw",
+            "sds_chisel",
             "bearing",
             "radiator",
             "floor_convector",
@@ -1967,6 +1986,10 @@ def derive_branch_from_text(
         return "сверла по бетону"
     if effective_entity_type == "concrete_hole_saw":
         return "коронки по бетону"
+    if effective_entity_type == "sds_chisel":
+        if "sds-max" in merged or "sds max" in merged:
+            return "зубила sds-max"
+        return "зубила sds-plus"
     if effective_entity_type == "fuse":
         return "плавкие предохранители"
     if effective_entity_type == "power_accessory":
