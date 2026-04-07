@@ -595,6 +595,32 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
             ],
         },
     },
+    "industrial_pump": {
+        "entity_types": ["industrial_pump"],
+        "default_branches": ["промышленные вертикальные центробежные насосы"],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "audited": True,
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 54,
+            "positive_patterns": [
+                "насос",
+                "pump",
+                "центробежный насос",
+                "вертикальный насос",
+            ],
+            "negative_patterns": [
+                "клапан",
+                "затвор",
+                "кран шаровой",
+                "электродвигатель",
+                "преобразователь частоты",
+                "частотный привод",
+            ],
+            "required_any_tokens": [["насос", "pump"]],
+        },
+    },
     "bearing": {
         "entity_types": ["bearing"],
         "default_branches": [
@@ -1510,6 +1536,10 @@ DEFAULT_DOMAIN_REGISTRY: Dict[str, Any] = {
                 "соленоид",
             ],
             "families": ["industrial_valve"],
+        },
+        "industrial_pump": {
+            "patterns": ["насос", "pump", "центробежный насос", "вертикальный насос"],
+            "families": ["industrial_pump"],
         },
         "bearing": {
             "patterns": [
@@ -2662,6 +2692,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "light_signage",
         "safety_sign",
         "industrial_valve",
+        "industrial_pump",
         "bearing",
         "radiator",
         "floor_convector",
@@ -2714,6 +2745,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "electric_motor": "electric_motor",
         "light_signage": "signage",
         "safety_sign": "signage",
+        "industrial_pump": "industrial_pump",
         "patch_panel": "patch_panel",
         "patch_cord": "patch_cord",
         "keystone": "keystone_rj45",
@@ -2779,6 +2811,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "frequency_drive": "frequency drive",
         "electric_motor": "electric motor",
         "signage": "signage",
+        "industrial_pump": "industrial pump",
         "fastener": "fastener",
         "surge_protector": "surge protector",
         "grounding": "grounding",

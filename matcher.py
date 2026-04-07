@@ -4806,6 +4806,11 @@ class ReMoMatcher:
             or ("электромагнит" in search_text and "клапан" in search_text)
         ):
             return "industrial_valve"
+        if "промышленные вертикальные центробежные насосы" in branch_path or (
+            any(token in search_text for token in ("насос", "pump", "центробежн", "вертикальн"))
+            and not any(token in search_text for token in ("клапан", "затвор", "кран шаров", "электродвигател", "частотн", "frequency drive", "vfd"))
+        ):
+            return "industrial_pump"
         if any(token in branch_path for token in ("подшипники роликовые цилиндрические", "подшипники роликовые сферические", "подшипники роликовые конические", "подшипники шариковые радиальные", "подшипники шариковые радиально-упорные", "упорные подшипники", "самоустанавливающиеся шарикоподшипники", "игольчатые подшипники")) or (
             "подшип" in search_text
             or "bearing" in search_text
@@ -5091,6 +5096,7 @@ class ReMoMatcher:
             "cable_conduit",
             "cable_channel",
             "industrial_valve",
+            "industrial_pump",
             "bearing",
             "radiator",
             "floor_convector",

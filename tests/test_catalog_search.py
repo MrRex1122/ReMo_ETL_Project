@@ -967,6 +967,20 @@ class CatalogSearchTests(unittest.TestCase):
             "electric_motor",
         )
 
+    def test_classify_item_type_detects_industrial_pump_queries(self):
+        self.assertEqual(
+            classify_item_type("Насос промышленный вертикальный центробежный 5,5 кВт"),
+            "industrial_pump",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Насос промышленный вертикальный центробежный 5,5 кВт"),
+            "промышленные вертикальные центробежные насосы",
+        )
+        self.assertNotEqual(
+            classify_item_type("Электродвигатель для насоса 5,5 кВт"),
+            "industrial_pump",
+        )
+
     def test_classify_item_type_detects_distribution_enclosure_queries(self):
         self.assertEqual(
             classify_item_type("Щит распределительный встраиваемый металлический на 36 модулей"),
@@ -1487,6 +1501,28 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(motor["search_entity_type"], "electric_motor")
             self.assertEqual(motor["search_effective_entity_type"], "electric_motor")
             self.assertEqual(motor["search_effective_family"], "electric_motor")
+
+    def test_build_search_catalog_maps_industrial_pumps_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Насос промышленный вертикальный центробежный 5,5 кВт;PUMP-1;10;Промышленные Вертикальные Центробежные Насосы;CLS-1;Насос;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+            pump = built.loc[built["Артикул"] == "PUMP-1"].iloc[0]
+
+            self.assertEqual(pump["search_branch_path"], "промышленные вертикальные центробежные насосы")
+            self.assertEqual(pump["search_entity_type"], "industrial_pump")
+            self.assertEqual(pump["search_effective_entity_type"], "industrial_pump")
+            self.assertEqual(pump["search_effective_family"], "industrial_pump")
 
     def test_build_search_catalog_maps_distribution_enclosures_out_of_other(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
