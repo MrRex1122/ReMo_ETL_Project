@@ -253,6 +253,18 @@ class CatalogSearchTests(unittest.TestCase):
             classify_item_type("Световое табло ВЫХОД аварийное"),
             "light_signage",
         )
+        self.assertEqual(
+            derive_branch_from_text("Свето-звуковое табло ВЫХОД"),
+            "свето-звуковое табло",
+        )
+        self.assertEqual(
+            classify_item_type("Знак безопасности Направление эвакуации"),
+            "safety_sign",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Знак безопасности Направление эвакуации"),
+            "знаки безопасности",
+        )
 
     def test_classify_item_type_splits_other_into_fire_alarm_control_software_power_and_firestop(self):
         self.assertEqual(
@@ -339,6 +351,33 @@ class CatalogSearchTests(unittest.TestCase):
 
             self.assertEqual(avr["search_effective_family"], "breaker")
             self.assertEqual(avr["search_effective_entity_type"], "breaker")
+
+    def test_build_search_catalog_assigns_signage_families(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;Тип исполнения кабельного изделия;Производитель\n"
+                    "Свето-звуковое табло ВЫХОД 12В;SGN-1;10;Свето-Звуковое Табло;CLS-1;Световое Табло;;ReMo\n"
+                    "Знак безопасности Направление эвакуации;SGN-2;10;Знаки Безопасности;CLS-2;Знак Безопасности;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+
+            light_sign = built.loc[built["Артикул"] == "SGN-1"].iloc[0]
+            safety_sign = built.loc[built["Артикул"] == "SGN-2"].iloc[0]
+
+            self.assertEqual(light_sign["search_branch_path"], "свето-звуковое табло")
+            self.assertEqual(light_sign["search_effective_family"], "light_signage")
+            self.assertEqual(light_sign["search_effective_entity_type"], "light_signage")
+
+            self.assertEqual(safety_sign["search_branch_path"], "знаки безопасности")
+            self.assertEqual(safety_sign["search_effective_family"], "safety_sign")
+            self.assertEqual(safety_sign["search_effective_entity_type"], "safety_sign")
 
     def test_build_search_catalog_cleans_breaker_and_lighting_branch_contamination(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -4728,10 +4728,16 @@ class ReMoMatcher:
         ):
             if "табло" not in search_text:
                 return "lighting_fixture"
-        if "световое табло" in branch_path or (
-            "табло" in search_text and any(token in search_text for token in ("светов", "эвакуац", "аварийн", "выход", "exit"))
+        if any(token in branch_path for token in ("световое табло", "свето звуковое табло")) or (
+            "табло" in search_text and any(token in search_text for token in ("светов", "свето", "звуков", "эвакуац", "аварийн", "выход", "exit"))
         ):
             return "light_signage"
+        if "знаки безопасности" in branch_path or (
+            "знак" in search_text
+            and any(token in search_text for token in ("безопас", "эвакуац", "пиктограмм", "warning", "caution"))
+            and "табло" not in search_text
+        ):
+            return "safety_sign"
         if "извещатели пожарные" in branch_path or "извещатели охранные" in branch_path or (
             "извещател" in search_text and "оповещател" not in search_text and "табло" not in search_text
         ):
@@ -4895,6 +4901,7 @@ class ReMoMatcher:
             "contactor_starter",
             "control_relay",
             "light_signage",
+            "safety_sign",
             "fire_detector",
             "fire_annunciator",
             "fire_alarm_device",

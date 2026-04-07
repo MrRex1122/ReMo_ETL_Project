@@ -947,6 +947,16 @@ def classify_item_type(
         return "heat_shrink"
     if "трансформатор" in normalized or "transformer" in normalized:
         return "transformer"
+    if "табло" in normalized and any(
+        token in normalized
+        for token in ("светов", "свето", "звуков", "эвакуац", "аварийн", "выход", "exit")
+    ):
+        return "light_signage"
+    if "знак" in normalized and any(
+        token in normalized
+        for token in ("безопас", "эвакуац", "пиктограмм", "warning", "caution")
+    ):
+        return "safety_sign"
     if any(token in normalized for token in ("анкер", "болт", "шуруп", "шпильк", "дюбел", "гайк", "шайб")):
         return "fastener"
     if "заземл" in normalized and "шин" in normalized:
@@ -1138,6 +1148,10 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "heat_shrink"
     if "трансформаторы напряжения понижающие низковольтные" in normalized_branch:
         return "transformer"
+    if any(marker in normalized_branch for marker in ("световое табло", "свето звуковое табло")):
+        return "light_signage"
+    if "знаки безопасности" in normalized_branch:
+        return "safety_sign"
 
     return effective_entity_type or raw_entity_type
 
@@ -1296,6 +1310,12 @@ def derive_branch_from_text(
                 return "термоусаживаемые изделия"
             if effective_family == "transformer":
                 return "трансформаторы напряжения понижающие низковольтные"
+            if effective_family == "light_signage":
+                if "табло" in merged and any(token in merged for token in ("звуков", "сирен", "свето звуков", "светозвуков")):
+                    return "свето-звуковое табло"
+                return "световое табло"
+            if effective_family == "safety_sign":
+                return "знаки безопасности"
             if extracted_markers.get("installation_kind") == "cable_channel":
                 return "электрика > кабели > кабель-каналы"
             if effective_family in {"fire_detector", "fire_annunciator"}:
@@ -1364,6 +1384,12 @@ def derive_branch_from_text(
             return "термоусаживаемые изделия"
         if registry_family == "transformer":
             return "трансформаторы напряжения понижающие низковольтные"
+        if registry_family == "light_signage":
+            if "табло" in merged and any(token in merged for token in ("звуков", "сирен", "свето звуков", "светозвуков")):
+                return "свето-звуковое табло"
+            return "световое табло"
+        if registry_family == "safety_sign":
+            return "знаки безопасности"
         if registry_family == "switch_wiring":
             if "рамк" in merged:
                 return "рамки"
@@ -1415,6 +1441,7 @@ def derive_branch_from_text(
             "contactor_starter",
             "control_relay",
             "light_signage",
+            "safety_sign",
             "fire_detector",
             "fire_annunciator",
             "fire_alarm_device",
@@ -1460,6 +1487,12 @@ def derive_branch_from_text(
         return "электрика > автоматы"
     if effective_entity_type == "socket":
         return "электрика > розетки"
+    if effective_entity_type == "light_signage":
+        if "табло" in merged and any(token in merged for token in ("звуков", "сирен", "свето звуков", "светозвуков")):
+            return "свето-звуковое табло"
+        return "световое табло"
+    if effective_entity_type == "safety_sign":
+        return "знаки безопасности"
     if effective_entity_type == "cable_channel":
         if "перфор" in merged and any(token in merged for token in ("кабель", "канал", "короб")):
             return "перфорированные кабель-каналы"

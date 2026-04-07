@@ -108,6 +108,15 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(frame_spec.entity_type, "switch_wiring")
         self.assertEqual(frame_spec.branch_hint, "рамки")
 
+    def test_parse_query_spec_detects_signage_queries(self):
+        light_sign = parse_query_spec("Свето-звуковое табло ВЫХОД 12В", taxonomy_rules=self.rules)
+        safety_sign = parse_query_spec("Знак безопасности Направление эвакуации", taxonomy_rules=self.rules)
+
+        self.assertEqual(light_sign.entity_type, "light_signage")
+        self.assertEqual(light_sign.branch_hint, "свето-звуковое табло")
+        self.assertEqual(safety_sign.entity_type, "safety_sign")
+        self.assertEqual(safety_sign.branch_hint, "знаки безопасности")
+
 
     def test_parse_query_spec_detects_industrial_valve_queries(self):
         disc_valve = parse_query_spec("Затвор дисковый поворотный DN100", taxonomy_rules=self.rules)

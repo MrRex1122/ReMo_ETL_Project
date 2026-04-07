@@ -1975,6 +1975,35 @@ class MatchTaxonomyTests(unittest.TestCase):
             "transformer",
         )
 
+    def test_effective_candidate_family_maps_other_signage_branches(self):
+        light_features = self.matcher._extract_query_features("Свето-звуковое табло ВЫХОД 12В")
+        light_features["entity_type"] = "light_signage"
+        light_candidate = {
+            "name": "Свето-звуковое табло ВЫХОД 12В",
+            "normalized_name": "свето звуковое табло выход 12в",
+            "branch_path": "свето-звуковое табло",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        safety_features = self.matcher._extract_query_features("Знак безопасности Направление эвакуации")
+        safety_features["entity_type"] = "safety_sign"
+        safety_candidate = {
+            "name": "Знак безопасности Направление эвакуации",
+            "normalized_name": "знак безопасности направление эвакуации",
+            "branch_path": "знаки безопасности",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(light_features, light_candidate),
+            "light_signage",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(safety_features, safety_candidate),
+            "safety_sign",
+        )
+
     def test_collect_branch_candidates_relaxes_entity_filter_for_box_family(self):
         self.matcher._uses_duckdb_query_backend = lambda: True
         captured = {}

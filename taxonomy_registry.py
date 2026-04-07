@@ -311,14 +311,27 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
     },
     "light_signage": {
         "entity_types": ["light_signage"],
-        "default_branches": ["световое табло"],
+        "default_branches": ["световое табло", "свето-звуковое табло"],
         "retrieval_mode": "branch_limited",
         "strictness": "semi_strict",
         "weak_match_policy": "reject_in_exact",
         "classifier": {
             "priority": 57,
-            "positive_patterns": ["табло", "выход", "exit"],
-            "required_any_tokens": [["табло", "выход", "exit"], ["светов", "эвакуац", "аварийн"]],
+            "positive_patterns": ["табло", "выход", "exit", "свето-звуков"],
+            "required_any_tokens": [["табло", "выход", "exit"], ["светов", "свето", "эвакуац", "аварийн", "звуков"]],
+        },
+    },
+    "safety_sign": {
+        "entity_types": ["safety_sign"],
+        "default_branches": ["знаки безопасности"],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 56,
+            "positive_patterns": ["знак", "знаки безопасности", "эвакуац"],
+            "required_any_tokens": [["знак"], ["безопас", "эвакуац", "пиктограмм"]],
+            "negative_patterns": ["табло", "оповещател", "извещател"],
         },
     },
     "fire_detector": {
@@ -953,6 +966,10 @@ DEFAULT_DOMAIN_REGISTRY: Dict[str, Any] = {
         "lighting": {
             "patterns": ["светильник", "светодиод", "треков", "дсо", "дсп", "дпо", "дку"],
             "families": ["lighting_fixture", "light_signage"],
+        },
+        "safety_signage": {
+            "patterns": ["табло", "выход", "exit", "эвакуац", "знак безопасности", "пиктограмм"],
+            "families": ["light_signage", "safety_sign"],
         },
         "software": {
             "patterns": ["программ", "лиценз", "software", "monitoring"],
@@ -2068,6 +2085,8 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "floor_box",
         "fastener",
         "ground_bar",
+        "light_signage",
+        "safety_sign",
         "industrial_valve",
         "bearing",
         "radiator",
@@ -2099,6 +2118,8 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "floor_convector": "floor_convector",
         "heat_shrink": "heat_shrink",
         "transformer": "transformer",
+        "light_signage": "signage",
+        "safety_sign": "signage",
         "patch_panel": "patch_panel",
         "patch_cord": "patch_cord",
         "keystone": "keystone_rj45",
@@ -2145,6 +2166,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "floor_convector": "floor convector",
         "heat_shrink": "heat shrink",
         "transformer": "transformer",
+        "signage": "signage",
         "fastener": "fastener",
         "grounding": "grounding",
         "industrial_valve": "industrial valve",
