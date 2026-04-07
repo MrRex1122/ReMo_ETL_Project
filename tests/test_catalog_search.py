@@ -835,6 +835,16 @@ class CatalogSearchTests(unittest.TestCase):
             "трансформаторы тока низковольтные",
         )
 
+    def test_classify_item_type_detects_fuse_queries(self):
+        self.assertEqual(
+            classify_item_type("Предохранитель плавкий 10А"),
+            "fuse",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Предохранитель плавкий 10А"),
+            "плавкие предохранители",
+        )
+
     def test_build_search_catalog_maps_perforated_cable_channels_to_cable_channel_family(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
@@ -1052,6 +1062,28 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(current_transformer["search_entity_type"], "transformer")
             self.assertEqual(current_transformer["search_effective_entity_type"], "transformer")
             self.assertEqual(current_transformer["search_effective_family"], "transformer")
+
+    def test_build_search_catalog_maps_fuses_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Предохранитель плавкий 10А;FUSE-1;10;Плавкие Предохранители;CLS-1;Предохранитель плавкий;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+            fuse = built.loc[built["Артикул"] == "FUSE-1"].iloc[0]
+
+            self.assertEqual(fuse["search_branch_path"], "плавкие предохранители")
+            self.assertEqual(fuse["search_entity_type"], "fuse")
+            self.assertEqual(fuse["search_effective_entity_type"], "fuse")
+            self.assertEqual(fuse["search_effective_family"], "fuse")
 
     def test_derive_branch_from_text_skips_telecom_rack_for_control_cabinet(self):
         self.assertEqual(

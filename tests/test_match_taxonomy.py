@@ -2034,6 +2034,22 @@ class MatchTaxonomyTests(unittest.TestCase):
             "safety_sign",
         )
 
+    def test_effective_candidate_family_maps_other_fuse_branch(self):
+        features = self.matcher._extract_query_features("Предохранитель плавкий 10А")
+        features["entity_type"] = "fuse"
+        candidate = {
+            "name": "Предохранитель плавкий 10А",
+            "normalized_name": "предохранитель плавкий 10а",
+            "branch_path": "плавкие предохранители",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(features, candidate),
+            "fuse",
+        )
+
     def test_collect_branch_candidates_relaxes_entity_filter_for_box_family(self):
         self.matcher._uses_duckdb_query_backend = lambda: True
         captured = {}

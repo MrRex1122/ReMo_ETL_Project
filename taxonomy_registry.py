@@ -932,6 +932,18 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
             },
         ],
     },
+    "fuse": {
+        "entity_types": ["fuse"],
+        "default_branches": ["плавкие предохранители"],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "audited": True,
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 56,
+            "positive_patterns": ["предохранител", "плавк", "fuse"],
+        },
+    },
     "socket": {
         "entity_types": ["socket"],
         "default_branches": ["электрика > розетки"],
@@ -995,6 +1007,10 @@ DEFAULT_DOMAIN_REGISTRY: Dict[str, Any] = {
         "electrical_protection": {
             "patterns": ["выключател", "автоматическ", "автомат", "optidin", "bm63"],
             "families": ["breaker"],
+        },
+        "fuse": {
+            "patterns": ["предохранител", "плавк", "fuse"],
+            "families": ["fuse"],
         },
         "grounding": {
             "patterns": ["заземл", "шина", "стержень"],
@@ -2085,6 +2101,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "coax",
         "floor_box",
         "fastener",
+        "fuse",
         "ground_bar",
         "light_signage",
         "safety_sign",
@@ -2143,6 +2160,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "ground_bar": "grounding",
         "industrial_valve": "industrial_valve",
         "floor_box": "floor_box",
+        "fuse": "fuse",
         "rack": "rack",
         "sensor": "sensor",
         "switch_wiring": "switch_wiring",
@@ -2172,6 +2190,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "grounding": "grounding",
         "industrial_valve": "industrial valve",
         "floor_box": "floor_box",
+        "fuse": "fuse",
         "rack": "rack",
         "sensor": "sensor",
         "switch_wiring": "switch_wiring",
