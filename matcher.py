@@ -4807,6 +4807,8 @@ class ReMoMatcher:
             return "radiator"
         if "конвекторы внутрипольные" in branch_path or (("конвектор" in search_text or "convector" in search_text) and "внутрипол" in search_text):
             return "floor_convector"
+        if "термоусаживаемые изделия" in branch_path or "термоусаж" in search_text or "термоусад" in search_text or "heat shrink" in search_text or "shrink tube" in search_text:
+            return "heat_shrink"
         if (
             "трансформаторы напряжения понижающие низковольтные" in branch_path
             or "трансформатор" in search_text
@@ -4910,6 +4912,7 @@ class ReMoMatcher:
             "bearing",
             "radiator",
             "floor_convector",
+            "heat_shrink",
             "transformer",
             "switch_wiring",
         }

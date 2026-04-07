@@ -151,6 +151,12 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(convector.entity_type, "floor_convector")
         self.assertEqual(convector.branch_hint, "конвекторы внутрипольные")
 
+    def test_parse_query_spec_detects_heat_shrink_queries(self):
+        heat_shrink = parse_query_spec("Термоусаживаемая трубка 12/6 черная", taxonomy_rules=self.rules)
+
+        self.assertEqual(heat_shrink.entity_type, "heat_shrink")
+        self.assertEqual(heat_shrink.branch_hint, "термоусаживаемые изделия")
+
     def test_parse_query_spec_detects_transformer_queries(self):
         transformer = parse_query_spec("Трансформатор напряжения понижающий низковольтный 220/24В", taxonomy_rules=self.rules)
 

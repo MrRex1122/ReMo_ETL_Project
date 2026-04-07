@@ -943,6 +943,8 @@ def classify_item_type(
         return "radiator"
     if ("конвектор" in normalized or "convector" in normalized) and "внутрипол" in normalized:
         return "floor_convector"
+    if "термоусаж" in normalized or "термоусад" in normalized or "heat shrink" in normalized or "shrink tube" in normalized:
+        return "heat_shrink"
     if "трансформатор" in normalized or "transformer" in normalized:
         return "transformer"
     if any(token in normalized for token in ("анкер", "болт", "шуруп", "шпильк", "дюбел", "гайк", "шайб")):
@@ -1132,6 +1134,8 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "radiator"
     if "конвекторы внутрипольные" in normalized_branch:
         return "floor_convector"
+    if "термоусаживаемые изделия" in normalized_branch:
+        return "heat_shrink"
     if "трансформаторы напряжения понижающие низковольтные" in normalized_branch:
         return "transformer"
 
@@ -1286,6 +1290,8 @@ def derive_branch_from_text(
                 return "радиаторы стальные панельные"
             if effective_family == "floor_convector":
                 return "конвекторы внутрипольные"
+            if effective_family == "heat_shrink":
+                return "термоусаживаемые изделия"
             if effective_family == "transformer":
                 return "трансформаторы напряжения понижающие низковольтные"
             if extracted_markers.get("installation_kind") == "cable_channel":
@@ -1350,6 +1356,8 @@ def derive_branch_from_text(
             return "радиаторы стальные панельные"
         if registry_family == "floor_convector":
             return "конвекторы внутрипольные"
+        if registry_family == "heat_shrink":
+            return "термоусаживаемые изделия"
         if registry_family == "transformer":
             return "трансформаторы напряжения понижающие низковольтные"
         if registry_family == "switch_wiring":
@@ -1387,6 +1395,7 @@ def derive_branch_from_text(
             "bearing",
             "radiator",
             "floor_convector",
+            "heat_shrink",
             "transformer",
             "patch_panel",
             "optical_cross",

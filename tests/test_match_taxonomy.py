@@ -1928,6 +1928,22 @@ class MatchTaxonomyTests(unittest.TestCase):
             "floor_convector",
         )
 
+    def test_effective_candidate_family_maps_other_heat_shrink_branch(self):
+        features = self.matcher._extract_query_features("Термоусаживаемая трубка 12/6 черная")
+        features["entity_type"] = "heat_shrink"
+        candidate = {
+            "name": "Термоусаживаемая трубка 12/6 черная",
+            "normalized_name": "термоусаживаемая трубка 12 6 черная",
+            "branch_path": "термоусаживаемые изделия",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(features, candidate),
+            "heat_shrink",
+        )
+
     def test_effective_candidate_family_maps_other_transformer_branch(self):
         features = self.matcher._extract_query_features("Трансформатор напряжения понижающий низковольтный 220/24В")
         features["entity_type"] = "transformer"

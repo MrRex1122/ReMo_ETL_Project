@@ -559,6 +559,18 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
             "required_any_tokens": [["конвектор", "convector"], ["внутрипол"]],
         },
     },
+    "heat_shrink": {
+        "entity_types": ["heat_shrink"],
+        "default_branches": ["термоусаживаемые изделия"],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "audited": True,
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 52,
+            "positive_patterns": ["термоусаж", "термоусад", "heat shrink", "shrink tube"],
+        },
+    },
     "transformer": {
         "entity_types": ["transformer"],
         "default_branches": ["трансформаторы напряжения понижающие низковольтные"],
@@ -984,6 +996,10 @@ DEFAULT_DOMAIN_REGISTRY: Dict[str, Any] = {
         "floor_convector": {
             "patterns": ["конвектор", "convector", "внутрипол"],
             "families": ["floor_convector"],
+        },
+        "heat_shrink": {
+            "patterns": ["термоусаж", "термоусад", "heat shrink", "shrink tube"],
+            "families": ["heat_shrink"],
         },
         "transformer": {
             "patterns": ["трансформатор", "transformer", "понижающ", "низковольтн"],
@@ -2055,6 +2071,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "bearing",
         "radiator",
         "floor_convector",
+        "heat_shrink",
         "transformer",
         "iec_power_cable",
         "keystone",
@@ -2079,6 +2096,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "bearing": "bearing",
         "radiator": "radiator",
         "floor_convector": "floor_convector",
+        "heat_shrink": "heat_shrink",
         "transformer": "transformer",
         "patch_panel": "patch_panel",
         "patch_cord": "patch_cord",
@@ -2124,6 +2142,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "bearing": "bearing",
         "radiator": "radiator",
         "floor_convector": "floor convector",
+        "heat_shrink": "heat shrink",
         "transformer": "transformer",
         "fastener": "fastener",
         "grounding": "grounding",
