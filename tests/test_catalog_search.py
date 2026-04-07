@@ -783,6 +783,22 @@ class CatalogSearchTests(unittest.TestCase):
             "подшипники шариковые радиально-упорные",
         )
         self.assertEqual(
+            classify_item_type("Подшипник упорный 51105"),
+            "bearing",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Подшипник упорный 51105"),
+            "упорные подшипники",
+        )
+        self.assertEqual(
+            classify_item_type("Подшипник самоустанавливающийся шариковый 1205"),
+            "bearing",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Подшипник самоустанавливающийся шариковый 1205"),
+            "самоустанавливающиеся шарикоподшипники",
+        )
+        self.assertEqual(
             classify_item_type("Подшипник игольчатый HK1210"),
             "bearing",
         )
@@ -1014,6 +1030,8 @@ class CatalogSearchTests(unittest.TestCase):
                     "Подшипник роликовый конический 30205;BEARING-6;10;Подшипники Роликовые Конические;CLS-6;Подшипник роликовый конический;;ReMo\n"
                     "Подшипник шариковый радиальный 6205;BEARING-2;10;Подшипники Шариковые Радиальные;CLS-2;Подшипник шариковый радиальный;;ReMo\n"
                     "Подшипник шариковый радиально-упорный 7205;BEARING-3;10;Подшипники Шариковые Радиально-Упорные;CLS-3;Подшипник шариковый радиально-упорный;;ReMo\n"
+                    "Подшипник упорный 51105;BEARING-7;10;Упорные Подшипники;CLS-7;Подшипник упорный;;ReMo\n"
+                    "Подшипник самоустанавливающийся шариковый 1205;BEARING-8;10;Самоустанавливающиеся Шарикоподшипники;CLS-8;Подшипник самоустанавливающийся шариковый;;ReMo\n"
                     "Подшипник игольчатый HK1210;BEARING-5;10;Игольчатые Подшипники;CLS-5;Подшипник игольчатый;;ReMo\n"
                 ),
                 encoding="utf-8",
@@ -1026,6 +1044,8 @@ class CatalogSearchTests(unittest.TestCase):
             tapered_bearing = built.loc[built["Артикул"] == "BEARING-6"].iloc[0]
             ball_bearing = built.loc[built["Артикул"] == "BEARING-2"].iloc[0]
             thrust_bearing = built.loc[built["Артикул"] == "BEARING-3"].iloc[0]
+            axial_bearing = built.loc[built["Артикул"] == "BEARING-7"].iloc[0]
+            self_aligning_bearing = built.loc[built["Артикул"] == "BEARING-8"].iloc[0]
             needle_bearing = built.loc[built["Артикул"] == "BEARING-5"].iloc[0]
 
             self.assertEqual(roller_bearing["search_branch_path"], "подшипники роликовые цилиндрические")
@@ -1052,6 +1072,16 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(thrust_bearing["search_entity_type"], "bearing")
             self.assertEqual(thrust_bearing["search_effective_entity_type"], "bearing")
             self.assertEqual(thrust_bearing["search_effective_family"], "bearing")
+
+            self.assertEqual(axial_bearing["search_branch_path"], "упорные подшипники")
+            self.assertEqual(axial_bearing["search_entity_type"], "bearing")
+            self.assertEqual(axial_bearing["search_effective_entity_type"], "bearing")
+            self.assertEqual(axial_bearing["search_effective_family"], "bearing")
+
+            self.assertEqual(self_aligning_bearing["search_branch_path"], "самоустанавливающиеся шарикоподшипники")
+            self.assertEqual(self_aligning_bearing["search_entity_type"], "bearing")
+            self.assertEqual(self_aligning_bearing["search_effective_entity_type"], "bearing")
+            self.assertEqual(self_aligning_bearing["search_effective_family"], "bearing")
 
             self.assertEqual(needle_bearing["search_branch_path"], "игольчатые подшипники")
             self.assertEqual(needle_bearing["search_entity_type"], "bearing")

@@ -1180,7 +1180,7 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "cable_channel"
     if any(marker in normalized_branch for marker in ("затворы поворотные дисковые", "краны шаровые стальные", "краны шаровые пнд")):
         return "industrial_valve"
-    if any(marker in normalized_branch for marker in ("подшипники роликовые цилиндрические", "подшипники роликовые сферические", "подшипники роликовые конические", "подшипники шариковые радиальные", "подшипники шариковые радиально-упорные", "игольчатые подшипники")):
+    if any(marker in normalized_branch for marker in ("подшипники роликовые цилиндрические", "подшипники роликовые сферические", "подшипники роликовые конические", "подшипники шариковые радиальные", "подшипники шариковые радиально-упорные", "упорные подшипники", "самоустанавливающиеся шарикоподшипники", "игольчатые подшипники")):
         return "bearing"
     if "радиаторы стальные панельные" in normalized_branch:
         return "radiator"
@@ -1362,6 +1362,10 @@ def derive_branch_from_text(
             if effective_family == "bearing":
                 if "игольчат" in merged:
                     return "игольчатые подшипники"
+                if "самоустанавлива" in merged:
+                    return "самоустанавливающиеся шарикоподшипники"
+                if "упорн" in merged and "радиальн" not in merged:
+                    return "упорные подшипники"
                 if "коническ" in merged:
                     return "подшипники роликовые конические"
                 if "сферич" in merged:
@@ -1448,6 +1452,10 @@ def derive_branch_from_text(
         if registry_family == "bearing":
             if "игольчат" in merged:
                 return "игольчатые подшипники"
+            if "самоустанавлива" in merged:
+                return "самоустанавливающиеся шарикоподшипники"
+            if "упорн" in merged and "радиальн" not in merged:
+                return "упорные подшипники"
             if "коническ" in merged:
                 return "подшипники роликовые конические"
             if "сферич" in merged:

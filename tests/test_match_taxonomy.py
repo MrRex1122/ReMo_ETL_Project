@@ -1906,8 +1906,38 @@ class MatchTaxonomyTests(unittest.TestCase):
             "item_markers": {},
         }
 
+        axial_features = self.matcher._extract_query_features("Подшипник упорный 51105")
+        axial_features["entity_type"] = "bearing"
+        axial_candidate = {
+            "name": "Подшипник упорный 51105",
+            "normalized_name": "подшипник упорный 51105",
+            "branch_path": "упорные подшипники",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self_aligning_features = self.matcher._extract_query_features("Подшипник самоустанавливающийся шариковый 1205")
+        self_aligning_features["entity_type"] = "bearing"
+        self_aligning_candidate = {
+            "name": "Подшипник самоустанавливающийся шариковый 1205",
+            "normalized_name": "подшипник самоустанавливающийся шариковый 1205",
+            "branch_path": "самоустанавливающиеся шарикоподшипники",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
         self.assertEqual(
             self.matcher._effective_candidate_family_for_query(thrust_features, thrust_candidate),
+            "bearing",
+        )
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(axial_features, axial_candidate),
+            "bearing",
+        )
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(self_aligning_features, self_aligning_candidate),
             "bearing",
         )
 

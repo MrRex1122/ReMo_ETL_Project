@@ -139,6 +139,8 @@ class QueryParserTests(unittest.TestCase):
         tapered_bearing = parse_query_spec("Подшипник роликовый конический 30205", taxonomy_rules=self.rules)
         ball_bearing = parse_query_spec("Подшипник шариковый радиальный 6205", taxonomy_rules=self.rules)
         thrust_bearing = parse_query_spec("Подшипник шариковый радиально-упорный 7205", taxonomy_rules=self.rules)
+        axial_bearing = parse_query_spec("Подшипник упорный 51105", taxonomy_rules=self.rules)
+        self_aligning_bearing = parse_query_spec("Подшипник самоустанавливающийся шариковый 1205", taxonomy_rules=self.rules)
         needle_bearing = parse_query_spec("Подшипник игольчатый HK1210", taxonomy_rules=self.rules)
 
         self.assertEqual(roller_bearing.entity_type, "bearing")
@@ -151,6 +153,10 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(ball_bearing.branch_hint, "подшипники шариковые радиальные")
         self.assertEqual(thrust_bearing.entity_type, "bearing")
         self.assertEqual(thrust_bearing.branch_hint, "подшипники шариковые радиально-упорные")
+        self.assertEqual(axial_bearing.entity_type, "bearing")
+        self.assertEqual(axial_bearing.branch_hint, "упорные подшипники")
+        self.assertEqual(self_aligning_bearing.entity_type, "bearing")
+        self.assertEqual(self_aligning_bearing.branch_hint, "самоустанавливающиеся шарикоподшипники")
         self.assertEqual(needle_bearing.entity_type, "bearing")
         self.assertEqual(needle_bearing.branch_hint, "игольчатые подшипники")
 

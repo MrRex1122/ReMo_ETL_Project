@@ -559,6 +559,8 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
             "подшипники роликовые конические",
             "подшипники шариковые радиальные",
             "подшипники шариковые радиально-упорные",
+            "упорные подшипники",
+            "самоустанавливающиеся шарикоподшипники",
             "игольчатые подшипники",
         ],
         "retrieval_mode": "branch_limited",
@@ -567,7 +569,16 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
         "weak_match_policy": "reject_in_exact",
         "classifier": {
             "priority": 53,
-            "positive_patterns": ["подшип", "bearing", "роликов", "шариков", "радиальн", "цилиндрическ"],
+            "positive_patterns": [
+                "подшип",
+                "bearing",
+                "роликов",
+                "шариков",
+                "радиальн",
+                "цилиндрическ",
+                "упорн",
+                "самоустанавлива",
+            ],
         },
     },
     "radiator": {
@@ -1150,7 +1161,16 @@ DEFAULT_DOMAIN_REGISTRY: Dict[str, Any] = {
             "families": ["industrial_valve"],
         },
         "bearing": {
-            "patterns": ["подшип", "bearing", "роликов", "шариков", "радиальн", "цилиндрическ"],
+            "patterns": [
+                "подшип",
+                "bearing",
+                "роликов",
+                "шариков",
+                "радиальн",
+                "цилиндрическ",
+                "упорн",
+                "самоустанавлива",
+            ],
             "families": ["bearing"],
         },
         "radiator": {
