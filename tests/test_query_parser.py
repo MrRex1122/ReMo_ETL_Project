@@ -145,6 +145,12 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(radiator.entity_type, "radiator")
         self.assertEqual(radiator.branch_hint, "радиаторы стальные панельные")
 
+    def test_parse_query_spec_detects_floor_convector_queries(self):
+        convector = parse_query_spec("Конвектор внутрипольный с вентилятором 2000мм", taxonomy_rules=self.rules)
+
+        self.assertEqual(convector.entity_type, "floor_convector")
+        self.assertEqual(convector.branch_hint, "конвекторы внутрипольные")
+
     def test_parse_query_spec_detects_transformer_queries(self):
         transformer = parse_query_spec("Трансформатор напряжения понижающий низковольтный 220/24В", taxonomy_rules=self.rules)
 

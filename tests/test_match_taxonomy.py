@@ -1912,6 +1912,22 @@ class MatchTaxonomyTests(unittest.TestCase):
             "radiator",
         )
 
+    def test_effective_candidate_family_maps_other_floor_convector_branch(self):
+        features = self.matcher._extract_query_features("Конвектор внутрипольный с вентилятором 2000мм")
+        features["entity_type"] = "floor_convector"
+        candidate = {
+            "name": "Конвектор внутрипольный с вентилятором 2000мм",
+            "normalized_name": "конвектор внутрипольный с вентилятором 2000мм",
+            "branch_path": "конвекторы внутрипольные",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(features, candidate),
+            "floor_convector",
+        )
+
     def test_effective_candidate_family_maps_other_transformer_branch(self):
         features = self.matcher._extract_query_features("Трансформатор напряжения понижающий низковольтный 220/24В")
         features["entity_type"] = "transformer"

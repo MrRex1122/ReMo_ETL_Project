@@ -941,6 +941,8 @@ def classify_item_type(
         return "bearing"
     if "радиатор" in normalized or "radiator" in normalized:
         return "radiator"
+    if ("конвектор" in normalized or "convector" in normalized) and "внутрипол" in normalized:
+        return "floor_convector"
     if "трансформатор" in normalized or "transformer" in normalized:
         return "transformer"
     if any(token in normalized for token in ("анкер", "болт", "шуруп", "шпильк", "дюбел", "гайк", "шайб")):
@@ -1128,6 +1130,8 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "bearing"
     if "радиаторы стальные панельные" in normalized_branch:
         return "radiator"
+    if "конвекторы внутрипольные" in normalized_branch:
+        return "floor_convector"
     if "трансформаторы напряжения понижающие низковольтные" in normalized_branch:
         return "transformer"
 
@@ -1280,6 +1284,8 @@ def derive_branch_from_text(
                 return "подшипники роликовые цилиндрические"
             if effective_family == "radiator":
                 return "радиаторы стальные панельные"
+            if effective_family == "floor_convector":
+                return "конвекторы внутрипольные"
             if effective_family == "transformer":
                 return "трансформаторы напряжения понижающие низковольтные"
             if extracted_markers.get("installation_kind") == "cable_channel":
@@ -1342,6 +1348,8 @@ def derive_branch_from_text(
             return "подшипники роликовые цилиндрические"
         if registry_family == "radiator":
             return "радиаторы стальные панельные"
+        if registry_family == "floor_convector":
+            return "конвекторы внутрипольные"
         if registry_family == "transformer":
             return "трансформаторы напряжения понижающие низковольтные"
         if registry_family == "switch_wiring":
@@ -1378,6 +1386,7 @@ def derive_branch_from_text(
             "industrial_valve",
             "bearing",
             "radiator",
+            "floor_convector",
             "transformer",
             "patch_panel",
             "optical_cross",
