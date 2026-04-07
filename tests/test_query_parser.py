@@ -205,6 +205,12 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(multimeter.entity_type, "multimeter")
         self.assertEqual(multimeter.branch_hint, "мультиметры")
 
+    def test_parse_query_spec_detects_voltage_indicator_queries(self):
+        indicator = parse_query_spec("Индикатор напряжения двухполюсный 12-690В", taxonomy_rules=self.rules)
+
+        self.assertEqual(indicator.entity_type, "voltage_indicator")
+        self.assertEqual(indicator.branch_hint, "индикаторы напряжения")
+
     def test_parse_query_spec_detects_pressure_regulator_queries(self):
         regulator = parse_query_spec("Регулятор давления воды DN20", taxonomy_rules=self.rules)
 

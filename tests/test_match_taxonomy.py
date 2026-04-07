@@ -2063,6 +2063,22 @@ class MatchTaxonomyTests(unittest.TestCase):
             "multimeter",
         )
 
+    def test_effective_candidate_family_maps_other_voltage_indicator_branch(self):
+        features = self.matcher._extract_query_features("Индикатор напряжения двухполюсный 12-690В")
+        features["entity_type"] = "voltage_indicator"
+        candidate = {
+            "name": "Индикатор напряжения двухполюсный 12-690В",
+            "normalized_name": "индикатор напряжения двухполюсный 12 690в",
+            "branch_path": "индикаторы напряжения",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(features, candidate),
+            "voltage_indicator",
+        )
+
     def test_effective_candidate_family_maps_other_pressure_regulator_branch(self):
         features = self.matcher._extract_query_features("Регулятор давления воды DN20")
         features["entity_type"] = "pressure_regulator"
@@ -2574,6 +2590,28 @@ class MatchTaxonomyTests(unittest.TestCase):
             ["мультиметры"],
             limit=25,
             query_features={"entity_type": "multimeter"},
+        )
+
+        self.assertNotIn("search_entity_type", captured["where_sql"])
+        self.assertEqual(captured["limit"], 25)
+
+    def test_collect_branch_candidates_relaxes_entity_filter_for_voltage_indicator_family(self):
+        self.matcher._uses_duckdb_query_backend = lambda: True
+        captured = {}
+
+        def fake_fetch_items(where_sql="", params=None, order_by_sql="", limit=None):
+            captured["where_sql"] = where_sql
+            captured["params"] = list(params or [])
+            captured["order_by_sql"] = order_by_sql
+            captured["limit"] = limit
+            return []
+
+        self.matcher._duckdb_fetch_items = fake_fetch_items
+
+        self.matcher._collect_branch_candidates(
+            ["индикаторы напряжения"],
+            limit=25,
+            query_features={"entity_type": "voltage_indicator"},
         )
 
         self.assertNotIn("search_entity_type", captured["where_sql"])

@@ -4834,6 +4834,17 @@ class ReMoMatcher:
             )
         ):
             return "multimeter"
+        if "индикаторы напряжения" in branch_path or (
+            any(
+                token in search_text
+                for token in ("индикатор напряжения", "индикаторы напряжения", "указатель напряжения", "пробник напряжения", "voltage indicator", "voltage tester")
+            )
+            and not any(
+                token in search_text
+                for token in ("светосигнальн", "сигнальн ламп", "лампа сигнальн", "световой индикатор", "pilot light", "indicator lamp", "мультиметр", "multimeter")
+            )
+        ):
+            return "voltage_indicator"
         if "регулятор давления" in branch_path or "регулятор давления" in search_text or "pressure regulator" in search_text:
             return "pressure_regulator"
         if "стабилизаторы напряжения" in branch_path or (
@@ -5064,6 +5075,7 @@ class ReMoMatcher:
             "transformer",
             "ups",
             "multimeter",
+            "voltage_indicator",
             "voltage_stabilizer",
             "frequency_drive",
             "breaker",

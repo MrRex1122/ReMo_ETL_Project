@@ -990,6 +990,17 @@ def classify_item_type(
         )
     ):
         return "multimeter"
+    if (
+        any(
+            token in normalized
+            for token in ("индикатор напряжения", "индикаторы напряжения", "указатель напряжения", "пробник напряжения", "voltage indicator", "voltage tester")
+        )
+        and not any(
+            token in normalized
+            for token in ("светосигнальн", "сигнальн ламп", "лампа сигнальн", "световой индикатор", "pilot light", "indicator lamp", "мультиметр", "multimeter")
+        )
+    ):
+        return "voltage_indicator"
     if "регулятор давления" in normalized or "pressure regulator" in normalized:
         return "pressure_regulator"
     if (
@@ -1271,6 +1282,8 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "pressure_gauge"
     if "мультиметры" in normalized_branch:
         return "multimeter"
+    if "индикаторы напряжения" in normalized_branch:
+        return "voltage_indicator"
     if "регулятор давления" in normalized_branch:
         return "pressure_regulator"
     if "стабилизаторы напряжения" in normalized_branch:
@@ -1544,6 +1557,8 @@ def derive_branch_from_text(
                 return "манометры"
             if effective_family == "multimeter":
                 return "мультиметры"
+            if effective_family == "voltage_indicator":
+                return "индикаторы напряжения"
             if effective_family == "pressure_regulator":
                 return "регулятор давления"
             if effective_family == "voltage_stabilizer":
@@ -1672,6 +1687,8 @@ def derive_branch_from_text(
             return "манометры"
         if registry_family == "multimeter":
             return "мультиметры"
+        if registry_family == "voltage_indicator":
+            return "индикаторы напряжения"
         if registry_family == "pressure_regulator":
             return "регулятор давления"
         if registry_family == "voltage_stabilizer":
@@ -1750,6 +1767,7 @@ def derive_branch_from_text(
             "transformer",
             "voltage_stabilizer",
             "frequency_drive",
+            "voltage_indicator",
             "patch_panel",
             "optical_cross",
             "optical_patch_cord",
@@ -1823,6 +1841,8 @@ def derive_branch_from_text(
         return "источники бесперебойного питания (ибп)"
     if effective_entity_type == "multimeter":
         return "мультиметры"
+    if effective_entity_type == "voltage_indicator":
+        return "индикаторы напряжения"
     if effective_entity_type == "voltage_stabilizer":
         return "стабилизаторы напряжения"
     if effective_entity_type == "frequency_drive":
