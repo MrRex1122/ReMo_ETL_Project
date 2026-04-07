@@ -4825,6 +4825,22 @@ class ReMoMatcher:
             token in search_text for token in ("источник бесперебойного питания", "ибп", "ups", "line interactive", "online ups", "uninterruptible")
         ):
             return "ups"
+        if "ограничители импульсного перенапряжения силовые модульные" in branch_path or (
+            any(
+                token in search_text
+                for token in (
+                    "ограничитель импульсного перенапряжения",
+                    "ограничители импульсного перенапряжения",
+                    "перенапряжен",
+                    "узип",
+                    "spd",
+                    "surge protector",
+                    "surge arrester",
+                )
+            )
+            and not any(token in search_text for token in ("предохранител", "автомат", "рубильник"))
+        ):
+            return "surge_protector"
         if any(token in branch_path for token in ("рубильники", "выключатели нагрузки", "выключатели разъединители")) or any(
             token in search_text for token in ("рубильник", "выключатель нагрузки", "выключатель разъединитель")
         ):
@@ -4947,6 +4963,7 @@ class ReMoMatcher:
             "transformer",
             "ups",
             "breaker",
+            "surge_protector",
             "fuse",
             "push_button",
             "terminal_block",

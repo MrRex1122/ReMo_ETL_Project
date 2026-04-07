@@ -958,6 +958,19 @@ def classify_item_type(
         return "push_button"
     if any(
         token in normalized
+        for token in (
+            "ограничитель импульсного перенапряжения",
+            "ограничители импульсного перенапряжения",
+            "перенапряжен",
+            "узип",
+            "spd",
+            "surge protector",
+            "surge arrester",
+        )
+    ) and not any(token in normalized for token in ("предохранител", "автомат", "рубильник")):
+        return "surge_protector"
+    if any(
+        token in normalized
         for token in ("клеммный блок", "клеммные блоки", "клеммник", "клемма наборная", "terminal block", "din rail")
     ) and not any(token in normalized for token in ("заглушк", "маркиров", "аккумулятор", "акб")):
         return "terminal_block"
@@ -1170,6 +1183,8 @@ def _normalize_effective_entity_type_by_catalog_branch(
         for marker in ("трансформаторы напряжения понижающие низковольтные", "трансформаторы тока низковольтные")
     ):
         return "transformer"
+    if "ограничители импульсного перенапряжения силовые модульные" in normalized_branch:
+        return "surge_protector"
     if any(marker in normalized_branch for marker in ("рубильники", "выключатели нагрузки", "выключатели разъединители")):
         return "breaker"
     if "источники бесперебойного питания" in normalized_branch or "ибп" in normalized_branch:
@@ -1446,6 +1461,8 @@ def derive_branch_from_text(
             if any(token in merged for token in ("рубильник", "выключатель нагрузки", "выключатель разъединитель")):
                 return "рубильники"
             return "электрика > автоматы"
+        if registry_family == "surge_protector":
+            return "ограничители импульсного перенапряжения силовые модульные"
         if registry_family == "terminal_block":
             return "клеммные блоки зажимов на din-рейку"
         if registry_family == "signal_indicator":
@@ -1501,6 +1518,7 @@ def derive_branch_from_text(
             "floor_box",
             "ground_bar",
             "breaker",
+            "surge_protector",
             "ups",
             "fuse",
             "push_button",
@@ -1558,6 +1576,8 @@ def derive_branch_from_text(
         if any(token in merged for token in ("рубильник", "выключатель нагрузки", "выключатель разъединитель")):
             return "рубильники"
         return "электрика > автоматы"
+    if effective_entity_type == "surge_protector":
+        return "ограничители импульсного перенапряжения силовые модульные"
     if effective_entity_type == "ups":
         return "источники бесперебойного питания (ибп)"
     if effective_entity_type == "fuse":

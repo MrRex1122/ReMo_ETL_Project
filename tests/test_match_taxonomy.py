@@ -2140,6 +2140,22 @@ class MatchTaxonomyTests(unittest.TestCase):
             "breaker",
         )
 
+    def test_effective_candidate_family_maps_other_surge_protector_branch(self):
+        features = self.matcher._extract_query_features("Ограничитель импульсного перенапряжения SPD тип 2 40кА")
+        features["entity_type"] = "surge_protector"
+        candidate = {
+            "name": "Ограничитель импульсного перенапряжения SPD тип 2 40кА",
+            "normalized_name": "ограничитель импульсного перенапряжения spd тип 2 40ка",
+            "branch_path": "ограничители импульсного перенапряжения силовые модульные",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(features, candidate),
+            "surge_protector",
+        )
+
     def test_collect_branch_candidates_relaxes_entity_filter_for_box_family(self):
         self.matcher._uses_duckdb_query_backend = lambda: True
         captured = {}
@@ -2179,6 +2195,28 @@ class MatchTaxonomyTests(unittest.TestCase):
             ["рубильники"],
             limit=25,
             query_features={"entity_type": "breaker"},
+        )
+
+        self.assertNotIn("search_entity_type", captured["where_sql"])
+        self.assertEqual(captured["limit"], 25)
+
+    def test_collect_branch_candidates_relaxes_entity_filter_for_surge_protector_family(self):
+        self.matcher._uses_duckdb_query_backend = lambda: True
+        captured = {}
+
+        def fake_fetch_items(where_sql="", params=None, order_by_sql="", limit=None):
+            captured["where_sql"] = where_sql
+            captured["params"] = list(params or [])
+            captured["order_by_sql"] = order_by_sql
+            captured["limit"] = limit
+            return []
+
+        self.matcher._duckdb_fetch_items = fake_fetch_items
+
+        self.matcher._collect_branch_candidates(
+            ["ограничители импульсного перенапряжения силовые модульные"],
+            limit=25,
+            query_features={"entity_type": "surge_protector"},
         )
 
         self.assertNotIn("search_entity_type", captured["where_sql"])

@@ -220,5 +220,11 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(disconnector.entity_type, "breaker")
         self.assertEqual(disconnector.branch_hint, "рубильники")
 
+    def test_parse_query_spec_detects_surge_protector_queries(self):
+        surge = parse_query_spec("Ограничитель импульсного перенапряжения SPD тип 2 40кА", taxonomy_rules=self.rules)
+
+        self.assertEqual(surge.entity_type, "surge_protector")
+        self.assertEqual(surge.branch_hint, "ограничители импульсного перенапряжения силовые модульные")
+
 if __name__ == "__main__":
     unittest.main()

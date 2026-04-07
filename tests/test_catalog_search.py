@@ -904,6 +904,16 @@ class CatalogSearchTests(unittest.TestCase):
             derive_branch_from_text("Выключатель разъединитель 3P 125A"),
             "рубильники",
         )
+
+    def test_classify_item_type_detects_surge_protector_queries(self):
+        self.assertEqual(
+            classify_item_type("Ограничитель импульсного перенапряжения SPD тип 2 40кА"),
+            "surge_protector",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Ограничитель импульсного перенапряжения SPD тип 2 40кА"),
+            "ограничители импульсного перенапряжения силовые модульные",
+        )
         self.assertEqual(
             derive_branch_from_text("Кнопочный пост ПКЕ 2 кнопки"),
             "кнопочные посты",
@@ -1257,6 +1267,28 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(load_switch["search_entity_type"], "breaker")
             self.assertEqual(load_switch["search_effective_entity_type"], "breaker")
             self.assertEqual(load_switch["search_effective_family"], "breaker")
+
+    def test_build_search_catalog_maps_surge_protectors_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Ограничитель импульсного перенапряжения SPD тип 2 40кА;SPD-1;10;Ограничители Импульсного Перенапряжения Силовые Модульные;CLS-1;Ограничитель импульсного перенапряжения;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+            surge = built.loc[built["Артикул"] == "SPD-1"].iloc[0]
+
+            self.assertEqual(surge["search_branch_path"], "ограничители импульсного перенапряжения силовые модульные")
+            self.assertEqual(surge["search_entity_type"], "surge_protector")
+            self.assertEqual(surge["search_effective_entity_type"], "surge_protector")
+            self.assertEqual(surge["search_effective_family"], "surge_protector")
 
     def test_derive_branch_from_text_skips_telecom_rack_for_control_cabinet(self):
         self.assertEqual(
