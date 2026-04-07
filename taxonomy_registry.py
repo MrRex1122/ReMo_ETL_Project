@@ -677,6 +677,39 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
             "required_any_tokens": [["сверл", "drill"], ["металл", "metal", "hss"]],
         },
     },
+    "masonry_drill_bit": {
+        "entity_types": ["masonry_drill_bit"],
+        "default_branches": ["буры sds-plus", "буры sds-max", "сверла по бетону"],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "audited": True,
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 53,
+            "positive_patterns": [
+                "бур sds-plus",
+                "бур sds plus",
+                "бур sds-max",
+                "бур sds max",
+                "сверло по бетону",
+                "сверла по бетону",
+                "masonry drill",
+                "concrete drill",
+            ],
+            "negative_patterns": [
+                "коронк",
+                "зубил",
+                "металл",
+                "metal",
+                "hss",
+                "дерев",
+                "wood",
+                "tap",
+                "thread tap",
+            ],
+            "required_any_tokens": [["бур", "сверл", "drill"], ["sds", "бетон", "concrete", "masonry"]],
+        },
+    },
     "bearing": {
         "entity_types": ["bearing"],
         "default_branches": [
@@ -1604,6 +1637,19 @@ DEFAULT_DOMAIN_REGISTRY: Dict[str, Any] = {
         "drill_bit_metal": {
             "patterns": ["сверло по металлу", "сверла по металлу", "drill bit", "metal drill", "hss drill"],
             "families": ["drill_bit_metal"],
+        },
+        "masonry_drill_bit": {
+            "patterns": [
+                "бур sds-plus",
+                "бур sds plus",
+                "бур sds-max",
+                "бур sds max",
+                "сверло по бетону",
+                "сверла по бетону",
+                "masonry drill",
+                "concrete drill",
+            ],
+            "families": ["masonry_drill_bit"],
         },
         "bearing": {
             "patterns": [
@@ -2759,6 +2805,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "industrial_pump",
         "thread_tap",
         "drill_bit_metal",
+        "masonry_drill_bit",
         "bearing",
         "radiator",
         "floor_convector",
@@ -2814,6 +2861,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "industrial_pump": "industrial_pump",
         "thread_tap": "thread_tap",
         "drill_bit_metal": "drill_bit_metal",
+        "masonry_drill_bit": "masonry_drill_bit",
         "patch_panel": "patch_panel",
         "patch_cord": "patch_cord",
         "keystone": "keystone_rj45",
@@ -2882,6 +2930,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "industrial_pump": "industrial pump",
         "thread_tap": "thread tap",
         "drill_bit_metal": "drill bit metal",
+        "masonry_drill_bit": "masonry drill bit",
         "fastener": "fastener",
         "surge_protector": "surge protector",
         "grounding": "grounding",

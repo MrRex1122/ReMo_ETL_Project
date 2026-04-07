@@ -1009,6 +1009,20 @@ class CatalogSearchTests(unittest.TestCase):
             "drill_bit_metal",
         )
 
+    def test_classify_item_type_detects_masonry_drill_bit_queries(self):
+        self.assertEqual(
+            classify_item_type("Бур SDS-Plus 8x160 мм"),
+            "masonry_drill_bit",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Бур SDS-Plus 8x160 мм"),
+            "буры sds-plus",
+        )
+        self.assertNotEqual(
+            classify_item_type("Коронка алмазная по бетону 68 мм"),
+            "masonry_drill_bit",
+        )
+
     def test_classify_item_type_detects_distribution_enclosure_queries(self):
         self.assertEqual(
             classify_item_type("Щит распределительный встраиваемый металлический на 36 модулей"),
@@ -1595,6 +1609,28 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(drill["search_entity_type"], "drill_bit_metal")
             self.assertEqual(drill["search_effective_entity_type"], "drill_bit_metal")
             self.assertEqual(drill["search_effective_family"], "drill_bit_metal")
+
+    def test_build_search_catalog_maps_masonry_drill_bits_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Бур SDS-Plus 8x160 мм;MASONRY-1;10;Буры SDS-Plus;CLS-1;Бур;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+            drill = built.loc[built["Артикул"] == "MASONRY-1"].iloc[0]
+
+            self.assertEqual(drill["search_branch_path"], "буры sds-plus")
+            self.assertEqual(drill["search_entity_type"], "masonry_drill_bit")
+            self.assertEqual(drill["search_effective_entity_type"], "masonry_drill_bit")
+            self.assertEqual(drill["search_effective_family"], "masonry_drill_bit")
 
     def test_build_search_catalog_maps_distribution_enclosures_out_of_other(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

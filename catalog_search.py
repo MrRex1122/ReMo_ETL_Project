@@ -984,6 +984,14 @@ def classify_item_type(
         and not any(token in normalized for token in ("метчик", "плашк", "коронк", "зенкер", "держател", "tap", "thread tap"))
     ):
         return "drill_bit_metal"
+    if (
+        any(
+            token in normalized
+            for token in ("бур sds-plus", "бур sds plus", "бур sds-max", "бур sds max", "сверло по бетону", "сверла по бетону", "masonry drill", "concrete drill")
+        )
+        and not any(token in normalized for token in ("коронк", "зубил", "металл", "metal", "hss", "дерев", "wood", "tap", "thread tap"))
+    ):
+        return "masonry_drill_bit"
     if "подшип" in normalized or "bearing" in normalized:
         return "bearing"
     if "радиатор" in normalized or "radiator" in normalized:
@@ -1303,6 +1311,8 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "thread_tap"
     if "сверла по металлу" in normalized_branch:
         return "drill_bit_metal"
+    if any(marker in normalized_branch for marker in ("буры sds-plus", "буры sds-max", "сверла по бетону")):
+        return "masonry_drill_bit"
     if any(marker in normalized_branch for marker in ("подшипники роликовые цилиндрические", "подшипники роликовые сферические", "подшипники роликовые конические", "подшипники шариковые радиальные", "подшипники шариковые радиально-упорные", "упорные подшипники", "самоустанавливающиеся шарикоподшипники", "игольчатые подшипники")):
         return "bearing"
     if "радиаторы стальные панельные" in normalized_branch:
@@ -1573,6 +1583,12 @@ def derive_branch_from_text(
                 return "метчики"
             if effective_family == "drill_bit_metal":
                 return "сверла по металлу"
+            if effective_family == "masonry_drill_bit":
+                if "sds-max" in merged or "sds max" in merged:
+                    return "буры sds-max"
+                if "sds-plus" in merged or "sds plus" in merged or "sds+" in merged:
+                    return "буры sds-plus"
+                return "сверла по бетону"
             if effective_family == "bearing":
                 if "игольчат" in merged:
                     return "игольчатые подшипники"
@@ -1713,6 +1729,12 @@ def derive_branch_from_text(
             return "метчики"
         if registry_family == "drill_bit_metal":
             return "сверла по металлу"
+        if registry_family == "masonry_drill_bit":
+            if "sds-max" in merged or "sds max" in merged:
+                return "буры sds-max"
+            if "sds-plus" in merged or "sds plus" in merged or "sds+" in merged:
+                return "буры sds-plus"
+            return "сверла по бетону"
         if registry_family == "bearing":
             if "игольчат" in merged:
                 return "игольчатые подшипники"
@@ -1825,6 +1847,7 @@ def derive_branch_from_text(
             "industrial_pump",
             "thread_tap",
             "drill_bit_metal",
+            "masonry_drill_bit",
             "bearing",
             "radiator",
             "floor_convector",
@@ -1924,6 +1947,12 @@ def derive_branch_from_text(
         return "метчики"
     if effective_entity_type == "drill_bit_metal":
         return "сверла по металлу"
+    if effective_entity_type == "masonry_drill_bit":
+        if "sds-max" in merged or "sds max" in merged:
+            return "буры sds-max"
+        if "sds-plus" in merged or "sds plus" in merged or "sds+" in merged:
+            return "буры sds-plus"
+        return "сверла по бетону"
     if effective_entity_type == "fuse":
         return "плавкие предохранители"
     if effective_entity_type == "power_accessory":
