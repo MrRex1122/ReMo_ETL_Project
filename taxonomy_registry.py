@@ -542,6 +542,18 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
             "positive_patterns": ["радиатор", "radiator", "панельн"],
         },
     },
+    "transformer": {
+        "entity_types": ["transformer"],
+        "default_branches": ["трансформаторы напряжения понижающие низковольтные"],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "audited": True,
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 52,
+            "positive_patterns": ["трансформатор", "transformer", "понижающ", "низковольтн"],
+        },
+    },
     "iec_power_cable": {
         "entity_types": ["iec_power_cable"],
         "default_branches": ["электрика > кабели"],
@@ -951,6 +963,10 @@ DEFAULT_DOMAIN_REGISTRY: Dict[str, Any] = {
         "radiator": {
             "patterns": ["радиатор", "radiator", "панельн"],
             "families": ["radiator"],
+        },
+        "transformer": {
+            "patterns": ["трансформатор", "transformer", "понижающ", "низковольтн"],
+            "families": ["transformer"],
         },
         "rack_accessory": {
             "patterns": ["полк", "рельс", "направля", "щеточ", "заглуш"],
@@ -2017,6 +2033,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "industrial_valve",
         "bearing",
         "radiator",
+        "transformer",
         "iec_power_cable",
         "keystone",
         "optical_cross",
@@ -2039,6 +2056,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "cable_channel": "cable_channel",
         "bearing": "bearing",
         "radiator": "radiator",
+        "transformer": "transformer",
         "patch_panel": "patch_panel",
         "patch_cord": "patch_cord",
         "keystone": "keystone_rj45",
@@ -2082,6 +2100,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "electrical_cable": "electrical cable",
         "bearing": "bearing",
         "radiator": "radiator",
+        "transformer": "transformer",
         "fastener": "fastener",
         "grounding": "grounding",
         "industrial_valve": "industrial valve",

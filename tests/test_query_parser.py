@@ -133,5 +133,11 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(radiator.entity_type, "radiator")
         self.assertEqual(radiator.branch_hint, "радиаторы стальные панельные")
 
+    def test_parse_query_spec_detects_transformer_queries(self):
+        transformer = parse_query_spec("Трансформатор напряжения понижающий низковольтный 220/24В", taxonomy_rules=self.rules)
+
+        self.assertEqual(transformer.entity_type, "transformer")
+        self.assertEqual(transformer.branch_hint, "трансформаторы напряжения понижающие низковольтные")
+
 if __name__ == "__main__":
     unittest.main()

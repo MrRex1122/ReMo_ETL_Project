@@ -1852,6 +1852,22 @@ class MatchTaxonomyTests(unittest.TestCase):
             "radiator",
         )
 
+    def test_effective_candidate_family_maps_other_transformer_branch(self):
+        features = self.matcher._extract_query_features("Трансформатор напряжения понижающий низковольтный 220/24В")
+        features["entity_type"] = "transformer"
+        candidate = {
+            "name": "Трансформатор напряжения понижающий низковольтный 220/24В",
+            "normalized_name": "трансформатор напряжения понижающий низковольтный 220 24в",
+            "branch_path": "трансформаторы напряжения понижающие низковольтные",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(features, candidate),
+            "transformer",
+        )
+
     def test_collect_branch_candidates_relaxes_entity_filter_for_box_family(self):
         self.matcher._uses_duckdb_query_backend = lambda: True
         captured = {}

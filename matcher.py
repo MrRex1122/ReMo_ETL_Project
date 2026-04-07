@@ -4806,6 +4806,12 @@ class ReMoMatcher:
         if "радиаторы стальные панельные" in branch_path or "радиатор" in search_text or "radiator" in search_text:
             return "radiator"
         if (
+            "трансформаторы напряжения понижающие низковольтные" in branch_path
+            or "трансформатор" in search_text
+            or "transformer" in search_text
+        ):
+            return "transformer"
+        if (
             "перфорированные кабель каналы" in branch_path
             or (
                 "кабель каналы" in branch_path
@@ -4901,6 +4907,7 @@ class ReMoMatcher:
             "industrial_valve",
             "bearing",
             "radiator",
+            "transformer",
             "switch_wiring",
         }
 

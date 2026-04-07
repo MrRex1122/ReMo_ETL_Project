@@ -714,6 +714,16 @@ class CatalogSearchTests(unittest.TestCase):
             "радиаторы стальные панельные",
         )
 
+    def test_classify_item_type_detects_transformer_queries(self):
+        self.assertEqual(
+            classify_item_type("Трансформатор напряжения понижающий низковольтный 220/24В"),
+            "transformer",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Трансформатор напряжения понижающий низковольтный 220/24В"),
+            "трансформаторы напряжения понижающие низковольтные",
+        )
+
     def test_build_search_catalog_maps_perforated_cable_channels_to_cable_channel_family(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
@@ -816,6 +826,28 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(radiator["search_entity_type"], "radiator")
             self.assertEqual(radiator["search_effective_entity_type"], "radiator")
             self.assertEqual(radiator["search_effective_family"], "radiator")
+
+    def test_build_search_catalog_maps_transformers_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Трансформатор напряжения понижающий низковольтный 220/24В;TR-1;10;Трансформаторы Напряжения Понижающие Низковольтные;CLS-1;Трансформатор напряжения понижающий;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+            transformer = built.loc[built["Артикул"] == "TR-1"].iloc[0]
+
+            self.assertEqual(transformer["search_branch_path"], "трансформаторы напряжения понижающие низковольтные")
+            self.assertEqual(transformer["search_entity_type"], "transformer")
+            self.assertEqual(transformer["search_effective_entity_type"], "transformer")
+            self.assertEqual(transformer["search_effective_family"], "transformer")
 
     def test_derive_branch_from_text_skips_telecom_rack_for_control_cabinet(self):
         self.assertEqual(
