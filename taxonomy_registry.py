@@ -649,6 +649,34 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
             "required_any_tokens": [["метчик", "tap"]],
         },
     },
+    "drill_bit_metal": {
+        "entity_types": ["drill_bit_metal"],
+        "default_branches": ["сверла по металлу"],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "audited": True,
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 53,
+            "positive_patterns": [
+                "сверло по металлу",
+                "сверла по металлу",
+                "drill bit",
+                "metal drill",
+                "hss drill",
+            ],
+            "negative_patterns": [
+                "метчик",
+                "плашк",
+                "коронк",
+                "зенкер",
+                "держател",
+                "tap",
+                "thread tap",
+            ],
+            "required_any_tokens": [["сверл", "drill"], ["металл", "metal", "hss"]],
+        },
+    },
     "bearing": {
         "entity_types": ["bearing"],
         "default_branches": [
@@ -1572,6 +1600,10 @@ DEFAULT_DOMAIN_REGISTRY: Dict[str, Any] = {
         "thread_tap": {
             "patterns": ["метчик", "метчики", "tap", "thread tap", "машинно-ручной метчик"],
             "families": ["thread_tap"],
+        },
+        "drill_bit_metal": {
+            "patterns": ["сверло по металлу", "сверла по металлу", "drill bit", "metal drill", "hss drill"],
+            "families": ["drill_bit_metal"],
         },
         "bearing": {
             "patterns": [
@@ -2726,6 +2758,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "industrial_valve",
         "industrial_pump",
         "thread_tap",
+        "drill_bit_metal",
         "bearing",
         "radiator",
         "floor_convector",
@@ -2780,6 +2813,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "safety_sign": "signage",
         "industrial_pump": "industrial_pump",
         "thread_tap": "thread_tap",
+        "drill_bit_metal": "drill_bit_metal",
         "patch_panel": "patch_panel",
         "patch_cord": "patch_cord",
         "keystone": "keystone_rj45",
@@ -2847,6 +2881,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "signage": "signage",
         "industrial_pump": "industrial pump",
         "thread_tap": "thread tap",
+        "drill_bit_metal": "drill bit metal",
         "fastener": "fastener",
         "surge_protector": "surge protector",
         "grounding": "grounding",

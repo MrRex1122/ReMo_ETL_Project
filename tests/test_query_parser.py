@@ -253,6 +253,12 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(tap.entity_type, "thread_tap")
         self.assertEqual(tap.branch_hint, "метчики")
 
+    def test_parse_query_spec_detects_drill_bit_metal_queries(self):
+        drill = parse_query_spec("Сверло по металлу HSS 8 мм", taxonomy_rules=self.rules)
+
+        self.assertEqual(drill.entity_type, "drill_bit_metal")
+        self.assertEqual(drill.branch_hint, "сверла по металлу")
+
     def test_parse_query_spec_detects_distribution_enclosure_queries(self):
         metal = parse_query_spec("Щит распределительный встраиваемый металлический на 36 модулей", taxonomy_rules=self.rules)
         plastic = parse_query_spec("Корпус распределительный встраиваемый пластиковый на 24 модуля", taxonomy_rules=self.rules)

@@ -995,6 +995,20 @@ class CatalogSearchTests(unittest.TestCase):
             "thread_tap",
         )
 
+    def test_classify_item_type_detects_drill_bit_metal_queries(self):
+        self.assertEqual(
+            classify_item_type("Сверло по металлу HSS 8 мм"),
+            "drill_bit_metal",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Сверло по металлу HSS 8 мм"),
+            "сверла по металлу",
+        )
+        self.assertNotEqual(
+            classify_item_type("Метчик машинно-ручной М8"),
+            "drill_bit_metal",
+        )
+
     def test_classify_item_type_detects_distribution_enclosure_queries(self):
         self.assertEqual(
             classify_item_type("Щит распределительный встраиваемый металлический на 36 модулей"),
@@ -1559,6 +1573,28 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(tap["search_entity_type"], "thread_tap")
             self.assertEqual(tap["search_effective_entity_type"], "thread_tap")
             self.assertEqual(tap["search_effective_family"], "thread_tap")
+
+    def test_build_search_catalog_maps_drill_bits_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Сверло по металлу HSS 8 мм;DRILL-1;10;Сверла По Металлу;CLS-1;Сверло;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+            drill = built.loc[built["Артикул"] == "DRILL-1"].iloc[0]
+
+            self.assertEqual(drill["search_branch_path"], "сверла по металлу")
+            self.assertEqual(drill["search_entity_type"], "drill_bit_metal")
+            self.assertEqual(drill["search_effective_entity_type"], "drill_bit_metal")
+            self.assertEqual(drill["search_effective_family"], "drill_bit_metal")
 
     def test_build_search_catalog_maps_distribution_enclosures_out_of_other(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
