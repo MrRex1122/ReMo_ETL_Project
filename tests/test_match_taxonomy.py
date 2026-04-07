@@ -1866,6 +1866,21 @@ class MatchTaxonomyTests(unittest.TestCase):
             "bearing",
         )
 
+        tapered_features = self.matcher._extract_query_features("Подшипник роликовый конический 30205")
+        tapered_features["entity_type"] = "bearing"
+        tapered_candidate = {
+            "name": "Подшипник роликовый конический 30205",
+            "normalized_name": "подшипник роликовый конический 30205",
+            "branch_path": "подшипники роликовые конические",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(tapered_features, tapered_candidate),
+            "bearing",
+        )
+
         thrust_features = self.matcher._extract_query_features("Подшипник шариковый радиально-упорный 7205")
         thrust_features["entity_type"] = "bearing"
         thrust_candidate = {

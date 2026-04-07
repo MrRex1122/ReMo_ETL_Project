@@ -712,6 +712,14 @@ class CatalogSearchTests(unittest.TestCase):
             "подшипники роликовые сферические",
         )
         self.assertEqual(
+            classify_item_type("Подшипник роликовый конический 30205"),
+            "bearing",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Подшипник роликовый конический 30205"),
+            "подшипники роликовые конические",
+        )
+        self.assertEqual(
             classify_item_type("Подшипник шариковый радиальный 6205"),
             "bearing",
         )
@@ -845,6 +853,7 @@ class CatalogSearchTests(unittest.TestCase):
                     "Тип исполнения кабельного изделия;Производитель\n"
                     "Подшипник роликовый цилиндрический 22210;BEARING-1;10;Подшипники Роликовые Цилиндрические;CLS-1;Подшипник роликовый цилиндрический;;ReMo\n"
                     "Подшипник роликовый сферический 22212;BEARING-4;10;Подшипники Роликовые Сферические;CLS-4;Подшипник роликовый сферический;;ReMo\n"
+                    "Подшипник роликовый конический 30205;BEARING-6;10;Подшипники Роликовые Конические;CLS-6;Подшипник роликовый конический;;ReMo\n"
                     "Подшипник шариковый радиальный 6205;BEARING-2;10;Подшипники Шариковые Радиальные;CLS-2;Подшипник шариковый радиальный;;ReMo\n"
                     "Подшипник шариковый радиально-упорный 7205;BEARING-3;10;Подшипники Шариковые Радиально-Упорные;CLS-3;Подшипник шариковый радиально-упорный;;ReMo\n"
                     "Подшипник игольчатый HK1210;BEARING-5;10;Игольчатые Подшипники;CLS-5;Подшипник игольчатый;;ReMo\n"
@@ -856,6 +865,7 @@ class CatalogSearchTests(unittest.TestCase):
             built = pd.read_csv(search_path, sep=";", encoding="utf-8")
             roller_bearing = built.loc[built["Артикул"] == "BEARING-1"].iloc[0]
             spherical_bearing = built.loc[built["Артикул"] == "BEARING-4"].iloc[0]
+            tapered_bearing = built.loc[built["Артикул"] == "BEARING-6"].iloc[0]
             ball_bearing = built.loc[built["Артикул"] == "BEARING-2"].iloc[0]
             thrust_bearing = built.loc[built["Артикул"] == "BEARING-3"].iloc[0]
             needle_bearing = built.loc[built["Артикул"] == "BEARING-5"].iloc[0]
@@ -869,6 +879,11 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(spherical_bearing["search_entity_type"], "bearing")
             self.assertEqual(spherical_bearing["search_effective_entity_type"], "bearing")
             self.assertEqual(spherical_bearing["search_effective_family"], "bearing")
+
+            self.assertEqual(tapered_bearing["search_branch_path"], "подшипники роликовые конические")
+            self.assertEqual(tapered_bearing["search_entity_type"], "bearing")
+            self.assertEqual(tapered_bearing["search_effective_entity_type"], "bearing")
+            self.assertEqual(tapered_bearing["search_effective_family"], "bearing")
 
             self.assertEqual(ball_bearing["search_branch_path"], "подшипники шариковые радиальные")
             self.assertEqual(ball_bearing["search_entity_type"], "bearing")
