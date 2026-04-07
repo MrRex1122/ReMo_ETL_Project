@@ -211,5 +211,14 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(signal_indicator.entity_type, "signal_indicator")
         self.assertEqual(signal_indicator.branch_hint, "светосигнальная арматура")
 
+    def test_parse_query_spec_detects_breaker_load_switch_queries(self):
+        load_switch = parse_query_spec("Выключатель нагрузки 3P 63A", taxonomy_rules=self.rules)
+        disconnector = parse_query_spec("Выключатель разъединитель 3P 125A", taxonomy_rules=self.rules)
+
+        self.assertEqual(load_switch.entity_type, "breaker")
+        self.assertEqual(load_switch.branch_hint, "рубильники")
+        self.assertEqual(disconnector.entity_type, "breaker")
+        self.assertEqual(disconnector.branch_hint, "рубильники")
+
 if __name__ == "__main__":
     unittest.main()

@@ -40,7 +40,7 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
     },
     "breaker": {
         "entity_types": ["breaker"],
-        "default_branches": ["электрика > автоматы"],
+        "default_branches": ["электрика > автоматы", "рубильники"],
         "retrieval_mode": "branch_limited",
         "strictness": "strict",
         "audited": True,

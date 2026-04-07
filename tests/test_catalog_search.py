@@ -886,6 +886,24 @@ class CatalogSearchTests(unittest.TestCase):
             derive_branch_from_text("Арматура светосигнальная зеленая 24В"),
             "светосигнальная арматура",
         )
+
+    def test_classify_item_type_detects_breaker_load_switch_queries(self):
+        self.assertEqual(
+            classify_item_type("Выключатель нагрузки 3P 63A"),
+            "breaker",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Выключатель нагрузки 3P 63A"),
+            "рубильники",
+        )
+        self.assertEqual(
+            classify_item_type("Выключатель разъединитель 3P 125A"),
+            "breaker",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Выключатель разъединитель 3P 125A"),
+            "рубильники",
+        )
         self.assertEqual(
             derive_branch_from_text("Кнопочный пост ПКЕ 2 кнопки"),
             "кнопочные посты",
@@ -1210,6 +1228,35 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(signal_indicator["search_entity_type"], "signal_indicator")
             self.assertEqual(signal_indicator["search_effective_entity_type"], "signal_indicator")
             self.assertEqual(signal_indicator["search_effective_family"], "signal_indicator")
+
+    def test_build_search_catalog_maps_rubilniki_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Рубильник ВН32 3P 63A;BRK-1;10;Рубильники;CLS-1;Рубильник;;ReMo\n"
+                    "Выключатель нагрузки 3P 125A;BRK-2;10;Рубильники;CLS-2;Выключатель нагрузки;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+            rubilnik = built.loc[built["Артикул"] == "BRK-1"].iloc[0]
+            load_switch = built.loc[built["Артикул"] == "BRK-2"].iloc[0]
+
+            self.assertEqual(rubilnik["search_branch_path"], "рубильники")
+            self.assertEqual(rubilnik["search_entity_type"], "breaker")
+            self.assertEqual(rubilnik["search_effective_entity_type"], "breaker")
+            self.assertEqual(rubilnik["search_effective_family"], "breaker")
+
+            self.assertEqual(load_switch["search_branch_path"], "рубильники")
+            self.assertEqual(load_switch["search_entity_type"], "breaker")
+            self.assertEqual(load_switch["search_effective_entity_type"], "breaker")
+            self.assertEqual(load_switch["search_effective_family"], "breaker")
 
     def test_derive_branch_from_text_skips_telecom_rack_for_control_cabinet(self):
         self.assertEqual(

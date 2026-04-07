@@ -4825,6 +4825,10 @@ class ReMoMatcher:
             token in search_text for token in ("источник бесперебойного питания", "ибп", "ups", "line interactive", "online ups", "uninterruptible")
         ):
             return "ups"
+        if any(token in branch_path for token in ("рубильники", "выключатели нагрузки", "выключатели разъединители")) or any(
+            token in search_text for token in ("рубильник", "выключатель нагрузки", "выключатель разъединитель")
+        ):
+            return "breaker"
         if "плавкие предохранители" in branch_path or any(token in search_text for token in ("предохранител", "плавк", "fuse")):
             return "fuse"
         if any(token in branch_path for token in ("кнопки", "кнопочные посты")) or any(
@@ -4942,6 +4946,7 @@ class ReMoMatcher:
             "heat_shrink",
             "transformer",
             "ups",
+            "breaker",
             "fuse",
             "push_button",
             "terminal_block",

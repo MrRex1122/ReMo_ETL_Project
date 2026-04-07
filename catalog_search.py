@@ -997,7 +997,7 @@ def classify_item_type(
         return "cable"
     if "провод" in normalized:
         return "wire"
-    if "автомат" in normalized:
+    if any(token in normalized for token in ("автомат", "рубильник", "выключатель нагрузки", "выключатель разъединитель")):
         return "breaker"
     if "розетк" in normalized:
         return "socket"
@@ -1170,6 +1170,8 @@ def _normalize_effective_entity_type_by_catalog_branch(
         for marker in ("трансформаторы напряжения понижающие низковольтные", "трансформаторы тока низковольтные")
     ):
         return "transformer"
+    if any(marker in normalized_branch for marker in ("рубильники", "выключатели нагрузки", "выключатели разъединители")):
+        return "breaker"
     if "источники бесперебойного питания" in normalized_branch or "ибп" in normalized_branch:
         return "ups"
     if "плавкие предохранители" in normalized_branch:
@@ -1440,6 +1442,10 @@ def derive_branch_from_text(
             if "пост" in merged:
                 return "кнопочные посты"
             return "кнопки"
+        if registry_family == "breaker":
+            if any(token in merged for token in ("рубильник", "выключатель нагрузки", "выключатель разъединитель")):
+                return "рубильники"
+            return "электрика > автоматы"
         if registry_family == "terminal_block":
             return "клеммные блоки зажимов на din-рейку"
         if registry_family == "signal_indicator":
@@ -1549,6 +1555,8 @@ def derive_branch_from_text(
     if effective_entity_type == "ground_bar":
         return "телеком > аксессуары > заземление"
     if effective_entity_type == "breaker":
+        if any(token in merged for token in ("рубильник", "выключатель нагрузки", "выключатель разъединитель")):
+            return "рубильники"
         return "электрика > автоматы"
     if effective_entity_type == "ups":
         return "источники бесперебойного питания (ибп)"
