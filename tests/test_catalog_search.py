@@ -905,6 +905,24 @@ class CatalogSearchTests(unittest.TestCase):
             "корпуса распределительные встраиваемые пластиковые",
         )
 
+    def test_classify_item_type_detects_power_accessory_queries(self):
+        self.assertEqual(
+            classify_item_type("Удлинитель силовой на 4 розетки 3м"),
+            "power_accessory",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Удлинитель силовой на 4 розетки 3м"),
+            "удлинители, сетевые фильтры, переходники, штепсельные вилки",
+        )
+        self.assertEqual(
+            classify_item_type("Штепсельная вилка прямая 16А 220В"),
+            "power_accessory",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Штепсельная вилка прямая 16А 220В"),
+            "удлинители, сетевые фильтры, переходники, штепсельные вилки",
+        )
+
     def test_classify_item_type_detects_fuse_queries(self):
         self.assertEqual(
             classify_item_type("Предохранитель плавкий 10А"),
@@ -1250,6 +1268,35 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(plastic["search_entity_type"], "distribution_enclosure")
             self.assertEqual(plastic["search_effective_entity_type"], "distribution_enclosure")
             self.assertEqual(plastic["search_effective_family"], "distribution_enclosure")
+
+    def test_build_search_catalog_maps_power_accessories_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Удлинитель силовой на 4 розетки 3м;PWR-1;10;Удлинители, Сетевые Фильтры, Переходники, Штепсельные Вилки;CLS-1;Удлинитель;;ReMo\n"
+                    "Штепсельная вилка прямая 16А 220В;PWR-2;10;Удлинители, Сетевые Фильтры, Переходники, Штепсельные Вилки;CLS-2;Штепсельная вилка;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+            strip = built.loc[built["Артикул"] == "PWR-1"].iloc[0]
+            plug = built.loc[built["Артикул"] == "PWR-2"].iloc[0]
+
+            self.assertEqual(strip["search_branch_path"], "удлинители, сетевые фильтры, переходники, штепсельные вилки")
+            self.assertEqual(strip["search_entity_type"], "power_accessory")
+            self.assertEqual(strip["search_effective_entity_type"], "power_accessory")
+            self.assertEqual(strip["search_effective_family"], "power_accessory")
+
+            self.assertEqual(plug["search_branch_path"], "удлинители, сетевые фильтры, переходники, штепсельные вилки")
+            self.assertEqual(plug["search_entity_type"], "power_accessory")
+            self.assertEqual(plug["search_effective_entity_type"], "power_accessory")
+            self.assertEqual(plug["search_effective_family"], "power_accessory")
 
     def test_build_search_catalog_maps_floor_convectors_out_of_other(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

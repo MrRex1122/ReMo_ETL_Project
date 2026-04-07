@@ -2061,6 +2061,35 @@ class MatchTaxonomyTests(unittest.TestCase):
             "distribution_enclosure",
         )
 
+    def test_effective_candidate_family_maps_other_power_accessory_branch(self):
+        strip_features = self.matcher._extract_query_features("Удлинитель силовой на 4 розетки 3м")
+        strip_features["entity_type"] = "power_accessory"
+        strip_candidate = {
+            "name": "Удлинитель силовой на 4 розетки 3м",
+            "normalized_name": "удлинитель силовой на 4 розетки 3м",
+            "branch_path": "удлинители, сетевые фильтры, переходники, штепсельные вилки",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        plug_features = self.matcher._extract_query_features("Штепсельная вилка прямая 16А 220В")
+        plug_features["entity_type"] = "power_accessory"
+        plug_candidate = {
+            "name": "Штепсельная вилка прямая 16А 220В",
+            "normalized_name": "штепсельная вилка прямая 16а 220в",
+            "branch_path": "удлинители, сетевые фильтры, переходники, штепсельные вилки",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(strip_features, strip_candidate),
+            "power_accessory",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(plug_features, plug_candidate),
+            "power_accessory",
+        )
+
     def test_effective_candidate_family_maps_other_floor_convector_branch(self):
         features = self.matcher._extract_query_features("Конвектор внутрипольный с вентилятором 2000мм")
         features["entity_type"] = "floor_convector"
@@ -2340,6 +2369,28 @@ class MatchTaxonomyTests(unittest.TestCase):
             ["корпуса учетно-распределительные встраиваемые металлические"],
             limit=25,
             query_features={"entity_type": "distribution_enclosure"},
+        )
+
+        self.assertNotIn("search_entity_type", captured["where_sql"])
+        self.assertEqual(captured["limit"], 25)
+
+    def test_collect_branch_candidates_relaxes_entity_filter_for_power_accessory_family(self):
+        self.matcher._uses_duckdb_query_backend = lambda: True
+        captured = {}
+
+        def fake_fetch_items(where_sql="", params=None, order_by_sql="", limit=None):
+            captured["where_sql"] = where_sql
+            captured["params"] = list(params or [])
+            captured["order_by_sql"] = order_by_sql
+            captured["limit"] = limit
+            return []
+
+        self.matcher._duckdb_fetch_items = fake_fetch_items
+
+        self.matcher._collect_branch_candidates(
+            ["удлинители, сетевые фильтры, переходники, штепсельные вилки"],
+            limit=25,
+            query_features={"entity_type": "power_accessory"},
         )
 
         self.assertNotIn("search_entity_type", captured["where_sql"])

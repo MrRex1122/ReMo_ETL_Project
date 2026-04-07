@@ -298,7 +298,7 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
         "classifier": {
             "priority": 60,
             "positive_patterns": ["выключател", "переключател", "розетк", "рамк"],
-            "negative_patterns": ["rj45", "keystone", "патч", "pdu", "блок розеток", "zero u", "лючок", "кабель-канал", "кабель канал"],
+            "negative_patterns": ["rj45", "keystone", "патч", "pdu", "блок розеток", "zero u", "лючок", "кабель-канал", "кабель канал", "удлинител", "сетевой фильтр", "штепсель", "вилка"],
         },
     },
     "lighting_fixture": {
@@ -1119,6 +1119,35 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
             "negative_patterns": ["табло", "знак безопасности", "светильник"],
         },
     },
+    "power_accessory": {
+        "entity_types": ["power_accessory"],
+        "default_branches": ["удлинители, сетевые фильтры, переходники, штепсельные вилки"],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "audited": True,
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 61,
+            "positive_patterns": [
+                "удлинител",
+                "сетевой фильтр",
+                "штепсельн",
+                "вилка",
+                "силовой переходник",
+                "power strip",
+                "extension cord",
+                "travel adapter",
+            ],
+            "negative_patterns": [
+                "переходники для кабельных лотков",
+                "keystone",
+                "rj45",
+                "патч",
+                "адаптер для din",
+            ],
+            "required_any_tokens": [["удлинител", "сетев", "штепсель", "вилка", "power strip", "extension", "переходник"], ["220", "230", "250", "евро", "schuko", "силов", "сетев"]],
+        },
+    },
     "socket": {
         "entity_types": ["socket"],
         "default_branches": ["электрика > розетки"],
@@ -1277,6 +1306,10 @@ DEFAULT_DOMAIN_REGISTRY: Dict[str, Any] = {
         "pressure_regulator": {
             "patterns": ["регулятор давления", "pressure regulator"],
             "families": ["pressure_regulator"],
+        },
+        "power_accessory": {
+            "patterns": ["удлинител", "сетевой фильтр", "штепсельн", "вилка", "power strip", "extension cord", "силовой переходник"],
+            "families": ["power_accessory"],
         },
         "distribution_enclosure": {
             "patterns": ["щит распредел", "щиток", "электрощит", "корпус распредел", "корпус учетно", "встраиваемый щит"],
@@ -2349,6 +2382,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "push_button",
         "terminal_block",
         "signal_indicator",
+        "power_accessory",
         "ground_bar",
         "light_signage",
         "safety_sign",
@@ -2419,6 +2453,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "push_button": "push_button",
         "terminal_block": "terminal_block",
         "signal_indicator": "signal_indicator",
+        "power_accessory": "power_accessory",
         "rack": "rack",
         "sensor": "sensor",
         "switch_wiring": "switch_wiring",
@@ -2457,6 +2492,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "push_button": "push_button",
         "terminal_block": "terminal_block",
         "signal_indicator": "signal indicator",
+        "power_accessory": "power accessory",
         "rack": "rack",
         "sensor": "sensor",
         "switch_wiring": "switch_wiring",

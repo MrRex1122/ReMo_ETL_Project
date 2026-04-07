@@ -4827,6 +4827,14 @@ class ReMoMatcher:
             return "pressure_gauge"
         if "регулятор давления" in branch_path or "регулятор давления" in search_text or "pressure regulator" in search_text:
             return "pressure_regulator"
+        if "удлинители сетевые фильтры переходники штепсельные вилки" in branch_path or (
+            (
+                any(token in search_text for token in ("удлинител", "сетевой фильтр", "штепсель", "вилка", "power strip", "extension cord"))
+                or ("переходник" in search_text and any(token in search_text for token in ("220", "230", "250", "евро", "schuko", "силов", "сетев")))
+            )
+            and not any(token in search_text for token in ("кабельн лот", "keystone", "rj45", "патч", "din рейк", "din-рейк"))
+        ):
+            return "power_accessory"
         if any(
             token in branch_path
             for token in (
@@ -4993,6 +5001,7 @@ class ReMoMatcher:
             "firestop_material",
             "box",
             "box_accessory",
+            "power_accessory",
             "distribution_enclosure",
             "cable_channel",
             "industrial_valve",

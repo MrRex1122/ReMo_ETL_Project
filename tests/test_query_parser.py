@@ -214,6 +214,15 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(plastic.entity_type, "distribution_enclosure")
         self.assertEqual(plastic.branch_hint, "корпуса распределительные встраиваемые пластиковые")
 
+    def test_parse_query_spec_detects_power_accessory_queries(self):
+        strip = parse_query_spec("Удлинитель силовой на 4 розетки 3м", taxonomy_rules=self.rules)
+        plug = parse_query_spec("Штепсельная вилка прямая 16А 220В", taxonomy_rules=self.rules)
+
+        self.assertEqual(strip.entity_type, "power_accessory")
+        self.assertEqual(strip.branch_hint, "удлинители, сетевые фильтры, переходники, штепсельные вилки")
+        self.assertEqual(plug.entity_type, "power_accessory")
+        self.assertEqual(plug.branch_hint, "удлинители, сетевые фильтры, переходники, штепсельные вилки")
+
     def test_parse_query_spec_detects_fuse_queries(self):
         fuse = parse_query_spec("Предохранитель плавкий 10А", taxonomy_rules=self.rules)
 

@@ -957,6 +957,14 @@ def classify_item_type(
     if "регулятор давления" in normalized or "pressure regulator" in normalized:
         return "pressure_regulator"
     if (
+        any(token in normalized for token in ("удлинител", "сетевой фильтр", "штепсель", "вилка", "power strip", "extension cord"))
+        or (
+            "переходник" in normalized
+            and any(token in normalized for token in ("220", "230", "250", "евро", "schuko", "силов", "сетев"))
+        )
+    ) and not any(token in normalized for token in ("кабельн лот", "keystone", "rj45", "патч", "din рейк", "din-рейк")):
+        return "power_accessory"
+    if (
         any(token in normalized for token in ("щит распредел", "щиток", "электрощит", "корпус распредел", "корпус учетно"))
         and any(token in normalized for token in ("встраив", "модул", "распредел", "учет"))
         and not any(token in normalized for token in ("заглуш", "двер", "панел", "рамк", "аксессуар", "комплектующ"))
@@ -1207,6 +1215,8 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "pressure_gauge"
     if "регулятор давления" in normalized_branch:
         return "pressure_regulator"
+    if "удлинители сетевые фильтры переходники штепсельные вилки" in normalized_branch:
+        return "power_accessory"
     if any(
         marker in normalized_branch
         for marker in (
@@ -1254,6 +1264,11 @@ def _normalize_catalog_effective_entity_type(
 ) -> str:
     candidate_family = entity_family_for_type(candidate_entity_type, rules)
     raw_family = entity_family_for_type(raw_entity_type, rules)
+    if _has_power_accessory_signal(normalized_text):
+        if raw_family == "power_accessory":
+            return raw_entity_type
+        if candidate_family in {"keystone", "rj45_connector", "switch_wiring"}:
+            return "power_accessory"
     if candidate_family == "lighting_fixture":
         if _has_strong_lighting_domain_signal(normalized_text):
             return candidate_entity_type
@@ -1417,6 +1432,8 @@ def derive_branch_from_text(
                 return "манометры"
             if effective_family == "pressure_regulator":
                 return "регулятор давления"
+            if effective_family == "power_accessory":
+                return "удлинители, сетевые фильтры, переходники, штепсельные вилки"
             if effective_family == "distribution_enclosure":
                 if "пластик" in merged:
                     return "корпуса распределительные встраиваемые пластиковые"
@@ -1471,6 +1488,8 @@ def derive_branch_from_text(
             if "установоч" in merged:
                 return "аксессуары для установочных коробок"
             return "аксессуары и комплектующие для коробок"
+        if registry_family == "power_accessory":
+            return "удлинители, сетевые фильтры, переходники, штепсельные вилки"
         if registry_family == "distribution_enclosure":
             if "пластик" in merged:
                 return "корпуса распределительные встраиваемые пластиковые"
@@ -1581,6 +1600,7 @@ def derive_branch_from_text(
             "ats_sts",
             "box",
             "box_accessory",
+            "power_accessory",
             "distribution_enclosure",
             "cable_channel",
             "industrial_valve",
@@ -1661,6 +1681,8 @@ def derive_branch_from_text(
         return "источники бесперебойного питания (ибп)"
     if effective_entity_type == "fuse":
         return "плавкие предохранители"
+    if effective_entity_type == "power_accessory":
+        return "удлинители, сетевые фильтры, переходники, штепсельные вилки"
     if effective_entity_type == "distribution_enclosure":
         if "пластик" in merged:
             return "корпуса распределительные встраиваемые пластиковые"
@@ -1932,6 +1954,16 @@ def extract_item_markers(
         markers["designation_family"] = designation_family
 
     return markers
+
+
+def _has_power_accessory_signal(normalized: str) -> bool:
+    if not normalized:
+        return False
+    if any(token in normalized for token in ("удлинител", "сетевой фильтр", "штепсель", "вилка", "power strip", "extension cord")):
+        return True
+    if "переходник" in normalized and any(token in normalized for token in ("220", "230", "250", "евро", "schuko", "силов", "сетев")):
+        return True
+    return False
 
 
 def build_search_projection_row(
