@@ -4832,6 +4832,11 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("коронк", "зубил", "металл", "metal", "hss", "дерев", "wood", "tap", "thread tap"))
         ):
             return "masonry_drill_bit"
+        if "коронки по бетону" in branch_path or (
+            any(token in search_text for token in ("коронка по бетону", "коронки по бетону", "алмазная коронка по бетону", "diamond hole saw", "core bit"))
+            and not any(token in search_text for token in ("металл", "metal", "дерев", "wood", "bi-metal", "бур", "sds", "drill bit", "сверло"))
+        ):
+            return "concrete_hole_saw"
         if any(token in branch_path for token in ("подшипники роликовые цилиндрические", "подшипники роликовые сферические", "подшипники роликовые конические", "подшипники шариковые радиальные", "подшипники шариковые радиально-упорные", "упорные подшипники", "самоустанавливающиеся шарикоподшипники", "игольчатые подшипники")) or (
             "подшип" in search_text
             or "bearing" in search_text
@@ -5121,6 +5126,7 @@ class ReMoMatcher:
             "thread_tap",
             "drill_bit_metal",
             "masonry_drill_bit",
+            "concrete_hole_saw",
             "bearing",
             "radiator",
             "floor_convector",

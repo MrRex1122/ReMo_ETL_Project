@@ -710,6 +710,36 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
             "required_any_tokens": [["бур", "сверл", "drill"], ["sds", "бетон", "concrete", "masonry"]],
         },
     },
+    "concrete_hole_saw": {
+        "entity_types": ["concrete_hole_saw"],
+        "default_branches": ["коронки по бетону"],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "audited": True,
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 53,
+            "positive_patterns": [
+                "коронка по бетону",
+                "коронки по бетону",
+                "алмазная коронка по бетону",
+                "diamond hole saw",
+                "core bit",
+            ],
+            "negative_patterns": [
+                "металл",
+                "metal",
+                "дерев",
+                "wood",
+                "bi-metal",
+                "бур",
+                "sds",
+                "drill bit",
+                "сверло",
+            ],
+            "required_any_tokens": [["коронк", "hole saw", "core bit"], ["бетон", "concrete", "алмаз"]],
+        },
+    },
     "bearing": {
         "entity_types": ["bearing"],
         "default_branches": [
@@ -1650,6 +1680,16 @@ DEFAULT_DOMAIN_REGISTRY: Dict[str, Any] = {
                 "concrete drill",
             ],
             "families": ["masonry_drill_bit"],
+        },
+        "concrete_hole_saw": {
+            "patterns": [
+                "коронка по бетону",
+                "коронки по бетону",
+                "алмазная коронка по бетону",
+                "diamond hole saw",
+                "core bit",
+            ],
+            "families": ["concrete_hole_saw"],
         },
         "bearing": {
             "patterns": [
@@ -2806,6 +2846,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "thread_tap",
         "drill_bit_metal",
         "masonry_drill_bit",
+        "concrete_hole_saw",
         "bearing",
         "radiator",
         "floor_convector",
@@ -2862,6 +2903,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "thread_tap": "thread_tap",
         "drill_bit_metal": "drill_bit_metal",
         "masonry_drill_bit": "masonry_drill_bit",
+        "concrete_hole_saw": "concrete_hole_saw",
         "patch_panel": "patch_panel",
         "patch_cord": "patch_cord",
         "keystone": "keystone_rj45",
@@ -2931,6 +2973,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "thread_tap": "thread tap",
         "drill_bit_metal": "drill bit metal",
         "masonry_drill_bit": "masonry drill bit",
+        "concrete_hole_saw": "concrete hole saw",
         "fastener": "fastener",
         "surge_protector": "surge protector",
         "grounding": "grounding",

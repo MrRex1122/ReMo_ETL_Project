@@ -265,6 +265,12 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(drill.entity_type, "masonry_drill_bit")
         self.assertEqual(drill.branch_hint, "буры sds-plus")
 
+    def test_parse_query_spec_detects_concrete_hole_saw_queries(self):
+        hole_saw = parse_query_spec("Коронка по бетону алмазная 68 мм", taxonomy_rules=self.rules)
+
+        self.assertEqual(hole_saw.entity_type, "concrete_hole_saw")
+        self.assertEqual(hole_saw.branch_hint, "коронки по бетону")
+
     def test_parse_query_spec_detects_distribution_enclosure_queries(self):
         metal = parse_query_spec("Щит распределительный встраиваемый металлический на 36 модулей", taxonomy_rules=self.rules)
         plastic = parse_query_spec("Корпус распределительный встраиваемый пластиковый на 24 модуля", taxonomy_rules=self.rules)
