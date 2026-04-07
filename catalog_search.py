@@ -945,6 +945,8 @@ def classify_item_type(
         return "rj45_outlet"
     if _looks_like_cable_channel_box(normalized, extracted_markers=extracted_markers):
         return "cable_channel"
+    if _has_cable_conduit_signal(normalized):
+        return "cable_conduit"
     if "лючок" in normalized or ("напольн" in normalized and "короб" in normalized):
         return "floor_box"
     if "щеточ" in normalized:
@@ -1226,6 +1228,8 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "tray_sheet"
     if any(marker in normalized_branch for marker in cable_channel_body_branch_markers):
         return "cable_channel"
+    if any(marker in normalized_branch for marker in ("металлорукав с изоляцией", "гофрированные трубы для прокладки кабеля")):
+        return "cable_conduit"
     if any(marker in normalized_branch for marker in ("затворы поворотные дисковые", "краны шаровые стальные", "краны шаровые латунные для воды", "краны шаровые пнд", "клапаны электромагнитные соленоидные")):
         return "industrial_valve"
     if any(marker in normalized_branch for marker in ("подшипники роликовые цилиндрические", "подшипники роликовые сферические", "подшипники роликовые конические", "подшипники шариковые радиальные", "подшипники шариковые радиально-упорные", "упорные подшипники", "самоустанавливающиеся шарикоподшипники", "игольчатые подшипники")):
@@ -1303,6 +1307,11 @@ def _normalize_catalog_effective_entity_type(
             return raw_entity_type
         if candidate_family in {"keystone", "rj45_connector", "switch_wiring"}:
             return "power_accessory"
+    if _has_cable_conduit_signal(normalized_text):
+        if raw_family == "cable_conduit":
+            return raw_entity_type or "cable_conduit"
+        if candidate_family in {"cable", "wire", "cable_channel", "box"}:
+            return "cable_conduit"
     if any(token in normalized_text for token in ("стабилизатор напряжения", "стабилизаторы напряжения", "voltage stabilizer", "avr")) and not any(
         token in normalized_text for token in ("источник бесперебойного питания", "ибп", "ups", "реле контроля напряжения", "амортизатор")
     ):
@@ -1459,6 +1468,10 @@ def derive_branch_from_text(
                 if "перфор" in merged and any(token in merged for token in ("кабель", "канал", "короб")):
                     return "перфорированные кабель-каналы"
                 return "электрика > кабели > кабель-каналы"
+            if effective_family == "cable_conduit":
+                if "металлорукав" in merged:
+                    return "металлорукав с изоляцией"
+                return "гофрированные трубы для прокладки кабеля"
             if effective_family == "industrial_valve":
                 if "соленоид" in merged or ("электромагнит" in merged and "клапан" in merged):
                     return "клапаны электромагнитные (соленоидные)"
@@ -1525,6 +1538,10 @@ def derive_branch_from_text(
                 return "световое табло"
             if effective_family == "safety_sign":
                 return "знаки безопасности"
+            if extracted_markers.get("installation_kind") == "cable_conduit":
+                if "металлорукав" in merged:
+                    return "металлорукав с изоляцией"
+                return "гофрированные трубы для прокладки кабеля"
             if extracted_markers.get("installation_kind") == "cable_channel":
                 return "электрика > кабели > кабель-каналы"
             if effective_family in {"fire_detector", "fire_annunciator"}:
@@ -1573,6 +1590,10 @@ def derive_branch_from_text(
             if "перфор" in merged and any(token in merged for token in ("кабель", "канал", "короб")):
                 return "перфорированные кабель-каналы"
             return "электрика > кабели > кабель-каналы"
+        if registry_family == "cable_conduit":
+            if "металлорукав" in merged:
+                return "металлорукав с изоляцией"
+            return "гофрированные трубы для прокладки кабеля"
         if registry_family == "industrial_valve":
             if "соленоид" in merged or ("электромагнит" in merged and "клапан" in merged):
                 return "клапаны электромагнитные (соленоидные)"
@@ -1681,6 +1702,7 @@ def derive_branch_from_text(
             "box_accessory",
             "power_accessory",
             "distribution_enclosure",
+            "cable_conduit",
             "cable_channel",
             "industrial_valve",
             "bearing",
@@ -1794,6 +1816,10 @@ def derive_branch_from_text(
         return "световое табло"
     if effective_entity_type == "safety_sign":
         return "знаки безопасности"
+    if effective_entity_type == "cable_conduit":
+        if "металлорукав" in merged:
+            return "металлорукав с изоляцией"
+        return "гофрированные трубы для прокладки кабеля"
     if effective_entity_type == "cable_channel":
         if "перфор" in merged and any(token in merged for token in ("кабель", "канал", "короб")):
             return "перфорированные кабель-каналы"
@@ -1973,6 +1999,8 @@ def extract_item_markers(
         markers["installation_kind"] = "outlet_module"
     elif _looks_like_cable_channel_box(normalized, extracted_markers=markers):
         markers["installation_kind"] = "cable_channel"
+    elif _has_cable_conduit_signal(normalized):
+        markers["installation_kind"] = "cable_conduit"
 
     if "адаптер" in normalized:
         markers["component_kind"] = "adapter"
@@ -2047,6 +2075,21 @@ def _has_power_accessory_signal(normalized: str) -> bool:
     if any(token in normalized for token in ("удлинител", "сетевой фильтр", "штепсель", "вилка", "power strip", "extension cord")):
         return True
     if "переходник" in normalized and any(token in normalized for token in ("220", "230", "250", "евро", "schuko", "силов", "сетев")):
+        return True
+    return False
+
+
+def _has_cable_conduit_signal(normalized: str) -> bool:
+    if not normalized:
+        return False
+    if "металлорукав" in normalized:
+        return True
+    if "conduit" in normalized and "cable channel" not in normalized:
+        return True
+    if "гофр" in normalized and any(
+        token in normalized
+        for token in ("труб", "рукав", "прокладк", "кабел", "канализац", "conduit", "corrugated")
+    ):
         return True
     return False
 

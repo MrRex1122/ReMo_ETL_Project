@@ -1044,6 +1044,38 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
             },
         ],
     },
+    "cable_conduit": {
+        "entity_types": ["cable_conduit"],
+        "default_branches": ["металлорукав с изоляцией", "гофрированные трубы для прокладки кабеля"],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "audited": True,
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 57,
+            "positive_patterns": [
+                "металлорукав",
+                "металлорукав с изоляцией",
+                "гофрированная труба",
+                "гофрированные трубы",
+                "труба для прокладки кабеля",
+                "cable conduit",
+                "corrugated conduit",
+                "metal conduit",
+            ],
+            "negative_patterns": [
+                "кабель-канал",
+                "кабель канал",
+                "перфорированный короб",
+                "рукав пожарный",
+                "шланг",
+            ],
+            "required_any_tokens": [
+                ["металлорукав", "гофр", "conduit"],
+                ["изоляц", "труб", "прокладк", "corrugated"],
+            ],
+        },
+    },
     "sensor": {
         "entity_types": ["sensor", "temperature_sensor", "temperature_humidity_sensor", "reed_sensor"],
         "default_branches": ["автоматика > датчики"],
@@ -1377,6 +1409,10 @@ DEFAULT_DOMAIN_REGISTRY: Dict[str, Any] = {
         "distribution_enclosure": {
             "patterns": ["щит распредел", "щиток", "электрощит", "корпус распредел", "корпус учетно", "встраиваемый щит"],
             "families": ["distribution_enclosure"],
+        },
+        "cable_conduit": {
+            "patterns": ["металлорукав", "гофрированная труба", "гофрированные трубы", "прокладки кабеля", "cable conduit", "corrugated conduit"],
+            "families": ["cable_conduit"],
         },
         "rack_accessory": {
             "patterns": ["полк", "рельс", "направля", "щеточ", "заглуш"],
@@ -2435,6 +2471,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "box",
         "box_accessory",
         "distribution_enclosure",
+        "cable_conduit",
         "cable_channel",
         "cable",
         "coax",
@@ -2480,6 +2517,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "box": "box",
         "box_accessory": "box_accessory",
         "distribution_enclosure": "distribution_enclosure",
+        "cable_conduit": "cable_conduit",
         "cable_channel": "cable_channel",
         "bearing": "bearing",
         "radiator": "radiator",
@@ -2529,6 +2567,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "box": "box",
         "box_accessory": "box_accessory",
         "distribution_enclosure": "distribution enclosure",
+        "cable_conduit": "cable conduit",
         "cable_channel": "cable_channel",
         "patch_panel": "patch_panel",
         "patch_cord": "patch_cord",

@@ -4954,6 +4954,12 @@ class ReMoMatcher:
             )
         ):
             return "cable_channel"
+        if any(token in branch_path for token in ("металлорукав с изоляцией", "гофрированные трубы для прокладки кабеля")) or (
+            "металлорукав" in search_text
+            or ("гофр" in search_text and any(token in search_text for token in ("труб", "рукав", "прокладк", "кабел")))
+            or ("conduit" in search_text and "cable channel" not in search_text)
+        ):
+            return "cable_conduit"
         if any(token in branch_path for token in ("коробки распределительные", "коробки установочные")) or (
             "коробка" in search_text
             and any(token in search_text for token in ("распредел", "монтажн", "установоч", "распаеч", "огнестойк"))
@@ -5033,6 +5039,7 @@ class ReMoMatcher:
             "box_accessory",
             "power_accessory",
             "distribution_enclosure",
+            "cable_conduit",
             "cable_channel",
             "industrial_valve",
             "bearing",
@@ -6101,6 +6108,8 @@ class ReMoMatcher:
                 scores[branch] += 1.0
             elif entity_type == "cable" and "кабел" in branch_norm:
                 scores[branch] += 0.8
+            elif entity_type == "cable_conduit" and any(token in branch_norm for token in ("металлорукав", "гофрирован", "прокладки кабеля")):
+                scores[branch] += 1.0
             elif entity_type == "cable_channel" and ("кабель канал" in branch_norm or "перфорирован" in branch_norm):
                 scores[branch] += 1.0
             elif entity_type == "wire" and "провод" in branch_norm:

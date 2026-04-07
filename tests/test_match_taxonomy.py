@@ -1804,6 +1804,22 @@ class MatchTaxonomyTests(unittest.TestCase):
             "cable_channel",
         )
 
+    def test_effective_candidate_family_maps_other_cable_conduit_branch(self):
+        features = self.matcher._extract_query_features("Металлорукав в ПВХ изоляции 20 мм")
+        features["entity_type"] = "cable_conduit"
+        candidate = {
+            "name": "Металлорукав в ПВХ изоляции 20 мм",
+            "normalized_name": "металлорукав в пвх изоляции 20 мм",
+            "branch_path": "металлорукав с изоляцией",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(features, candidate),
+            "cable_conduit",
+        )
+
     def test_effective_candidate_family_maps_other_industrial_valve_branch(self):
         features = self.matcher._extract_query_features("Затвор дисковый поворотный DN100")
         features["entity_type"] = "industrial_valve"
@@ -2401,6 +2417,28 @@ class MatchTaxonomyTests(unittest.TestCase):
             ["корпуса учетно-распределительные встраиваемые металлические"],
             limit=25,
             query_features={"entity_type": "distribution_enclosure"},
+        )
+
+        self.assertNotIn("search_entity_type", captured["where_sql"])
+        self.assertEqual(captured["limit"], 25)
+
+    def test_collect_branch_candidates_relaxes_entity_filter_for_cable_conduit_family(self):
+        self.matcher._uses_duckdb_query_backend = lambda: True
+        captured = {}
+
+        def fake_fetch_items(where_sql="", params=None, order_by_sql="", limit=None):
+            captured["where_sql"] = where_sql
+            captured["params"] = list(params or [])
+            captured["order_by_sql"] = order_by_sql
+            captured["limit"] = limit
+            return []
+
+        self.matcher._duckdb_fetch_items = fake_fetch_items
+
+        self.matcher._collect_branch_candidates(
+            ["металлорукав с изоляцией"],
+            limit=25,
+            query_features={"entity_type": "cable_conduit"},
         )
 
         self.assertNotIn("search_entity_type", captured["where_sql"])

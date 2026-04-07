@@ -947,6 +947,24 @@ class CatalogSearchTests(unittest.TestCase):
             "удлинители, сетевые фильтры, переходники, штепсельные вилки",
         )
 
+    def test_classify_item_type_detects_cable_conduit_queries(self):
+        self.assertEqual(
+            classify_item_type("Металлорукав в ПВХ изоляции 20 мм"),
+            "cable_conduit",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Металлорукав в ПВХ изоляции 20 мм"),
+            "металлорукав с изоляцией",
+        )
+        self.assertEqual(
+            classify_item_type("Труба гофрированная для прокладки кабеля 25 мм"),
+            "cable_conduit",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Труба гофрированная для прокладки кабеля 25 мм"),
+            "гофрированные трубы для прокладки кабеля",
+        )
+
     def test_classify_item_type_detects_fuse_queries(self):
         self.assertEqual(
             classify_item_type("Предохранитель плавкий 10А"),
@@ -1336,6 +1354,35 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(plastic["search_entity_type"], "distribution_enclosure")
             self.assertEqual(plastic["search_effective_entity_type"], "distribution_enclosure")
             self.assertEqual(plastic["search_effective_family"], "distribution_enclosure")
+
+    def test_build_search_catalog_maps_cable_conduits_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Металлорукав в ПВХ изоляции 20 мм;COND-1;10;Металлорукав С Изоляцией;CLS-1;Металлорукав;;ReMo\n"
+                    "Труба гофрированная для прокладки кабеля 25 мм;COND-2;10;Гофрированные Трубы Для Прокладки Кабеля;CLS-2;Труба гофрированная;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+            metal = built.loc[built["Артикул"] == "COND-1"].iloc[0]
+            corrugated = built.loc[built["Артикул"] == "COND-2"].iloc[0]
+
+            self.assertEqual(metal["search_branch_path"], "металлорукав с изоляцией")
+            self.assertEqual(metal["search_entity_type"], "cable_conduit")
+            self.assertEqual(metal["search_effective_entity_type"], "cable_conduit")
+            self.assertEqual(metal["search_effective_family"], "cable_conduit")
+
+            self.assertEqual(corrugated["search_branch_path"], "гофрированные трубы для прокладки кабеля")
+            self.assertEqual(corrugated["search_entity_type"], "cable_conduit")
+            self.assertEqual(corrugated["search_effective_entity_type"], "cable_conduit")
+            self.assertEqual(corrugated["search_effective_family"], "cable_conduit")
 
     def test_build_search_catalog_maps_power_accessories_out_of_other(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
