@@ -981,6 +981,15 @@ def classify_item_type(
         return "ups"
     if "манометр" in normalized or "pressure gauge" in normalized or "gauge pressure" in normalized:
         return "pressure_gauge"
+    if (
+        ("мультиметр" in normalized or "multimeter" in normalized)
+        or (
+            any(token in normalized for token in ("тестер", "tester"))
+            and any(token in normalized for token in ("цифров", "измер", "вольт", "напряж", "ампер", "ток", "ом", "сопротивл", "digital"))
+            and not any(token in normalized for token in ("кабельный", "кабеля", "cable", "network", "lan", "rj45", "ethernet", "сканер"))
+        )
+    ):
+        return "multimeter"
     if "регулятор давления" in normalized or "pressure regulator" in normalized:
         return "pressure_regulator"
     if (
@@ -1260,6 +1269,8 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "transformer"
     if "манометры" in normalized_branch:
         return "pressure_gauge"
+    if "мультиметры" in normalized_branch:
+        return "multimeter"
     if "регулятор давления" in normalized_branch:
         return "pressure_regulator"
     if "стабилизаторы напряжения" in normalized_branch:
@@ -1531,6 +1542,8 @@ def derive_branch_from_text(
                 return "источники бесперебойного питания (ибп)"
             if effective_family == "pressure_gauge":
                 return "манометры"
+            if effective_family == "multimeter":
+                return "мультиметры"
             if effective_family == "pressure_regulator":
                 return "регулятор давления"
             if effective_family == "voltage_stabilizer":
@@ -1657,6 +1670,8 @@ def derive_branch_from_text(
             return "источники бесперебойного питания (ибп)"
         if registry_family == "pressure_gauge":
             return "манометры"
+        if registry_family == "multimeter":
+            return "мультиметры"
         if registry_family == "pressure_regulator":
             return "регулятор давления"
         if registry_family == "voltage_stabilizer":
@@ -1806,6 +1821,8 @@ def derive_branch_from_text(
         return "ограничители импульсного перенапряжения силовые модульные"
     if effective_entity_type == "ups":
         return "источники бесперебойного питания (ибп)"
+    if effective_entity_type == "multimeter":
+        return "мультиметры"
     if effective_entity_type == "voltage_stabilizer":
         return "стабилизаторы напряжения"
     if effective_entity_type == "frequency_drive":

@@ -4825,6 +4825,15 @@ class ReMoMatcher:
             return "transformer"
         if "манометры" in branch_path or "манометр" in search_text or "pressure gauge" in search_text:
             return "pressure_gauge"
+        if "мультиметры" in branch_path or (
+            ("мультиметр" in search_text or "multimeter" in search_text)
+            or (
+                any(token in search_text for token in ("тестер", "tester"))
+                and any(token in search_text for token in ("цифров", "измер", "вольт", "напряж", "ампер", "ток", "ом", "сопротивл", "digital"))
+                and not any(token in search_text for token in ("кабельный", "кабеля", "cable", "network", "lan", "rj45", "ethernet", "сканер"))
+            )
+        ):
+            return "multimeter"
         if "регулятор давления" in branch_path or "регулятор давления" in search_text or "pressure regulator" in search_text:
             return "pressure_regulator"
         if "стабилизаторы напряжения" in branch_path or (
@@ -5054,6 +5063,7 @@ class ReMoMatcher:
             "heat_shrink",
             "transformer",
             "ups",
+            "multimeter",
             "voltage_stabilizer",
             "frequency_drive",
             "breaker",

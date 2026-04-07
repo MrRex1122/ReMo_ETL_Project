@@ -699,6 +699,32 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
             "positive_patterns": ["манометр", "pressure gauge", "gauge pressure"],
         },
     },
+    "multimeter": {
+        "entity_types": ["multimeter"],
+        "default_branches": ["мультиметры"],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "audited": True,
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 52,
+            "positive_patterns": ["мультиметр", "multimeter", "тестер", "tester"],
+            "negative_patterns": [
+                "кабельный тестер",
+                "тестер кабеля",
+                "cable tester",
+                "network tester",
+                "lan tester",
+                "rj45",
+                "ethernet",
+                "сканер",
+            ],
+            "required_any_tokens": [
+                ["мультиметр", "multimeter", "тестер", "tester"],
+                ["цифров", "измер", "вольт", "напряж", "ампер", "ток", "ом", "сопротивл", "digital"],
+            ],
+        },
+    },
     "pressure_regulator": {
         "entity_types": ["pressure_regulator"],
         "default_branches": ["регулятор давления"],
@@ -1428,6 +1454,10 @@ DEFAULT_DOMAIN_REGISTRY: Dict[str, Any] = {
         "pressure_gauge": {
             "patterns": ["манометр", "pressure gauge", "gauge pressure"],
             "families": ["pressure_gauge"],
+        },
+        "multimeter": {
+            "patterns": ["мультиметр", "multimeter", "тестер", "tester", "измеритель напряжения", "измеритель тока"],
+            "families": ["multimeter"],
         },
         "pressure_regulator": {
             "patterns": ["регулятор давления", "pressure regulator"],
@@ -2534,6 +2564,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "transformer",
         "ups",
         "pressure_gauge",
+        "multimeter",
         "pressure_regulator",
         "voltage_stabilizer",
         "frequency_drive",
@@ -2566,6 +2597,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "transformer": "transformer",
         "ups": "ups",
         "pressure_gauge": "pressure_gauge",
+        "multimeter": "multimeter",
         "pressure_regulator": "pressure_regulator",
         "voltage_stabilizer": "voltage_stabilizer",
         "frequency_drive": "frequency_drive",
@@ -2628,6 +2660,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "transformer": "transformer",
         "ups": "ups",
         "pressure_gauge": "pressure gauge",
+        "multimeter": "multimeter",
         "pressure_regulator": "pressure regulator",
         "voltage_stabilizer": "voltage stabilizer",
         "frequency_drive": "frequency drive",

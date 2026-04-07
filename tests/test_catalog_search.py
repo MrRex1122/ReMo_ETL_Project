@@ -877,6 +877,20 @@ class CatalogSearchTests(unittest.TestCase):
             "манометры",
         )
 
+    def test_classify_item_type_detects_multimeter_queries(self):
+        self.assertEqual(
+            classify_item_type("Мультиметр цифровой TRUE RMS 600В"),
+            "multimeter",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Мультиметр цифровой TRUE RMS 600В"),
+            "мультиметры",
+        )
+        self.assertNotEqual(
+            classify_item_type("Кабельный тестер RJ45"),
+            "multimeter",
+        )
+
     def test_classify_item_type_detects_pressure_regulator_queries(self):
         self.assertEqual(
             classify_item_type("Регулятор давления воды DN20"),
@@ -1277,6 +1291,28 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(gauge["search_entity_type"], "pressure_gauge")
             self.assertEqual(gauge["search_effective_entity_type"], "pressure_gauge")
             self.assertEqual(gauge["search_effective_family"], "pressure_gauge")
+
+    def test_build_search_catalog_maps_multimeters_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Мультиметр цифровой TRUE RMS 600В;MULTI-1;10;Мультиметры;CLS-1;Мультиметр цифровой;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+            multimeter = built.loc[built["Артикул"] == "MULTI-1"].iloc[0]
+
+            self.assertEqual(multimeter["search_branch_path"], "мультиметры")
+            self.assertEqual(multimeter["search_entity_type"], "multimeter")
+            self.assertEqual(multimeter["search_effective_entity_type"], "multimeter")
+            self.assertEqual(multimeter["search_effective_family"], "multimeter")
 
     def test_build_search_catalog_maps_pressure_regulators_out_of_other(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

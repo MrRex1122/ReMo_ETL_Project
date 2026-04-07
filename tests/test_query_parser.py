@@ -199,6 +199,12 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(gauge.entity_type, "pressure_gauge")
         self.assertEqual(gauge.branch_hint, "манометры")
 
+    def test_parse_query_spec_detects_multimeter_queries(self):
+        multimeter = parse_query_spec("Мультиметр цифровой TRUE RMS 600В", taxonomy_rules=self.rules)
+
+        self.assertEqual(multimeter.entity_type, "multimeter")
+        self.assertEqual(multimeter.branch_hint, "мультиметры")
+
     def test_parse_query_spec_detects_pressure_regulator_queries(self):
         regulator = parse_query_spec("Регулятор давления воды DN20", taxonomy_rules=self.rules)
 
