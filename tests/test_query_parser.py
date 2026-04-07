@@ -171,9 +171,12 @@ class QueryParserTests(unittest.TestCase):
 
     def test_parse_query_spec_detects_transformer_queries(self):
         transformer = parse_query_spec("Трансформатор напряжения понижающий низковольтный 220/24В", taxonomy_rules=self.rules)
+        current_transformer = parse_query_spec("Трансформатор тока низковольтный 100/5А", taxonomy_rules=self.rules)
 
         self.assertEqual(transformer.entity_type, "transformer")
         self.assertEqual(transformer.branch_hint, "трансформаторы напряжения понижающие низковольтные")
+        self.assertEqual(current_transformer.entity_type, "transformer")
+        self.assertEqual(current_transformer.branch_hint, "трансформаторы тока низковольтные")
 
 if __name__ == "__main__":
     unittest.main()

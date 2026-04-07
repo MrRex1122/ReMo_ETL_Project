@@ -822,6 +822,10 @@ class CatalogSearchTests(unittest.TestCase):
             derive_branch_from_text("Трансформатор напряжения понижающий низковольтный 220/24В"),
             "трансформаторы напряжения понижающие низковольтные",
         )
+        self.assertEqual(
+            derive_branch_from_text("Трансформатор тока низковольтный 100/5А"),
+            "трансформаторы тока низковольтные",
+        )
 
     def test_build_search_catalog_maps_perforated_cable_channels_to_cable_channel_family(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -1014,6 +1018,7 @@ class CatalogSearchTests(unittest.TestCase):
                     "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
                     "Тип исполнения кабельного изделия;Производитель\n"
                     "Трансформатор напряжения понижающий низковольтный 220/24В;TR-1;10;Трансформаторы Напряжения Понижающие Низковольтные;CLS-1;Трансформатор напряжения понижающий;;ReMo\n"
+                    "Трансформатор тока низковольтный 100/5А;TR-2;10;Трансформаторы Тока Низковольтные;CLS-2;Трансформатор тока;;ReMo\n"
                 ),
                 encoding="utf-8",
             )
@@ -1021,11 +1026,17 @@ class CatalogSearchTests(unittest.TestCase):
             search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
             built = pd.read_csv(search_path, sep=";", encoding="utf-8")
             transformer = built.loc[built["Артикул"] == "TR-1"].iloc[0]
+            current_transformer = built.loc[built["Артикул"] == "TR-2"].iloc[0]
 
             self.assertEqual(transformer["search_branch_path"], "трансформаторы напряжения понижающие низковольтные")
             self.assertEqual(transformer["search_entity_type"], "transformer")
             self.assertEqual(transformer["search_effective_entity_type"], "transformer")
             self.assertEqual(transformer["search_effective_family"], "transformer")
+
+            self.assertEqual(current_transformer["search_branch_path"], "трансформаторы тока низковольтные")
+            self.assertEqual(current_transformer["search_entity_type"], "transformer")
+            self.assertEqual(current_transformer["search_effective_entity_type"], "transformer")
+            self.assertEqual(current_transformer["search_effective_family"], "transformer")
 
     def test_derive_branch_from_text_skips_telecom_rack_for_control_cabinet(self):
         self.assertEqual(

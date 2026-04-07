@@ -587,14 +587,14 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
     },
     "transformer": {
         "entity_types": ["transformer"],
-        "default_branches": ["трансформаторы напряжения понижающие низковольтные"],
+        "default_branches": ["трансформаторы напряжения понижающие низковольтные", "трансформаторы тока низковольтные"],
         "retrieval_mode": "branch_limited",
         "strictness": "semi_strict",
         "audited": True,
         "weak_match_policy": "reject_in_exact",
         "classifier": {
             "priority": 52,
-            "positive_patterns": ["трансформатор", "transformer", "понижающ", "низковольтн"],
+            "positive_patterns": ["трансформатор", "transformer", "понижающ", "низковольтн", "трансформатор тока"],
         },
     },
     "iec_power_cable": {
@@ -1020,7 +1020,7 @@ DEFAULT_DOMAIN_REGISTRY: Dict[str, Any] = {
             "families": ["heat_shrink"],
         },
         "transformer": {
-            "patterns": ["трансформатор", "transformer", "понижающ", "низковольтн"],
+            "patterns": ["трансформатор", "transformer", "понижающ", "низковольтн", "трансформатор тока"],
             "families": ["transformer"],
         },
         "rack_accessory": {

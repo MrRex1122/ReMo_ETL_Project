@@ -1146,7 +1146,10 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "floor_convector"
     if "термоусаживаемые изделия" in normalized_branch:
         return "heat_shrink"
-    if "трансформаторы напряжения понижающие низковольтные" in normalized_branch:
+    if any(
+        marker in normalized_branch
+        for marker in ("трансформаторы напряжения понижающие низковольтные", "трансформаторы тока низковольтные")
+    ):
         return "transformer"
     if any(marker in normalized_branch for marker in ("световое табло", "свето звуковое табло")):
         return "light_signage"
@@ -1309,6 +1312,8 @@ def derive_branch_from_text(
             if effective_family == "heat_shrink":
                 return "термоусаживаемые изделия"
             if effective_family == "transformer":
+                if "ток" in merged:
+                    return "трансформаторы тока низковольтные"
                 return "трансформаторы напряжения понижающие низковольтные"
             if effective_family == "light_signage":
                 if "табло" in merged and any(token in merged for token in ("звуков", "сирен", "свето звуков", "светозвуков")):
@@ -1383,6 +1388,8 @@ def derive_branch_from_text(
         if registry_family == "heat_shrink":
             return "термоусаживаемые изделия"
         if registry_family == "transformer":
+            if "ток" in merged:
+                return "трансформаторы тока низковольтные"
             return "трансформаторы напряжения понижающие низковольтные"
         if registry_family == "light_signage":
             if "табло" in merged and any(token in merged for token in ("звуков", "сирен", "свето звуков", "светозвуков")):

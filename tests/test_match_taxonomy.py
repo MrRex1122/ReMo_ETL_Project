@@ -1975,6 +1975,21 @@ class MatchTaxonomyTests(unittest.TestCase):
             "transformer",
         )
 
+        current_features = self.matcher._extract_query_features("Трансформатор тока низковольтный 100/5А")
+        current_features["entity_type"] = "transformer"
+        current_candidate = {
+            "name": "Трансформатор тока низковольтный 100/5А",
+            "normalized_name": "трансформатор тока низковольтный 100 5а",
+            "branch_path": "трансформаторы тока низковольтные",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(current_features, current_candidate),
+            "transformer",
+        )
+
     def test_effective_candidate_family_maps_other_signage_branches(self):
         light_features = self.matcher._extract_query_features("Свето-звуковое табло ВЫХОД 12В")
         light_features["entity_type"] = "light_signage"

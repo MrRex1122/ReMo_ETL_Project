@@ -4816,7 +4816,7 @@ class ReMoMatcher:
         if "термоусаживаемые изделия" in branch_path or "термоусаж" in search_text or "термоусад" in search_text or "heat shrink" in search_text or "shrink tube" in search_text:
             return "heat_shrink"
         if (
-            "трансформаторы напряжения понижающие низковольтные" in branch_path
+            any(token in branch_path for token in ("трансформаторы напряжения понижающие низковольтные", "трансформаторы тока низковольтные"))
             or "трансформатор" in search_text
             or "transformer" in search_text
         ):
