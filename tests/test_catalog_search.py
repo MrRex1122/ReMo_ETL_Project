@@ -1041,6 +1041,16 @@ class CatalogSearchTests(unittest.TestCase):
             "светосигнальная арматура",
         )
 
+    def test_classify_item_type_detects_wire_ferrule_queries(self):
+        self.assertEqual(
+            classify_item_type("Наконечник штыревой втулочный НШВИ 1,5-8"),
+            "wire_ferrule",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Наконечник штыревой втулочный НШВИ 1,5-8"),
+            "штыревые втулочные наконечники (ншв и ншви)",
+        )
+
     def test_classify_item_type_detects_breaker_load_switch_queries(self):
         self.assertEqual(
             classify_item_type("Выключатель нагрузки 3P 63A"),
@@ -1616,6 +1626,28 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(signal_indicator["search_entity_type"], "signal_indicator")
             self.assertEqual(signal_indicator["search_effective_entity_type"], "signal_indicator")
             self.assertEqual(signal_indicator["search_effective_family"], "signal_indicator")
+
+    def test_build_search_catalog_maps_wire_ferrules_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Наконечник штыревой втулочный НШВИ 1,5-8;FER-1;10;Штыревые Втулочные Наконечники (НШВ И НШВИ);CLS-1;Наконечник втулочный;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+            ferrule = built.loc[built["Артикул"] == "FER-1"].iloc[0]
+
+            self.assertEqual(ferrule["search_branch_path"], "штыревые втулочные наконечники (ншв и ншви)")
+            self.assertEqual(ferrule["search_entity_type"], "wire_ferrule")
+            self.assertEqual(ferrule["search_effective_entity_type"], "wire_ferrule")
+            self.assertEqual(ferrule["search_effective_family"], "wire_ferrule")
 
     def test_build_search_catalog_maps_rubilniki_out_of_other(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

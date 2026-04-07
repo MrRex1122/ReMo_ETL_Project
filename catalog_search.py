@@ -1022,6 +1022,19 @@ def classify_item_type(
     if any(
         token in normalized
         for token in (
+            "штыревые втулочные наконечники",
+            "втулочный наконечник",
+            "втулочные наконечники",
+            "ншв",
+            "ншви",
+            "ferrule",
+            "bootlace ferrule",
+        )
+    ) and not any(token in normalized for token in ("клеммный блок", "клеммник", "din рейк", "din-рейк", "terminal block")):
+        return "wire_ferrule"
+    if any(
+        token in normalized
+        for token in (
             "клеммный блок",
             "клеммные блоки",
             "клеммник",
@@ -1283,6 +1296,8 @@ def _normalize_effective_entity_type_by_catalog_branch(
         )
     ):
         return "terminal_block"
+    if "штыревые втулочные наконечники" in normalized_branch:
+        return "wire_ferrule"
     if "светосигнальная арматура" in normalized_branch:
         return "signal_indicator"
     if any(marker in normalized_branch for marker in ("световое табло", "свето звуковое табло")):
@@ -1668,6 +1683,8 @@ def derive_branch_from_text(
             if ("клем" in merged or "terminal block" in merged) and "блок" not in merged and "блоки" not in merged:
                 return "клеммы на din-рейку"
             return "клеммные блоки зажимов на din-рейку"
+        if registry_family == "wire_ferrule":
+            return "штыревые втулочные наконечники (ншв и ншви)"
         if registry_family == "signal_indicator":
             return "светосигнальная арматура"
         if registry_family == "light_signage":
@@ -1731,6 +1748,7 @@ def derive_branch_from_text(
             "fuse",
             "push_button",
             "terminal_block",
+            "wire_ferrule",
             "signal_indicator",
             "socket",
             "lighting_fixture",
@@ -1812,6 +1830,8 @@ def derive_branch_from_text(
         if ("клем" in merged or "terminal block" in merged) and "блок" not in merged and "блоки" not in merged:
             return "клеммы на din-рейку"
         return "клеммные блоки зажимов на din-рейку"
+    if effective_entity_type == "wire_ferrule":
+        return "штыревые втулочные наконечники (ншв и ншви)"
     if effective_entity_type == "signal_indicator":
         return "светосигнальная арматура"
     if effective_entity_type == "socket":

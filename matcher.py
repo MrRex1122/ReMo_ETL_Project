@@ -4933,6 +4933,11 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("заглушк", "маркир", "аккумулятор", "акб"))
         ):
             return "terminal_block"
+        if "штыревые втулочные наконечники" in branch_path or (
+            any(token in search_text for token in ("штыревые втулочные наконечники", "втулочный наконечник", "втулочные наконечники", "ншв", "ншви", "ferrule", "bootlace ferrule"))
+            and not any(token in search_text for token in ("клеммный блок", "клеммник", "din рейк", "din-рейк", "terminal block"))
+        ):
+            return "wire_ferrule"
         if "светосигнальная арматура" in branch_path or (
             any(token in search_text for token in ("светосигнальн", "сигнальн ламп", "лампа сигнальн", "световой индикатор", "индикатор световой", "pilot light", "indicator lamp"))
             and "табло" not in search_text
@@ -5056,6 +5061,7 @@ class ReMoMatcher:
             "fuse",
             "push_button",
             "terminal_block",
+            "wire_ferrule",
             "signal_indicator",
             "switch_wiring",
         }
