@@ -907,6 +907,11 @@ def classify_item_type(
     ):
         return "frequency_drive"
     if (
+        any(token in normalized for token in ("электродвигатель", "электродвигатели", "electric motor", "асинхронный двигатель", "трехфазный двигатель", "однофазный двигатель"))
+        and not any(token in normalized for token in ("преобразователь частоты", "частотный преобразователь", "частотный привод", "soft starter", "плавного пуска"))
+    ):
+        return "electric_motor"
+    if (
         ("заглуш" in normalized or "панел" in normalized)
         and _has_airflow_blanking_signal(normalized)
     ):
@@ -1302,6 +1307,8 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "pressure_regulator"
     if "стабилизаторы напряжения" in normalized_branch:
         return "voltage_stabilizer"
+    if "электродвигатели общепромышленные" in normalized_branch:
+        return "electric_motor"
     if "преобразователи частоты приводы" in normalized_branch:
         return "frequency_drive"
     if "удлинители сетевые фильтры переходники штепсельные вилки" in normalized_branch:
@@ -1579,6 +1586,8 @@ def derive_branch_from_text(
                 return "регулятор давления"
             if effective_family == "voltage_stabilizer":
                 return "стабилизаторы напряжения"
+            if effective_family == "electric_motor":
+                return "электродвигатели общепромышленные"
             if effective_family == "frequency_drive":
                 return "преобразователи частоты, приводы"
             if effective_family == "power_accessory":
@@ -1711,6 +1720,8 @@ def derive_branch_from_text(
             return "регулятор давления"
         if registry_family == "voltage_stabilizer":
             return "стабилизаторы напряжения"
+        if registry_family == "electric_motor":
+            return "электродвигатели общепромышленные"
         if registry_family == "frequency_drive":
             return "преобразователи частоты, приводы"
         if registry_family == "fuse":
@@ -1785,6 +1796,7 @@ def derive_branch_from_text(
             "transformer",
             "voltage_stabilizer",
             "frequency_drive",
+            "electric_motor",
             "clamp_meter",
             "voltage_indicator",
             "patch_panel",
@@ -1868,6 +1880,8 @@ def derive_branch_from_text(
         return "стабилизаторы напряжения"
     if effective_entity_type == "frequency_drive":
         return "преобразователи частоты, приводы"
+    if effective_entity_type == "electric_motor":
+        return "электродвигатели общепромышленные"
     if effective_entity_type == "fuse":
         return "плавкие предохранители"
     if effective_entity_type == "power_accessory":

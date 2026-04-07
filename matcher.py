@@ -4889,6 +4889,17 @@ class ReMoMatcher:
             )
         ):
             return "frequency_drive"
+        if "электродвигатели общепромышленные" in branch_path or (
+            any(
+                token in search_text
+                for token in ("электродвигатель", "электродвигатели", "electric motor", "асинхронный двигатель", "трехфазный двигатель", "однофазный двигатель")
+            )
+            and not any(
+                token in search_text
+                for token in ("преобразователь частоты", "частотный преобразователь", "частотный привод", "soft starter", "плавного пуска")
+            )
+        ):
+            return "electric_motor"
         if "удлинители сетевые фильтры переходники штепсельные вилки" in branch_path or (
             (
                 any(token in search_text for token in ("удлинител", "сетевой фильтр", "штепсель", "вилка", "power strip", "extension cord"))
@@ -5091,6 +5102,7 @@ class ReMoMatcher:
             "voltage_indicator",
             "voltage_stabilizer",
             "frequency_drive",
+            "electric_motor",
             "breaker",
             "surge_protector",
             "fuse",

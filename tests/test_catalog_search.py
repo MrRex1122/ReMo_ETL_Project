@@ -953,6 +953,20 @@ class CatalogSearchTests(unittest.TestCase):
             "soft_starter",
         )
 
+    def test_classify_item_type_detects_electric_motor_queries(self):
+        self.assertEqual(
+            classify_item_type("Электродвигатель асинхронный трехфазный 5,5 кВт"),
+            "electric_motor",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Электродвигатель асинхронный трехфазный 5,5 кВт"),
+            "электродвигатели общепромышленные",
+        )
+        self.assertNotEqual(
+            classify_item_type("Преобразователь частоты для электродвигателя 5,5 кВт"),
+            "electric_motor",
+        )
+
     def test_classify_item_type_detects_distribution_enclosure_queries(self):
         self.assertEqual(
             classify_item_type("Щит распределительный встраиваемый металлический на 36 модулей"),
@@ -1451,6 +1465,28 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(drive["search_entity_type"], "frequency_drive")
             self.assertEqual(drive["search_effective_entity_type"], "frequency_drive")
             self.assertEqual(drive["search_effective_family"], "frequency_drive")
+
+    def test_build_search_catalog_maps_electric_motors_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Электродвигатель асинхронный трехфазный 5,5 кВт;MOTOR-1;10;Электродвигатели Общепромышленные;CLS-1;Электродвигатель;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+            motor = built.loc[built["Артикул"] == "MOTOR-1"].iloc[0]
+
+            self.assertEqual(motor["search_branch_path"], "электродвигатели общепромышленные")
+            self.assertEqual(motor["search_entity_type"], "electric_motor")
+            self.assertEqual(motor["search_effective_entity_type"], "electric_motor")
+            self.assertEqual(motor["search_effective_family"], "electric_motor")
 
     def test_build_search_catalog_maps_distribution_enclosures_out_of_other(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

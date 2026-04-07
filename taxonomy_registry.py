@@ -1371,6 +1371,32 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
             "required_any_tokens": [["частот", "frequency", "vfd", "инвертор"], ["преобразоват", "привод", "drive"]],
         },
     },
+    "electric_motor": {
+        "entity_types": ["electric_motor"],
+        "default_branches": ["электродвигатели общепромышленные"],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "audited": True,
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 56,
+            "positive_patterns": [
+                "электродвигатель",
+                "электродвигатели",
+                "electric motor",
+                "асинхронный двигатель",
+                "трехфазный двигатель",
+                "однофазный двигатель",
+            ],
+            "negative_patterns": [
+                "преобразователь частоты",
+                "частотный преобразователь",
+                "частотный привод",
+                "soft starter",
+                "плавного пуска",
+            ],
+        },
+    },
     "wire": {
         "entity_types": ["wire"],
         "default_branches": ["электрика > провода"],
@@ -1545,6 +1571,10 @@ DEFAULT_DOMAIN_REGISTRY: Dict[str, Any] = {
         "frequency_drive": {
             "patterns": ["преобразователь частоты", "частотный преобразователь", "частотный привод", "frequency drive", "variable frequency drive", "vfd"],
             "families": ["frequency_drive"],
+        },
+        "electric_motor": {
+            "patterns": ["электродвигатель", "электродвигатели", "electric motor", "асинхронный двигатель", "трехфазный двигатель", "однофазный двигатель"],
+            "families": ["electric_motor"],
         },
         "power_accessory": {
             "patterns": ["удлинител", "сетевой фильтр", "штепсельн", "вилка", "power strip", "extension cord", "силовой переходник"],
@@ -2645,6 +2675,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "pressure_regulator",
         "voltage_stabilizer",
         "frequency_drive",
+        "electric_motor",
         "iec_power_cable",
         "keystone",
         "optical_cross",
@@ -2680,6 +2711,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "pressure_regulator": "pressure_regulator",
         "voltage_stabilizer": "voltage_stabilizer",
         "frequency_drive": "frequency_drive",
+        "electric_motor": "electric_motor",
         "light_signage": "signage",
         "safety_sign": "signage",
         "patch_panel": "patch_panel",
@@ -2745,6 +2777,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "pressure_regulator": "pressure regulator",
         "voltage_stabilizer": "voltage stabilizer",
         "frequency_drive": "frequency drive",
+        "electric_motor": "electric motor",
         "signage": "signage",
         "fastener": "fastener",
         "surge_protector": "surge protector",
