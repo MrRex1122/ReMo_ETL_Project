@@ -205,6 +205,12 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(regulator.entity_type, "pressure_regulator")
         self.assertEqual(regulator.branch_hint, "регулятор давления")
 
+    def test_parse_query_spec_detects_frequency_drive_queries(self):
+        drive = parse_query_spec("Преобразователь частоты 5,5 кВт 380В", taxonomy_rules=self.rules)
+
+        self.assertEqual(drive.entity_type, "frequency_drive")
+        self.assertEqual(drive.branch_hint, "преобразователи частоты, приводы")
+
     def test_parse_query_spec_detects_distribution_enclosure_queries(self):
         metal = parse_query_spec("Щит распределительный встраиваемый металлический на 36 модулей", taxonomy_rules=self.rules)
         plastic = parse_query_spec("Корпус распределительный встраиваемый пластиковый на 24 модуля", taxonomy_rules=self.rules)

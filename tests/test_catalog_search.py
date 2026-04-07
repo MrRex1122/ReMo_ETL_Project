@@ -887,6 +887,20 @@ class CatalogSearchTests(unittest.TestCase):
             "регулятор давления",
         )
 
+    def test_classify_item_type_detects_frequency_drive_queries(self):
+        self.assertEqual(
+            classify_item_type("Преобразователь частоты 5,5 кВт 380В"),
+            "frequency_drive",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Преобразователь частоты 5,5 кВт 380В"),
+            "преобразователи частоты, приводы",
+        )
+        self.assertEqual(
+            classify_item_type("Устройство плавного пуска 5,5 кВт"),
+            "soft_starter",
+        )
+
     def test_classify_item_type_detects_distribution_enclosure_queries(self):
         self.assertEqual(
             classify_item_type("Щит распределительный встраиваемый металлический на 36 модулей"),
@@ -1239,6 +1253,28 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(regulator["search_entity_type"], "pressure_regulator")
             self.assertEqual(regulator["search_effective_entity_type"], "pressure_regulator")
             self.assertEqual(regulator["search_effective_family"], "pressure_regulator")
+
+    def test_build_search_catalog_maps_frequency_drives_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Преобразователь частоты 5,5 кВт 380В;VFD-1;10;Преобразователи Частоты, Приводы;CLS-1;Преобразователь частоты;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+            drive = built.loc[built["Артикул"] == "VFD-1"].iloc[0]
+
+            self.assertEqual(drive["search_branch_path"], "преобразователи частоты, приводы")
+            self.assertEqual(drive["search_entity_type"], "frequency_drive")
+            self.assertEqual(drive["search_effective_entity_type"], "frequency_drive")
+            self.assertEqual(drive["search_effective_family"], "frequency_drive")
 
     def test_build_search_catalog_maps_distribution_enclosures_out_of_other(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

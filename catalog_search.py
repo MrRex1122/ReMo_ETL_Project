@@ -882,6 +882,31 @@ def classify_item_type(
     if "soft starter" in normalized or ("плавн" in normalized and "пуск" in normalized):
         return "soft_starter"
     if (
+        any(
+            token in normalized
+            for token in (
+                "преобразователь частоты",
+                "частотный преобразователь",
+                "частотный привод",
+                "frequency drive",
+                "variable frequency drive",
+                "vfd",
+                "инверторный привод",
+            )
+        )
+        and not any(
+            token in normalized
+            for token in (
+                "плавного пуска",
+                "soft starter",
+                "преобразователь интерфейса",
+                "интерфейс",
+                "rs-485",
+            )
+        )
+    ):
+        return "frequency_drive"
+    if (
         ("заглуш" in normalized or "панел" in normalized)
         and _has_airflow_blanking_signal(normalized)
     ):
@@ -1215,6 +1240,8 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "pressure_gauge"
     if "регулятор давления" in normalized_branch:
         return "pressure_regulator"
+    if "преобразователи частоты приводы" in normalized_branch:
+        return "frequency_drive"
     if "удлинители сетевые фильтры переходники штепсельные вилки" in normalized_branch:
         return "power_accessory"
     if any(
@@ -1269,6 +1296,36 @@ def _normalize_catalog_effective_entity_type(
             return raw_entity_type
         if candidate_family in {"keystone", "rj45_connector", "switch_wiring"}:
             return "power_accessory"
+    if any(
+        token in normalized_text
+        for token in (
+            "преобразователь частоты",
+            "частотн",
+            "frequency drive",
+            "variable frequency drive",
+            "vfd",
+            "инверторн",
+        )
+    ) and not any(
+        token in normalized_text
+        for token in (
+            "плавного пуска",
+            "soft starter",
+            "преобразователь интерфейса",
+            "интерфейс",
+            "rs-485",
+        )
+    ):
+        if raw_family == "frequency_drive":
+            return raw_entity_type or "frequency_drive"
+        if candidate_family in {
+            "soft_starter",
+            "security_interface_device",
+            "security_control_panel",
+            "security_module_device",
+            "security_control_device",
+        }:
+            return "frequency_drive"
     if candidate_family == "lighting_fixture":
         if _has_strong_lighting_domain_signal(normalized_text):
             return candidate_entity_type
@@ -1432,6 +1489,8 @@ def derive_branch_from_text(
                 return "манометры"
             if effective_family == "pressure_regulator":
                 return "регулятор давления"
+            if effective_family == "frequency_drive":
+                return "преобразователи частоты, приводы"
             if effective_family == "power_accessory":
                 return "удлинители, сетевые фильтры, переходники, штепсельные вилки"
             if effective_family == "distribution_enclosure":
@@ -1542,6 +1601,8 @@ def derive_branch_from_text(
             return "манометры"
         if registry_family == "pressure_regulator":
             return "регулятор давления"
+        if registry_family == "frequency_drive":
+            return "преобразователи частоты, приводы"
         if registry_family == "fuse":
             return "плавкие предохранители"
         if registry_family == "push_button":
@@ -1609,6 +1670,7 @@ def derive_branch_from_text(
             "floor_convector",
             "heat_shrink",
             "transformer",
+            "frequency_drive",
             "patch_panel",
             "optical_cross",
             "optical_patch_cord",
@@ -1679,6 +1741,8 @@ def derive_branch_from_text(
         return "ограничители импульсного перенапряжения силовые модульные"
     if effective_entity_type == "ups":
         return "источники бесперебойного питания (ибп)"
+    if effective_entity_type == "frequency_drive":
+        return "преобразователи частоты, приводы"
     if effective_entity_type == "fuse":
         return "плавкие предохранители"
     if effective_entity_type == "power_accessory":

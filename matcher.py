@@ -4827,6 +4827,31 @@ class ReMoMatcher:
             return "pressure_gauge"
         if "регулятор давления" in branch_path or "регулятор давления" in search_text or "pressure regulator" in search_text:
             return "pressure_regulator"
+        if "преобразователи частоты приводы" in branch_path or (
+            any(
+                token in search_text
+                for token in (
+                    "преобразователь частоты",
+                    "частотный преобразователь",
+                    "частотный привод",
+                    "frequency drive",
+                    "variable frequency drive",
+                    "vfd",
+                    "инверторный привод",
+                )
+            )
+            and not any(
+                token in search_text
+                for token in (
+                    "плавного пуска",
+                    "soft starter",
+                    "преобразователь интерфейса",
+                    "интерфейс",
+                    "rs-485",
+                )
+            )
+        ):
+            return "frequency_drive"
         if "удлинители сетевые фильтры переходники штепсельные вилки" in branch_path or (
             (
                 any(token in search_text for token in ("удлинител", "сетевой фильтр", "штепсель", "вилка", "power strip", "extension cord"))
@@ -5011,6 +5036,7 @@ class ReMoMatcher:
             "heat_shrink",
             "transformer",
             "ups",
+            "frequency_drive",
             "breaker",
             "surge_protector",
             "fuse",
