@@ -704,6 +704,14 @@ class CatalogSearchTests(unittest.TestCase):
             "подшипники роликовые цилиндрические",
         )
         self.assertEqual(
+            classify_item_type("Подшипник роликовый сферический 22212"),
+            "bearing",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Подшипник роликовый сферический 22212"),
+            "подшипники роликовые сферические",
+        )
+        self.assertEqual(
             classify_item_type("Подшипник шариковый радиальный 6205"),
             "bearing",
         )
@@ -718,6 +726,14 @@ class CatalogSearchTests(unittest.TestCase):
         self.assertEqual(
             derive_branch_from_text("Подшипник шариковый радиально-упорный 7205"),
             "подшипники шариковые радиально-упорные",
+        )
+        self.assertEqual(
+            classify_item_type("Подшипник игольчатый HK1210"),
+            "bearing",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Подшипник игольчатый HK1210"),
+            "игольчатые подшипники",
         )
 
     def test_classify_item_type_detects_radiator_queries(self):
@@ -808,8 +824,10 @@ class CatalogSearchTests(unittest.TestCase):
                     "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
                     "Тип исполнения кабельного изделия;Производитель\n"
                     "Подшипник роликовый цилиндрический 22210;BEARING-1;10;Подшипники Роликовые Цилиндрические;CLS-1;Подшипник роликовый цилиндрический;;ReMo\n"
+                    "Подшипник роликовый сферический 22212;BEARING-4;10;Подшипники Роликовые Сферические;CLS-4;Подшипник роликовый сферический;;ReMo\n"
                     "Подшипник шариковый радиальный 6205;BEARING-2;10;Подшипники Шариковые Радиальные;CLS-2;Подшипник шариковый радиальный;;ReMo\n"
                     "Подшипник шариковый радиально-упорный 7205;BEARING-3;10;Подшипники Шариковые Радиально-Упорные;CLS-3;Подшипник шариковый радиально-упорный;;ReMo\n"
+                    "Подшипник игольчатый HK1210;BEARING-5;10;Игольчатые Подшипники;CLS-5;Подшипник игольчатый;;ReMo\n"
                 ),
                 encoding="utf-8",
             )
@@ -817,13 +835,20 @@ class CatalogSearchTests(unittest.TestCase):
             search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
             built = pd.read_csv(search_path, sep=";", encoding="utf-8")
             roller_bearing = built.loc[built["Артикул"] == "BEARING-1"].iloc[0]
+            spherical_bearing = built.loc[built["Артикул"] == "BEARING-4"].iloc[0]
             ball_bearing = built.loc[built["Артикул"] == "BEARING-2"].iloc[0]
             thrust_bearing = built.loc[built["Артикул"] == "BEARING-3"].iloc[0]
+            needle_bearing = built.loc[built["Артикул"] == "BEARING-5"].iloc[0]
 
             self.assertEqual(roller_bearing["search_branch_path"], "подшипники роликовые цилиндрические")
             self.assertEqual(roller_bearing["search_entity_type"], "bearing")
             self.assertEqual(roller_bearing["search_effective_entity_type"], "bearing")
             self.assertEqual(roller_bearing["search_effective_family"], "bearing")
+
+            self.assertEqual(spherical_bearing["search_branch_path"], "подшипники роликовые сферические")
+            self.assertEqual(spherical_bearing["search_entity_type"], "bearing")
+            self.assertEqual(spherical_bearing["search_effective_entity_type"], "bearing")
+            self.assertEqual(spherical_bearing["search_effective_family"], "bearing")
 
             self.assertEqual(ball_bearing["search_branch_path"], "подшипники шариковые радиальные")
             self.assertEqual(ball_bearing["search_entity_type"], "bearing")
@@ -834,6 +859,11 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(thrust_bearing["search_entity_type"], "bearing")
             self.assertEqual(thrust_bearing["search_effective_entity_type"], "bearing")
             self.assertEqual(thrust_bearing["search_effective_family"], "bearing")
+
+            self.assertEqual(needle_bearing["search_branch_path"], "игольчатые подшипники")
+            self.assertEqual(needle_bearing["search_entity_type"], "bearing")
+            self.assertEqual(needle_bearing["search_effective_entity_type"], "bearing")
+            self.assertEqual(needle_bearing["search_effective_family"], "bearing")
 
     def test_build_search_catalog_maps_radiators_out_of_other(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

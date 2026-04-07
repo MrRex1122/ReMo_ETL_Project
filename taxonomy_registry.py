@@ -520,8 +520,10 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
         "entity_types": ["bearing"],
         "default_branches": [
             "подшипники роликовые цилиндрические",
+            "подшипники роликовые сферические",
             "подшипники шариковые радиальные",
             "подшипники шариковые радиально-упорные",
+            "игольчатые подшипники",
         ],
         "retrieval_mode": "branch_limited",
         "strictness": "semi_strict",

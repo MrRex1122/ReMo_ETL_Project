@@ -1851,6 +1851,21 @@ class MatchTaxonomyTests(unittest.TestCase):
             "bearing",
         )
 
+        spherical_features = self.matcher._extract_query_features("Подшипник роликовый сферический 22212")
+        spherical_features["entity_type"] = "bearing"
+        spherical_candidate = {
+            "name": "Подшипник роликовый сферический 22212",
+            "normalized_name": "подшипник роликовый сферический 22212",
+            "branch_path": "подшипники роликовые сферические",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(spherical_features, spherical_candidate),
+            "bearing",
+        )
+
         thrust_features = self.matcher._extract_query_features("Подшипник шариковый радиально-упорный 7205")
         thrust_features["entity_type"] = "bearing"
         thrust_candidate = {
@@ -1863,6 +1878,21 @@ class MatchTaxonomyTests(unittest.TestCase):
 
         self.assertEqual(
             self.matcher._effective_candidate_family_for_query(thrust_features, thrust_candidate),
+            "bearing",
+        )
+
+        needle_features = self.matcher._extract_query_features("Подшипник игольчатый HK1210")
+        needle_features["entity_type"] = "bearing"
+        needle_candidate = {
+            "name": "Подшипник игольчатый HK1210",
+            "normalized_name": "подшипник игольчатый hk1210",
+            "branch_path": "игольчатые подшипники",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(needle_features, needle_candidate),
             "bearing",
         )
 
