@@ -685,6 +685,14 @@ class CatalogSearchTests(unittest.TestCase):
             derive_branch_from_text("Кран шаровой стальной DN50"),
             "краны шаровые стальные",
         )
+        self.assertEqual(
+            classify_item_type("Затвор дисковый поворотный чугунный DN80"),
+            "industrial_valve",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Затвор дисковый поворотный чугунный DN80"),
+            "затворы поворотные дисковые чугунные",
+        )
 
     def test_classify_item_type_detects_bearing_queries(self):
         self.assertEqual(
@@ -756,6 +764,7 @@ class CatalogSearchTests(unittest.TestCase):
                     "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
                     "Тип исполнения кабельного изделия;Производитель\n"
                     "Затвор дисковый поворотный DN100;VALVE-1;10;Затворы Поворотные Дисковые Стальные;CLS-1;Затвор дисковый поворотный;;ReMo\n"
+                    "Затвор дисковый поворотный чугунный DN80;VALVE-3;10;Затворы Поворотные Дисковые Чугунные;CLS-3;Затвор дисковый поворотный чугунный;;ReMo\n"
                     "Кран шаровой стальной DN50;VALVE-2;10;Краны Шаровые Стальные;CLS-2;Кран шаровой стальной;;ReMo\n"
                 ),
                 encoding="utf-8",
@@ -764,12 +773,18 @@ class CatalogSearchTests(unittest.TestCase):
             search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
             built = pd.read_csv(search_path, sep=";", encoding="utf-8")
             disc_valve = built.loc[built["Артикул"] == "VALVE-1"].iloc[0]
+            cast_iron_valve = built.loc[built["Артикул"] == "VALVE-3"].iloc[0]
             ball_valve = built.loc[built["Артикул"] == "VALVE-2"].iloc[0]
 
             self.assertEqual(disc_valve["search_branch_path"], "затворы поворотные дисковые стальные")
             self.assertEqual(disc_valve["search_entity_type"], "industrial_valve")
             self.assertEqual(disc_valve["search_effective_entity_type"], "industrial_valve")
             self.assertEqual(disc_valve["search_effective_family"], "industrial_valve")
+
+            self.assertEqual(cast_iron_valve["search_branch_path"], "затворы поворотные дисковые чугунные")
+            self.assertEqual(cast_iron_valve["search_entity_type"], "industrial_valve")
+            self.assertEqual(cast_iron_valve["search_effective_entity_type"], "industrial_valve")
+            self.assertEqual(cast_iron_valve["search_effective_family"], "industrial_valve")
 
             self.assertEqual(ball_valve["search_branch_path"], "краны шаровые стальные")
             self.assertEqual(ball_valve["search_entity_type"], "industrial_valve")

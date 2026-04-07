@@ -1265,6 +1265,8 @@ def derive_branch_from_text(
             if effective_family == "industrial_valve":
                 if "кран" in merged and "шар" in merged:
                     return "краны шаровые стальные"
+                if "чугун" in merged:
+                    return "затворы поворотные дисковые чугунные"
                 return "затворы поворотные дисковые стальные"
             if effective_family == "bearing":
                 if "шарик" in merged or "радиальн" in merged:
@@ -1319,6 +1321,8 @@ def derive_branch_from_text(
         if registry_family == "industrial_valve":
             if "кран" in merged and "шар" in merged:
                 return "краны шаровые стальные"
+            if "чугун" in merged:
+                return "затворы поворотные дисковые чугунные"
             return "затворы поворотные дисковые стальные"
         if registry_family == "bearing":
             if "шарик" in merged or "радиальн" in merged:

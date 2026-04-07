@@ -504,6 +504,7 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
         "entity_types": ["industrial_valve"],
         "default_branches": [
             "затворы поворотные дисковые стальные",
+            "затворы поворотные дисковые чугунные",
             "краны шаровые стальные",
         ],
         "retrieval_mode": "branch_limited",

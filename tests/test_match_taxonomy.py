@@ -1820,6 +1820,21 @@ class MatchTaxonomyTests(unittest.TestCase):
             "industrial_valve",
         )
 
+        cast_iron_features = self.matcher._extract_query_features("Затвор дисковый поворотный чугунный DN80")
+        cast_iron_features["entity_type"] = "industrial_valve"
+        cast_iron_candidate = {
+            "name": "Затвор дисковый поворотный чугунный DN80",
+            "normalized_name": "затвор дисковый поворотный чугунный dn80",
+            "branch_path": "затворы поворотные дисковые чугунные",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(cast_iron_features, cast_iron_candidate),
+            "industrial_valve",
+        )
+
     def test_effective_candidate_family_maps_other_bearing_branch(self):
         features = self.matcher._extract_query_features("Подшипник роликовый цилиндрический 22210")
         features["entity_type"] = "bearing"
