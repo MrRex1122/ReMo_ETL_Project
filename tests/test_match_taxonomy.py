@@ -2032,6 +2032,35 @@ class MatchTaxonomyTests(unittest.TestCase):
             "pressure_regulator",
         )
 
+    def test_effective_candidate_family_maps_other_distribution_enclosure_branches(self):
+        metal_features = self.matcher._extract_query_features("Щит распределительный встраиваемый металлический на 36 модулей")
+        metal_features["entity_type"] = "distribution_enclosure"
+        metal_candidate = {
+            "name": "Щит распределительный встраиваемый металлический на 36 модулей",
+            "normalized_name": "щит распределительный встраиваемый металлический на 36 модулей",
+            "branch_path": "корпуса учетно-распределительные встраиваемые металлические",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        plastic_features = self.matcher._extract_query_features("Корпус распределительный встраиваемый пластиковый на 24 модуля")
+        plastic_features["entity_type"] = "distribution_enclosure"
+        plastic_candidate = {
+            "name": "Корпус распределительный встраиваемый пластиковый на 24 модуля",
+            "normalized_name": "корпус распределительный встраиваемый пластиковый на 24 модуля",
+            "branch_path": "корпуса распределительные встраиваемые пластиковые",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(metal_features, metal_candidate),
+            "distribution_enclosure",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(plastic_features, plastic_candidate),
+            "distribution_enclosure",
+        )
+
     def test_effective_candidate_family_maps_other_floor_convector_branch(self):
         features = self.matcher._extract_query_features("Конвектор внутрипольный с вентилятором 2000мм")
         features["entity_type"] = "floor_convector"
@@ -2289,6 +2318,28 @@ class MatchTaxonomyTests(unittest.TestCase):
             ["коробки распределительные наружные"],
             limit=25,
             query_features={"entity_type": "box"},
+        )
+
+        self.assertNotIn("search_entity_type", captured["where_sql"])
+        self.assertEqual(captured["limit"], 25)
+
+    def test_collect_branch_candidates_relaxes_entity_filter_for_distribution_enclosure_family(self):
+        self.matcher._uses_duckdb_query_backend = lambda: True
+        captured = {}
+
+        def fake_fetch_items(where_sql="", params=None, order_by_sql="", limit=None):
+            captured["where_sql"] = where_sql
+            captured["params"] = list(params or [])
+            captured["order_by_sql"] = order_by_sql
+            captured["limit"] = limit
+            return []
+
+        self.matcher._duckdb_fetch_items = fake_fetch_items
+
+        self.matcher._collect_branch_candidates(
+            ["корпуса учетно-распределительные встраиваемые металлические"],
+            limit=25,
+            query_features={"entity_type": "distribution_enclosure"},
         )
 
         self.assertNotIn("search_entity_type", captured["where_sql"])

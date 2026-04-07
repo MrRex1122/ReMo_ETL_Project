@@ -887,6 +887,24 @@ class CatalogSearchTests(unittest.TestCase):
             "регулятор давления",
         )
 
+    def test_classify_item_type_detects_distribution_enclosure_queries(self):
+        self.assertEqual(
+            classify_item_type("Щит распределительный встраиваемый металлический на 36 модулей"),
+            "distribution_enclosure",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Щит распределительный встраиваемый металлический на 36 модулей"),
+            "корпуса учетно-распределительные встраиваемые металлические",
+        )
+        self.assertEqual(
+            classify_item_type("Корпус распределительный встраиваемый пластиковый на 24 модуля"),
+            "distribution_enclosure",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Корпус распределительный встраиваемый пластиковый на 24 модуля"),
+            "корпуса распределительные встраиваемые пластиковые",
+        )
+
     def test_classify_item_type_detects_fuse_queries(self):
         self.assertEqual(
             classify_item_type("Предохранитель плавкий 10А"),
@@ -1203,6 +1221,35 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(regulator["search_entity_type"], "pressure_regulator")
             self.assertEqual(regulator["search_effective_entity_type"], "pressure_regulator")
             self.assertEqual(regulator["search_effective_family"], "pressure_regulator")
+
+    def test_build_search_catalog_maps_distribution_enclosures_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Щит распределительный встраиваемый металлический на 36 модулей;ENC-1;10;Корпуса Учетно-Распределительные Встраиваемые Металлические;CLS-1;Щит распределительный;;ReMo\n"
+                    "Корпус распределительный встраиваемый пластиковый на 24 модуля;ENC-2;10;Корпуса Распределительные Встраиваемые Пластиковые;CLS-2;Корпус распределительный;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+            metal = built.loc[built["Артикул"] == "ENC-1"].iloc[0]
+            plastic = built.loc[built["Артикул"] == "ENC-2"].iloc[0]
+
+            self.assertEqual(metal["search_branch_path"], "корпуса учетно-распределительные встраиваемые металлические")
+            self.assertEqual(metal["search_entity_type"], "distribution_enclosure")
+            self.assertEqual(metal["search_effective_entity_type"], "distribution_enclosure")
+            self.assertEqual(metal["search_effective_family"], "distribution_enclosure")
+
+            self.assertEqual(plastic["search_branch_path"], "корпуса распределительные встраиваемые пластиковые")
+            self.assertEqual(plastic["search_entity_type"], "distribution_enclosure")
+            self.assertEqual(plastic["search_effective_entity_type"], "distribution_enclosure")
+            self.assertEqual(plastic["search_effective_family"], "distribution_enclosure")
 
     def test_build_search_catalog_maps_floor_convectors_out_of_other(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -210,6 +210,40 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
             "required_any_tokens": [["аксессуар", "комплектующ", "принадлежн"], ["короб"]],
         },
     },
+    "distribution_enclosure": {
+        "entity_types": ["distribution_enclosure"],
+        "default_branches": [
+            "корпуса учетно-распределительные встраиваемые металлические",
+            "корпуса распределительные встраиваемые пластиковые",
+        ],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "audited": True,
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 60,
+            "positive_patterns": [
+                "щит распределительный",
+                "встраиваемый щит",
+                "электрощит",
+                "корпус распределительный",
+                "корпус учетно-распределительный",
+                "distribution enclosure",
+                "distribution board",
+            ],
+            "negative_patterns": [
+                "заглуш",
+                "двер",
+                "панел",
+                "рамк",
+                "аксессуар",
+                "комплектующ",
+                "din-рейк",
+                "din рейк",
+            ],
+            "required_any_tokens": [["щит", "щиток", "корпус"], ["распредел", "учет", "встраив", "модул", "электрощит"]],
+        },
+    },
     "cable_channel": {
         "entity_types": ["cable_channel"],
         "default_branches": [
@@ -1243,6 +1277,10 @@ DEFAULT_DOMAIN_REGISTRY: Dict[str, Any] = {
         "pressure_regulator": {
             "patterns": ["регулятор давления", "pressure regulator"],
             "families": ["pressure_regulator"],
+        },
+        "distribution_enclosure": {
+            "patterns": ["щит распредел", "щиток", "электрощит", "корпус распредел", "корпус учетно", "встраиваемый щит"],
+            "families": ["distribution_enclosure"],
         },
         "rack_accessory": {
             "patterns": ["полк", "рельс", "направля", "щеточ", "заглуш"],
@@ -2300,6 +2338,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "bulk_twisted_pair",
         "box",
         "box_accessory",
+        "distribution_enclosure",
         "cable_channel",
         "cable",
         "coax",
@@ -2341,6 +2380,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
     "family_groups": {
         "box": "box",
         "box_accessory": "box_accessory",
+        "distribution_enclosure": "distribution_enclosure",
         "cable_channel": "cable_channel",
         "bearing": "bearing",
         "radiator": "radiator",
@@ -2386,6 +2426,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
     "family_group_labels": {
         "box": "box",
         "box_accessory": "box_accessory",
+        "distribution_enclosure": "distribution enclosure",
         "cable_channel": "cable_channel",
         "patch_panel": "patch_panel",
         "patch_cord": "patch_cord",
