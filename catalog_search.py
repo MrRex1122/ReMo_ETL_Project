@@ -1228,7 +1228,7 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "tray_sheet"
     if any(marker in normalized_branch for marker in cable_channel_body_branch_markers):
         return "cable_channel"
-    if any(marker in normalized_branch for marker in ("металлорукав с изоляцией", "гофрированные трубы для прокладки кабеля")):
+    if any(marker in normalized_branch for marker in ("металлорукав с изоляцией", "гофрированные трубы для прокладки кабеля", "трубы жесткие двустенные")):
         return "cable_conduit"
     if any(marker in normalized_branch for marker in ("затворы поворотные дисковые", "краны шаровые стальные", "краны шаровые латунные для воды", "краны шаровые пнд", "клапаны электромагнитные соленоидные")):
         return "industrial_valve"
@@ -1471,6 +1471,8 @@ def derive_branch_from_text(
             if effective_family == "cable_conduit":
                 if "металлорукав" in merged:
                     return "металлорукав с изоляцией"
+                if "двустен" in merged and "труб" in merged:
+                    return "трубы жесткие двустенные"
                 return "гофрированные трубы для прокладки кабеля"
             if effective_family == "industrial_valve":
                 if "соленоид" in merged or ("электромагнит" in merged and "клапан" in merged):
@@ -1541,6 +1543,8 @@ def derive_branch_from_text(
             if extracted_markers.get("installation_kind") == "cable_conduit":
                 if "металлорукав" in merged:
                     return "металлорукав с изоляцией"
+                if "двустен" in merged and "труб" in merged:
+                    return "трубы жесткие двустенные"
                 return "гофрированные трубы для прокладки кабеля"
             if extracted_markers.get("installation_kind") == "cable_channel":
                 return "электрика > кабели > кабель-каналы"
@@ -1593,6 +1597,8 @@ def derive_branch_from_text(
         if registry_family == "cable_conduit":
             if "металлорукав" in merged:
                 return "металлорукав с изоляцией"
+            if "двустен" in merged and "труб" in merged:
+                return "трубы жесткие двустенные"
             return "гофрированные трубы для прокладки кабеля"
         if registry_family == "industrial_valve":
             if "соленоид" in merged or ("электромагнит" in merged and "клапан" in merged):
@@ -1819,6 +1825,8 @@ def derive_branch_from_text(
     if effective_entity_type == "cable_conduit":
         if "металлорукав" in merged:
             return "металлорукав с изоляцией"
+        if "двустен" in merged and "труб" in merged:
+            return "трубы жесткие двустенные"
         return "гофрированные трубы для прокладки кабеля"
     if effective_entity_type == "cable_channel":
         if "перфор" in merged and any(token in merged for token in ("кабель", "канал", "короб")):
@@ -2085,6 +2093,8 @@ def _has_cable_conduit_signal(normalized: str) -> bool:
     if "металлорукав" in normalized:
         return True
     if "conduit" in normalized and "cable channel" not in normalized:
+        return True
+    if "двустен" in normalized and "труб" in normalized:
         return True
     if "гофр" in normalized and any(
         token in normalized

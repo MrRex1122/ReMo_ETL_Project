@@ -1820,6 +1820,21 @@ class MatchTaxonomyTests(unittest.TestCase):
             "cable_conduit",
         )
 
+        rigid_features = self.matcher._extract_query_features("Труба жесткая двустенная 110 мм")
+        rigid_features["entity_type"] = "cable_conduit"
+        rigid_candidate = {
+            "name": "Труба жесткая двустенная 110 мм",
+            "normalized_name": "труба жесткая двустенная 110 мм",
+            "branch_path": "трубы жесткие двустенные",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(rigid_features, rigid_candidate),
+            "cable_conduit",
+        )
+
     def test_effective_candidate_family_maps_other_industrial_valve_branch(self):
         features = self.matcher._extract_query_features("Затвор дисковый поворотный DN100")
         features["entity_type"] = "industrial_valve"

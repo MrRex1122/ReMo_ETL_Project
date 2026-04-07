@@ -238,11 +238,14 @@ class QueryParserTests(unittest.TestCase):
     def test_parse_query_spec_detects_cable_conduit_queries(self):
         metal = parse_query_spec("Металлорукав в ПВХ изоляции 20 мм", taxonomy_rules=self.rules)
         corrugated = parse_query_spec("Труба гофрированная для прокладки кабеля 25 мм", taxonomy_rules=self.rules)
+        rigid = parse_query_spec("Труба жесткая двустенная 110 мм", taxonomy_rules=self.rules)
 
         self.assertEqual(metal.entity_type, "cable_conduit")
         self.assertEqual(metal.branch_hint, "металлорукав с изоляцией")
         self.assertEqual(corrugated.entity_type, "cable_conduit")
         self.assertEqual(corrugated.branch_hint, "гофрированные трубы для прокладки кабеля")
+        self.assertEqual(rigid.entity_type, "cable_conduit")
+        self.assertEqual(rigid.branch_hint, "трубы жесткие двустенные")
 
     def test_parse_query_spec_detects_fuse_queries(self):
         fuse = parse_query_spec("Предохранитель плавкий 10А", taxonomy_rules=self.rules)

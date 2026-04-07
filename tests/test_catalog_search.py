@@ -964,6 +964,14 @@ class CatalogSearchTests(unittest.TestCase):
             derive_branch_from_text("Труба гофрированная для прокладки кабеля 25 мм"),
             "гофрированные трубы для прокладки кабеля",
         )
+        self.assertEqual(
+            classify_item_type("Труба жесткая двустенная 110 мм"),
+            "cable_conduit",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Труба жесткая двустенная 110 мм"),
+            "трубы жесткие двустенные",
+        )
 
     def test_classify_item_type_detects_fuse_queries(self):
         self.assertEqual(
@@ -1365,6 +1373,7 @@ class CatalogSearchTests(unittest.TestCase):
                     "Тип исполнения кабельного изделия;Производитель\n"
                     "Металлорукав в ПВХ изоляции 20 мм;COND-1;10;Металлорукав С Изоляцией;CLS-1;Металлорукав;;ReMo\n"
                     "Труба гофрированная для прокладки кабеля 25 мм;COND-2;10;Гофрированные Трубы Для Прокладки Кабеля;CLS-2;Труба гофрированная;;ReMo\n"
+                    "Труба жесткая двустенная 110 мм;COND-3;10;Трубы Жесткие Двустенные;CLS-3;Труба жесткая двустенная;;ReMo\n"
                 ),
                 encoding="utf-8",
             )
@@ -1373,6 +1382,7 @@ class CatalogSearchTests(unittest.TestCase):
             built = pd.read_csv(search_path, sep=";", encoding="utf-8")
             metal = built.loc[built["Артикул"] == "COND-1"].iloc[0]
             corrugated = built.loc[built["Артикул"] == "COND-2"].iloc[0]
+            rigid = built.loc[built["Артикул"] == "COND-3"].iloc[0]
 
             self.assertEqual(metal["search_branch_path"], "металлорукав с изоляцией")
             self.assertEqual(metal["search_entity_type"], "cable_conduit")
@@ -1383,6 +1393,11 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(corrugated["search_entity_type"], "cable_conduit")
             self.assertEqual(corrugated["search_effective_entity_type"], "cable_conduit")
             self.assertEqual(corrugated["search_effective_family"], "cable_conduit")
+
+            self.assertEqual(rigid["search_branch_path"], "трубы жесткие двустенные")
+            self.assertEqual(rigid["search_entity_type"], "cable_conduit")
+            self.assertEqual(rigid["search_effective_entity_type"], "cable_conduit")
+            self.assertEqual(rigid["search_effective_family"], "cable_conduit")
 
     def test_build_search_catalog_maps_power_accessories_out_of_other(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

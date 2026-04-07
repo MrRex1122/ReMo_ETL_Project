@@ -1046,7 +1046,7 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
     },
     "cable_conduit": {
         "entity_types": ["cable_conduit"],
-        "default_branches": ["металлорукав с изоляцией", "гофрированные трубы для прокладки кабеля"],
+        "default_branches": ["металлорукав с изоляцией", "гофрированные трубы для прокладки кабеля", "трубы жесткие двустенные"],
         "retrieval_mode": "branch_limited",
         "strictness": "semi_strict",
         "audited": True,
@@ -1059,6 +1059,8 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
                 "гофрированная труба",
                 "гофрированные трубы",
                 "труба для прокладки кабеля",
+                "трубы жесткие двустенные",
+                "жесткая двустенная труба",
                 "cable conduit",
                 "corrugated conduit",
                 "metal conduit",
@@ -1071,8 +1073,8 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
                 "шланг",
             ],
             "required_any_tokens": [
-                ["металлорукав", "гофр", "conduit"],
-                ["изоляц", "труб", "прокладк", "corrugated"],
+                ["металлорукав", "гофр", "двустен", "conduit"],
+                ["изоляц", "труб", "прокладк", "corrugated", "жестк"],
             ],
         },
     },
@@ -1411,7 +1413,7 @@ DEFAULT_DOMAIN_REGISTRY: Dict[str, Any] = {
             "families": ["distribution_enclosure"],
         },
         "cable_conduit": {
-            "patterns": ["металлорукав", "гофрированная труба", "гофрированные трубы", "прокладки кабеля", "cable conduit", "corrugated conduit"],
+            "patterns": ["металлорукав", "гофрированная труба", "гофрированные трубы", "прокладки кабеля", "трубы жесткие двустенные", "жесткая двустенная труба", "cable conduit", "corrugated conduit"],
             "families": ["cable_conduit"],
         },
         "rack_accessory": {
