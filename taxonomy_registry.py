@@ -540,7 +540,9 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
             "затворы поворотные дисковые стальные",
             "затворы поворотные дисковые чугунные",
             "краны шаровые стальные",
+            "краны шаровые латунные для воды",
             "краны шаровые пнд",
+            "клапаны электромагнитные (соленоидные)",
         ],
         "retrieval_mode": "branch_limited",
         "strictness": "semi_strict",
@@ -548,7 +550,15 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
         "weak_match_policy": "reject_in_exact",
         "classifier": {
             "priority": 54,
-            "positive_patterns": ["затвор", "butterfly valve", "ball valve", "кран шаров", "краны шаров"],
+            "positive_patterns": [
+                "затвор",
+                "butterfly valve",
+                "ball valve",
+                "кран шаров",
+                "краны шаров",
+                "клапан электромагнитн",
+                "соленоид",
+            ],
         },
     },
     "bearing": {
@@ -1157,7 +1167,15 @@ DEFAULT_DOMAIN_REGISTRY: Dict[str, Any] = {
             "families": ["ground_bar"],
         },
         "industrial_valve": {
-            "patterns": ["затвор", "кран шаров", "краны шаров", "butterfly valve", "ball valve"],
+            "patterns": [
+                "затвор",
+                "кран шаров",
+                "краны шаров",
+                "butterfly valve",
+                "ball valve",
+                "клапан электромагнитн",
+                "соленоид",
+            ],
             "families": ["industrial_valve"],
         },
         "bearing": {

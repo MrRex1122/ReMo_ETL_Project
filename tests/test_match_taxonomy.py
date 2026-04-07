@@ -1845,8 +1845,36 @@ class MatchTaxonomyTests(unittest.TestCase):
             "item_markers": {},
         }
 
+        brass_features = self.matcher._extract_query_features("Кран шаровой латунный для воды DN20")
+        brass_features["entity_type"] = "industrial_valve"
+        brass_candidate = {
+            "name": "Кран шаровой латунный для воды DN20",
+            "normalized_name": "кран шаровой латунный для воды dn20",
+            "branch_path": "краны шаровые латунные для воды",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        solenoid_features = self.matcher._extract_query_features("Клапан электромагнитный соленоидный 1/2")
+        solenoid_features["entity_type"] = "industrial_valve"
+        solenoid_candidate = {
+            "name": "Клапан электромагнитный соленоидный 1/2",
+            "normalized_name": "клапан электромагнитный соленоидный 1 2",
+            "branch_path": "клапаны электромагнитные (соленоидные)",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
         self.assertEqual(
             self.matcher._effective_candidate_family_for_query(pnd_features, pnd_candidate),
+            "industrial_valve",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(brass_features, brass_candidate),
+            "industrial_valve",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(solenoid_features, solenoid_candidate),
             "industrial_valve",
         )
 

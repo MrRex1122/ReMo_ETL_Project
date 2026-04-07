@@ -4797,11 +4797,13 @@ class ReMoMatcher:
             and "коробка" not in search_text
         ):
             return "firestop_material"
-        if any(token in branch_path for token in ("затворы поворотные дисковые", "краны шаровые стальные", "краны шаровые пнд")) or (
+        if any(token in branch_path for token in ("затворы поворотные дисковые", "краны шаровые стальные", "краны шаровые латунные для воды", "краны шаровые пнд", "клапаны электромагнитные (соленоидные)")) or (
             "затвор" in search_text
             or ("кран" in search_text and "шар" in search_text)
             or "butterfly valve" in search_text
             or "ball valve" in search_text
+            or "соленоид" in search_text
+            or ("электромагнит" in search_text and "клапан" in search_text)
         ):
             return "industrial_valve"
         if any(token in branch_path for token in ("подшипники роликовые цилиндрические", "подшипники роликовые сферические", "подшипники роликовые конические", "подшипники шариковые радиальные", "подшипники шариковые радиально-упорные", "упорные подшипники", "самоустанавливающиеся шарикоподшипники", "игольчатые подшипники")) or (
