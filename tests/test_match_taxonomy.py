@@ -1835,6 +1835,21 @@ class MatchTaxonomyTests(unittest.TestCase):
             "industrial_valve",
         )
 
+        pnd_features = self.matcher._extract_query_features("Кран шаровой ПНД 32 мм")
+        pnd_features["entity_type"] = "industrial_valve"
+        pnd_candidate = {
+            "name": "Кран шаровой ПНД 32 мм",
+            "normalized_name": "кран шаровой пнд 32 мм",
+            "branch_path": "краны шаровые пнд",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(pnd_features, pnd_candidate),
+            "industrial_valve",
+        )
+
     def test_effective_candidate_family_maps_other_bearing_branch(self):
         features = self.matcher._extract_query_features("Подшипник роликовый цилиндрический 22210")
         features["entity_type"] = "bearing"

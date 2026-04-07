@@ -1136,7 +1136,7 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "tray_sheet"
     if any(marker in normalized_branch for marker in cable_channel_body_branch_markers):
         return "cable_channel"
-    if any(marker in normalized_branch for marker in ("затворы поворотные дисковые", "краны шаровые стальные")):
+    if any(marker in normalized_branch for marker in ("затворы поворотные дисковые", "краны шаровые стальные", "краны шаровые пнд")):
         return "industrial_valve"
     if any(marker in normalized_branch for marker in ("подшипники роликовые цилиндрические", "подшипники роликовые сферические", "подшипники роликовые конические", "подшипники шариковые радиальные", "подшипники шариковые радиально-упорные", "игольчатые подшипники")):
         return "bearing"
@@ -1288,6 +1288,8 @@ def derive_branch_from_text(
                     return "перфорированные кабель-каналы"
                 return "электрика > кабели > кабель-каналы"
             if effective_family == "industrial_valve":
+                if "пнд" in merged:
+                    return "краны шаровые пнд"
                 if "кран" in merged and "шар" in merged:
                     return "краны шаровые стальные"
                 if "чугун" in merged:
@@ -1364,6 +1366,8 @@ def derive_branch_from_text(
                 return "перфорированные кабель-каналы"
             return "электрика > кабели > кабель-каналы"
         if registry_family == "industrial_valve":
+            if "пнд" in merged:
+                return "краны шаровые пнд"
             if "кран" in merged and "шар" in merged:
                 return "краны шаровые стальные"
             if "чугун" in merged:

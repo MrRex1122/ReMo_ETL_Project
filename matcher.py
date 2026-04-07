@@ -4797,7 +4797,7 @@ class ReMoMatcher:
             and "коробка" not in search_text
         ):
             return "firestop_material"
-        if any(token in branch_path for token in ("затворы поворотные дисковые", "краны шаровые стальные")) or (
+        if any(token in branch_path for token in ("затворы поворотные дисковые", "краны шаровые стальные", "краны шаровые пнд")) or (
             "затвор" in search_text
             or ("кран" in search_text and "шар" in search_text)
             or "butterfly valve" in search_text

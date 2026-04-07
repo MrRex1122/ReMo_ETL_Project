@@ -725,6 +725,14 @@ class CatalogSearchTests(unittest.TestCase):
             "краны шаровые стальные",
         )
         self.assertEqual(
+            classify_item_type("Кран шаровой ПНД 32 мм"),
+            "industrial_valve",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Кран шаровой ПНД 32 мм"),
+            "краны шаровые пнд",
+        )
+        self.assertEqual(
             classify_item_type("Затвор дисковый поворотный чугунный DN80"),
             "industrial_valve",
         )
@@ -861,6 +869,7 @@ class CatalogSearchTests(unittest.TestCase):
                     "Затвор дисковый поворотный DN100;VALVE-1;10;Затворы Поворотные Дисковые Стальные;CLS-1;Затвор дисковый поворотный;;ReMo\n"
                     "Затвор дисковый поворотный чугунный DN80;VALVE-3;10;Затворы Поворотные Дисковые Чугунные;CLS-3;Затвор дисковый поворотный чугунный;;ReMo\n"
                     "Кран шаровой стальной DN50;VALVE-2;10;Краны Шаровые Стальные;CLS-2;Кран шаровой стальной;;ReMo\n"
+                    "Кран шаровой ПНД 32 мм;VALVE-4;10;Краны Шаровые ПНД;CLS-4;Кран шаровой ПНД;;ReMo\n"
                 ),
                 encoding="utf-8",
             )
@@ -870,6 +879,7 @@ class CatalogSearchTests(unittest.TestCase):
             disc_valve = built.loc[built["Артикул"] == "VALVE-1"].iloc[0]
             cast_iron_valve = built.loc[built["Артикул"] == "VALVE-3"].iloc[0]
             ball_valve = built.loc[built["Артикул"] == "VALVE-2"].iloc[0]
+            pnd_valve = built.loc[built["Артикул"] == "VALVE-4"].iloc[0]
 
             self.assertEqual(disc_valve["search_branch_path"], "затворы поворотные дисковые стальные")
             self.assertEqual(disc_valve["search_entity_type"], "industrial_valve")
@@ -885,6 +895,11 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(ball_valve["search_entity_type"], "industrial_valve")
             self.assertEqual(ball_valve["search_effective_entity_type"], "industrial_valve")
             self.assertEqual(ball_valve["search_effective_family"], "industrial_valve")
+
+            self.assertEqual(pnd_valve["search_branch_path"], "краны шаровые пнд")
+            self.assertEqual(pnd_valve["search_entity_type"], "industrial_valve")
+            self.assertEqual(pnd_valve["search_effective_entity_type"], "industrial_valve")
+            self.assertEqual(pnd_valve["search_effective_family"], "industrial_valve")
 
     def test_build_search_catalog_maps_bearings_out_of_other(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

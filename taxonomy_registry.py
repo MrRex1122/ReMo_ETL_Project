@@ -519,6 +519,7 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
             "затворы поворотные дисковые стальные",
             "затворы поворотные дисковые чугунные",
             "краны шаровые стальные",
+            "краны шаровые пнд",
         ],
         "retrieval_mode": "branch_limited",
         "strictness": "semi_strict",
