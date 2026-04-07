@@ -877,6 +877,16 @@ class CatalogSearchTests(unittest.TestCase):
             "манометры",
         )
 
+    def test_classify_item_type_detects_pressure_regulator_queries(self):
+        self.assertEqual(
+            classify_item_type("Регулятор давления воды DN20"),
+            "pressure_regulator",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Регулятор давления воды DN20"),
+            "регулятор давления",
+        )
+
     def test_classify_item_type_detects_fuse_queries(self):
         self.assertEqual(
             classify_item_type("Предохранитель плавкий 10А"),
@@ -1171,6 +1181,28 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(gauge["search_entity_type"], "pressure_gauge")
             self.assertEqual(gauge["search_effective_entity_type"], "pressure_gauge")
             self.assertEqual(gauge["search_effective_family"], "pressure_gauge")
+
+    def test_build_search_catalog_maps_pressure_regulators_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Регулятор давления воды DN20;REG-1;10;Регулятор Давления;CLS-1;Регулятор давления;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+            regulator = built.loc[built["Артикул"] == "REG-1"].iloc[0]
+
+            self.assertEqual(regulator["search_branch_path"], "регулятор давления")
+            self.assertEqual(regulator["search_entity_type"], "pressure_regulator")
+            self.assertEqual(regulator["search_effective_entity_type"], "pressure_regulator")
+            self.assertEqual(regulator["search_effective_family"], "pressure_regulator")
 
     def test_build_search_catalog_maps_floor_convectors_out_of_other(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

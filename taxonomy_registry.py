@@ -665,6 +665,18 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
             "positive_patterns": ["манометр", "pressure gauge", "gauge pressure"],
         },
     },
+    "pressure_regulator": {
+        "entity_types": ["pressure_regulator"],
+        "default_branches": ["регулятор давления"],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "audited": True,
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 52,
+            "positive_patterns": ["регулятор давления", "pressure regulator"],
+        },
+    },
     "iec_power_cable": {
         "entity_types": ["iec_power_cable"],
         "default_branches": ["электрика > кабели"],
@@ -1227,6 +1239,10 @@ DEFAULT_DOMAIN_REGISTRY: Dict[str, Any] = {
         "pressure_gauge": {
             "patterns": ["манометр", "pressure gauge", "gauge pressure"],
             "families": ["pressure_gauge"],
+        },
+        "pressure_regulator": {
+            "patterns": ["регулятор давления", "pressure regulator"],
+            "families": ["pressure_regulator"],
         },
         "rack_accessory": {
             "patterns": ["полк", "рельс", "направля", "щеточ", "заглуш"],
@@ -2305,6 +2321,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "transformer",
         "ups",
         "pressure_gauge",
+        "pressure_regulator",
         "iec_power_cable",
         "keystone",
         "optical_cross",
@@ -2332,6 +2349,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "transformer": "transformer",
         "ups": "ups",
         "pressure_gauge": "pressure_gauge",
+        "pressure_regulator": "pressure_regulator",
         "light_signage": "signage",
         "safety_sign": "signage",
         "patch_panel": "patch_panel",
@@ -2387,6 +2405,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "transformer": "transformer",
         "ups": "ups",
         "pressure_gauge": "pressure gauge",
+        "pressure_regulator": "pressure regulator",
         "signage": "signage",
         "fastener": "fastener",
         "surge_protector": "surge protector",

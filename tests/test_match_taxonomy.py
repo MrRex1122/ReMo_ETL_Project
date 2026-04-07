@@ -2016,6 +2016,22 @@ class MatchTaxonomyTests(unittest.TestCase):
             "pressure_gauge",
         )
 
+    def test_effective_candidate_family_maps_other_pressure_regulator_branch(self):
+        features = self.matcher._extract_query_features("Регулятор давления воды DN20")
+        features["entity_type"] = "pressure_regulator"
+        candidate = {
+            "name": "Регулятор давления воды DN20",
+            "normalized_name": "регулятор давления воды dn20",
+            "branch_path": "регулятор давления",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(features, candidate),
+            "pressure_regulator",
+        )
+
     def test_effective_candidate_family_maps_other_floor_convector_branch(self):
         features = self.matcher._extract_query_features("Конвектор внутрипольный с вентилятором 2000мм")
         features["entity_type"] = "floor_convector"
