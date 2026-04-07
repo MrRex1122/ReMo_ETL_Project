@@ -4831,6 +4831,16 @@ class ReMoMatcher:
             token in search_text for token in ("кнопк", "push button", "кнопочн пост")
         ):
             return "push_button"
+        if "клеммные блоки зажимов на din рейку" in branch_path or (
+            any(token in search_text for token in ("клеммный блок", "клеммные блоки", "клеммник", "клемма наборная", "terminal block", "din rail"))
+            and not any(token in search_text for token in ("заглушк", "маркир", "аккумулятор", "акб"))
+        ):
+            return "terminal_block"
+        if "светосигнальная арматура" in branch_path or (
+            any(token in search_text for token in ("светосигнальн", "сигнальн ламп", "лампа сигнальн", "световой индикатор", "индикатор световой", "pilot light", "indicator lamp"))
+            and "табло" not in search_text
+        ):
+            return "signal_indicator"
         if (
             "перфорированные кабель каналы" in branch_path
             or (
@@ -4934,6 +4944,8 @@ class ReMoMatcher:
             "ups",
             "fuse",
             "push_button",
+            "terminal_block",
+            "signal_indicator",
             "switch_wiring",
         }
 

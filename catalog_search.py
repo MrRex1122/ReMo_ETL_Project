@@ -956,6 +956,16 @@ def classify_item_type(
         return "fuse"
     if any(token in normalized for token in ("кнопк", "push button", "кнопочн пост")):
         return "push_button"
+    if any(
+        token in normalized
+        for token in ("клеммный блок", "клеммные блоки", "клеммник", "клемма наборная", "terminal block", "din rail")
+    ) and not any(token in normalized for token in ("заглушк", "маркиров", "аккумулятор", "акб")):
+        return "terminal_block"
+    if any(
+        token in normalized
+        for token in ("светосигнальн", "сигнальн ламп", "лампа сигнальн", "световой индикатор", "индикатор световой", "pilot light", "indicator lamp")
+    ) and "табло" not in normalized:
+        return "signal_indicator"
     if "табло" in normalized and any(
         token in normalized
         for token in ("светов", "свето", "звуков", "эвакуац", "аварийн", "выход", "exit")
@@ -1166,6 +1176,10 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "fuse"
     if any(marker in normalized_branch for marker in ("кнопки", "кнопочные посты")):
         return "push_button"
+    if "клеммные блоки зажимов на din рейку" in normalized_branch:
+        return "terminal_block"
+    if "светосигнальная арматура" in normalized_branch:
+        return "signal_indicator"
     if any(marker in normalized_branch for marker in ("световое табло", "свето звуковое табло")):
         return "light_signage"
     if "знаки безопасности" in normalized_branch:
@@ -1426,6 +1440,10 @@ def derive_branch_from_text(
             if "пост" in merged:
                 return "кнопочные посты"
             return "кнопки"
+        if registry_family == "terminal_block":
+            return "клеммные блоки зажимов на din-рейку"
+        if registry_family == "signal_indicator":
+            return "светосигнальная арматура"
         if registry_family == "light_signage":
             if "табло" in merged and any(token in merged for token in ("звуков", "сирен", "свето звуков", "светозвуков")):
                 return "свето-звуковое табло"
@@ -1480,6 +1498,8 @@ def derive_branch_from_text(
             "ups",
             "fuse",
             "push_button",
+            "terminal_block",
+            "signal_indicator",
             "socket",
             "lighting_fixture",
             "tray_sheet",
@@ -1538,6 +1558,10 @@ def derive_branch_from_text(
         if "пост" in merged:
             return "кнопочные посты"
         return "кнопки"
+    if effective_entity_type == "terminal_block":
+        return "клеммные блоки зажимов на din-рейку"
+    if effective_entity_type == "signal_indicator":
+        return "светосигнальная арматура"
     if effective_entity_type == "socket":
         return "электрика > розетки"
     if effective_entity_type == "light_signage":

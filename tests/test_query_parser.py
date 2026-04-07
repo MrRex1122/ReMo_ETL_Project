@@ -202,5 +202,14 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(post.entity_type, "push_button")
         self.assertEqual(post.branch_hint, "кнопочные посты")
 
+    def test_parse_query_spec_detects_terminal_block_and_signal_indicator_queries(self):
+        terminal_block = parse_query_spec("Клеммный блок на DIN-рейку 2,5мм серый", taxonomy_rules=self.rules)
+        signal_indicator = parse_query_spec("Арматура светосигнальная зеленая 24В", taxonomy_rules=self.rules)
+
+        self.assertEqual(terminal_block.entity_type, "terminal_block")
+        self.assertEqual(terminal_block.branch_hint, "клеммные блоки зажимов на din-рейку")
+        self.assertEqual(signal_indicator.entity_type, "signal_indicator")
+        self.assertEqual(signal_indicator.branch_hint, "светосигнальная арматура")
+
 if __name__ == "__main__":
     unittest.main()

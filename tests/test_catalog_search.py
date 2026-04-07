@@ -868,6 +868,24 @@ class CatalogSearchTests(unittest.TestCase):
             classify_item_type("Кнопочный пост ПКЕ 2 кнопки"),
             "push_button",
         )
+
+    def test_classify_item_type_detects_terminal_block_and_signal_indicator_queries(self):
+        self.assertEqual(
+            classify_item_type("Клеммный блок на DIN-рейку 2,5мм серый"),
+            "terminal_block",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Клеммный блок на DIN-рейку 2,5мм серый"),
+            "клеммные блоки зажимов на din-рейку",
+        )
+        self.assertEqual(
+            classify_item_type("Арматура светосигнальная зеленая 24В"),
+            "signal_indicator",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Арматура светосигнальная зеленая 24В"),
+            "светосигнальная арматура",
+        )
         self.assertEqual(
             derive_branch_from_text("Кнопочный пост ПКЕ 2 кнопки"),
             "кнопочные посты",
@@ -1163,6 +1181,35 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(post["search_entity_type"], "push_button")
             self.assertEqual(post["search_effective_entity_type"], "push_button")
             self.assertEqual(post["search_effective_family"], "push_button")
+
+    def test_build_search_catalog_maps_terminal_blocks_and_signal_indicators_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Клеммный блок на DIN-рейку 2,5мм серый;TERM-1;10;Клеммные Блоки Зажимов На DIN-рейку;CLS-1;Клеммный блок;;ReMo\n"
+                    "Арматура светосигнальная зеленая 24В;SIG-1;10;Светосигнальная Арматура;CLS-2;Арматура светосигнальная;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+            terminal_block = built.loc[built["Артикул"] == "TERM-1"].iloc[0]
+            signal_indicator = built.loc[built["Артикул"] == "SIG-1"].iloc[0]
+
+            self.assertEqual(terminal_block["search_branch_path"], "клеммные блоки зажимов на din-рейку")
+            self.assertEqual(terminal_block["search_entity_type"], "terminal_block")
+            self.assertEqual(terminal_block["search_effective_entity_type"], "terminal_block")
+            self.assertEqual(terminal_block["search_effective_family"], "terminal_block")
+
+            self.assertEqual(signal_indicator["search_branch_path"], "светосигнальная арматура")
+            self.assertEqual(signal_indicator["search_entity_type"], "signal_indicator")
+            self.assertEqual(signal_indicator["search_effective_entity_type"], "signal_indicator")
+            self.assertEqual(signal_indicator["search_effective_family"], "signal_indicator")
 
     def test_derive_branch_from_text_skips_telecom_rack_for_control_cabinet(self):
         self.assertEqual(

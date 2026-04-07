@@ -2095,6 +2095,35 @@ class MatchTaxonomyTests(unittest.TestCase):
             "push_button",
         )
 
+    def test_effective_candidate_family_maps_other_terminal_block_and_signal_indicator_branches(self):
+        terminal_features = self.matcher._extract_query_features("Клеммный блок на DIN-рейку 2,5мм серый")
+        terminal_features["entity_type"] = "terminal_block"
+        terminal_candidate = {
+            "name": "Клеммный блок на DIN-рейку 2,5мм серый",
+            "normalized_name": "клеммный блок на din рейку 2 5мм серый",
+            "branch_path": "клеммные блоки зажимов на din-рейку",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        signal_features = self.matcher._extract_query_features("Арматура светосигнальная зеленая 24В")
+        signal_features["entity_type"] = "signal_indicator"
+        signal_candidate = {
+            "name": "Арматура светосигнальная зеленая 24В",
+            "normalized_name": "арматура светосигнальная зеленая 24в",
+            "branch_path": "светосигнальная арматура",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(terminal_features, terminal_candidate),
+            "terminal_block",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(signal_features, signal_candidate),
+            "signal_indicator",
+        )
+
     def test_collect_branch_candidates_relaxes_entity_filter_for_box_family(self):
         self.matcher._uses_duckdb_query_backend = lambda: True
         captured = {}
