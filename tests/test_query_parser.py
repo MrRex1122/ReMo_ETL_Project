@@ -247,6 +247,12 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(pump.entity_type, "industrial_pump")
         self.assertEqual(pump.branch_hint, "промышленные вертикальные центробежные насосы")
 
+    def test_parse_query_spec_detects_thread_tap_queries(self):
+        tap = parse_query_spec("Метчик машинно-ручной М8", taxonomy_rules=self.rules)
+
+        self.assertEqual(tap.entity_type, "thread_tap")
+        self.assertEqual(tap.branch_hint, "метчики")
+
     def test_parse_query_spec_detects_distribution_enclosure_queries(self):
         metal = parse_query_spec("Щит распределительный встраиваемый металлический на 36 модулей", taxonomy_rules=self.rules)
         plastic = parse_query_spec("Корпус распределительный встраиваемый пластиковый на 24 модуля", taxonomy_rules=self.rules)

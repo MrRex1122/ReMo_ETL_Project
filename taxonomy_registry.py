@@ -621,6 +621,34 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
             "required_any_tokens": [["насос", "pump"]],
         },
     },
+    "thread_tap": {
+        "entity_types": ["thread_tap"],
+        "default_branches": ["метчики"],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "audited": True,
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 53,
+            "positive_patterns": [
+                "метчик",
+                "метчики",
+                "tap",
+                "thread tap",
+                "машинно ручной метчик",
+            ],
+            "negative_patterns": [
+                "сверл",
+                "плашк",
+                "держател",
+                "вороток",
+                "набор сверл",
+                "drill",
+                "die holder",
+            ],
+            "required_any_tokens": [["метчик", "tap"]],
+        },
+    },
     "bearing": {
         "entity_types": ["bearing"],
         "default_branches": [
@@ -1540,6 +1568,10 @@ DEFAULT_DOMAIN_REGISTRY: Dict[str, Any] = {
         "industrial_pump": {
             "patterns": ["насос", "pump", "центробежный насос", "вертикальный насос"],
             "families": ["industrial_pump"],
+        },
+        "thread_tap": {
+            "patterns": ["метчик", "метчики", "tap", "thread tap", "машинно-ручной метчик"],
+            "families": ["thread_tap"],
         },
         "bearing": {
             "patterns": [
@@ -2693,6 +2725,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "safety_sign",
         "industrial_valve",
         "industrial_pump",
+        "thread_tap",
         "bearing",
         "radiator",
         "floor_convector",
@@ -2746,6 +2779,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "light_signage": "signage",
         "safety_sign": "signage",
         "industrial_pump": "industrial_pump",
+        "thread_tap": "thread_tap",
         "patch_panel": "patch_panel",
         "patch_cord": "patch_cord",
         "keystone": "keystone_rj45",
@@ -2812,6 +2846,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "electric_motor": "electric motor",
         "signage": "signage",
         "industrial_pump": "industrial pump",
+        "thread_tap": "thread tap",
         "fastener": "fastener",
         "surge_protector": "surge protector",
         "grounding": "grounding",

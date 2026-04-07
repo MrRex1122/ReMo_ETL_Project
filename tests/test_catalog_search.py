@@ -981,6 +981,20 @@ class CatalogSearchTests(unittest.TestCase):
             "industrial_pump",
         )
 
+    def test_classify_item_type_detects_thread_tap_queries(self):
+        self.assertEqual(
+            classify_item_type("Метчик машинно-ручной М8"),
+            "thread_tap",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Метчик машинно-ручной М8"),
+            "метчики",
+        )
+        self.assertNotEqual(
+            classify_item_type("Сверло по металлу 8 мм"),
+            "thread_tap",
+        )
+
     def test_classify_item_type_detects_distribution_enclosure_queries(self):
         self.assertEqual(
             classify_item_type("Щит распределительный встраиваемый металлический на 36 модулей"),
@@ -1523,6 +1537,28 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(pump["search_entity_type"], "industrial_pump")
             self.assertEqual(pump["search_effective_entity_type"], "industrial_pump")
             self.assertEqual(pump["search_effective_family"], "industrial_pump")
+
+    def test_build_search_catalog_maps_thread_taps_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Метчик машинно-ручной М8;TAP-1;10;Метчики;CLS-1;Метчик;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+            tap = built.loc[built["Артикул"] == "TAP-1"].iloc[0]
+
+            self.assertEqual(tap["search_branch_path"], "метчики")
+            self.assertEqual(tap["search_entity_type"], "thread_tap")
+            self.assertEqual(tap["search_effective_entity_type"], "thread_tap")
+            self.assertEqual(tap["search_effective_family"], "thread_tap")
 
     def test_build_search_catalog_maps_distribution_enclosures_out_of_other(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

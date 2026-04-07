@@ -2175,6 +2175,22 @@ class MatchTaxonomyTests(unittest.TestCase):
             "industrial_pump",
         )
 
+    def test_effective_candidate_family_maps_other_thread_tap_branch(self):
+        features = self.matcher._extract_query_features("Метчик машинно-ручной М8")
+        features["entity_type"] = "thread_tap"
+        candidate = {
+            "name": "Метчик машинно-ручной М8",
+            "normalized_name": "метчик машинно ручной м8",
+            "branch_path": "метчики",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(features, candidate),
+            "thread_tap",
+        )
+
     def test_effective_candidate_family_maps_other_distribution_enclosure_branches(self):
         metal_features = self.matcher._extract_query_features("Щит распределительный встраиваемый металлический на 36 модулей")
         metal_features["entity_type"] = "distribution_enclosure"
@@ -2748,6 +2764,28 @@ class MatchTaxonomyTests(unittest.TestCase):
             ["промышленные вертикальные центробежные насосы"],
             limit=25,
             query_features={"entity_type": "industrial_pump"},
+        )
+
+        self.assertNotIn("search_entity_type", captured["where_sql"])
+        self.assertEqual(captured["limit"], 25)
+
+    def test_collect_branch_candidates_relaxes_entity_filter_for_thread_tap_family(self):
+        self.matcher._uses_duckdb_query_backend = lambda: True
+        captured = {}
+
+        def fake_fetch_items(where_sql="", params=None, order_by_sql="", limit=None):
+            captured["where_sql"] = where_sql
+            captured["params"] = list(params or [])
+            captured["order_by_sql"] = order_by_sql
+            captured["limit"] = limit
+            return []
+
+        self.matcher._duckdb_fetch_items = fake_fetch_items
+
+        self.matcher._collect_branch_candidates(
+            ["метчики"],
+            limit=25,
+            query_features={"entity_type": "thread_tap"},
         )
 
         self.assertNotIn("search_entity_type", captured["where_sql"])

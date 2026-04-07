@@ -974,6 +974,11 @@ def classify_item_type(
         and not any(token in normalized for token in ("клапан", "затвор", "кран шаров", "электродвигател", "частотн", "frequency drive", "vfd"))
     ):
         return "industrial_pump"
+    if (
+        any(token in normalized for token in ("метчик", "метчики", "tap", "thread tap"))
+        and not any(token in normalized for token in ("сверл", "плашк", "держател", "вороток", "набор сверл", "drill", "die holder"))
+    ):
+        return "thread_tap"
     if "подшип" in normalized or "bearing" in normalized:
         return "bearing"
     if "радиатор" in normalized or "radiator" in normalized:
@@ -1289,6 +1294,8 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "industrial_valve"
     if "промышленные вертикальные центробежные насосы" in normalized_branch:
         return "industrial_pump"
+    if "метчики" in normalized_branch:
+        return "thread_tap"
     if any(marker in normalized_branch for marker in ("подшипники роликовые цилиндрические", "подшипники роликовые сферические", "подшипники роликовые конические", "подшипники шариковые радиальные", "подшипники шариковые радиально-упорные", "упорные подшипники", "самоустанавливающиеся шарикоподшипники", "игольчатые подшипники")):
         return "bearing"
     if "радиаторы стальные панельные" in normalized_branch:
@@ -1555,6 +1562,8 @@ def derive_branch_from_text(
                 return "затворы поворотные дисковые стальные"
             if effective_family == "industrial_pump":
                 return "промышленные вертикальные центробежные насосы"
+            if effective_family == "thread_tap":
+                return "метчики"
             if effective_family == "bearing":
                 if "игольчат" in merged:
                     return "игольчатые подшипники"
@@ -1691,6 +1700,8 @@ def derive_branch_from_text(
             return "затворы поворотные дисковые стальные"
         if registry_family == "industrial_pump":
             return "промышленные вертикальные центробежные насосы"
+        if registry_family == "thread_tap":
+            return "метчики"
         if registry_family == "bearing":
             if "игольчат" in merged:
                 return "игольчатые подшипники"
@@ -1801,6 +1812,7 @@ def derive_branch_from_text(
             "cable_channel",
             "industrial_valve",
             "industrial_pump",
+            "thread_tap",
             "bearing",
             "radiator",
             "floor_convector",
@@ -1896,6 +1908,8 @@ def derive_branch_from_text(
         return "электродвигатели общепромышленные"
     if effective_entity_type == "industrial_pump":
         return "промышленные вертикальные центробежные насосы"
+    if effective_entity_type == "thread_tap":
+        return "метчики"
     if effective_entity_type == "fuse":
         return "плавкие предохранители"
     if effective_entity_type == "power_accessory":
