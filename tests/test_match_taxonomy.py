@@ -1820,6 +1820,22 @@ class MatchTaxonomyTests(unittest.TestCase):
             "industrial_valve",
         )
 
+    def test_effective_candidate_family_maps_other_bearing_branch(self):
+        features = self.matcher._extract_query_features("Подшипник роликовый цилиндрический 22210")
+        features["entity_type"] = "bearing"
+        candidate = {
+            "name": "Подшипник роликовый цилиндрический 22210",
+            "normalized_name": "подшипник роликовый цилиндрический 22210",
+            "branch_path": "подшипники роликовые цилиндрические",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(features, candidate),
+            "bearing",
+        )
+
     def test_collect_branch_candidates_relaxes_entity_filter_for_box_family(self):
         self.matcher._uses_duckdb_query_backend = lambda: True
         captured = {}

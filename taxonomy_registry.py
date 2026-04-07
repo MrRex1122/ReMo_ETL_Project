@@ -515,6 +515,21 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
             "positive_patterns": ["затвор", "butterfly valve", "ball valve", "кран шаров", "краны шаров"],
         },
     },
+    "bearing": {
+        "entity_types": ["bearing"],
+        "default_branches": [
+            "подшипники роликовые цилиндрические",
+            "подшипники шариковые радиальные",
+        ],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "audited": True,
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 53,
+            "positive_patterns": ["подшип", "bearing", "роликов", "шариков", "радиальн", "цилиндрическ"],
+        },
+    },
     "iec_power_cable": {
         "entity_types": ["iec_power_cable"],
         "default_branches": ["электрика > кабели"],
@@ -916,6 +931,10 @@ DEFAULT_DOMAIN_REGISTRY: Dict[str, Any] = {
         "industrial_valve": {
             "patterns": ["затвор", "кран шаров", "краны шаров", "butterfly valve", "ball valve"],
             "families": ["industrial_valve"],
+        },
+        "bearing": {
+            "patterns": ["подшип", "bearing", "роликов", "шариков", "радиальн", "цилиндрическ"],
+            "families": ["bearing"],
         },
         "rack_accessory": {
             "patterns": ["полк", "рельс", "направля", "щеточ", "заглуш"],
@@ -1980,6 +1999,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "fastener",
         "ground_bar",
         "industrial_valve",
+        "bearing",
         "iec_power_cable",
         "keystone",
         "optical_cross",
@@ -2000,6 +2020,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "box": "box",
         "box_accessory": "box_accessory",
         "cable_channel": "cable_channel",
+        "bearing": "bearing",
         "patch_panel": "patch_panel",
         "patch_cord": "patch_cord",
         "keystone": "keystone_rj45",
@@ -2041,6 +2062,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "airflow_accessories": "airflow/accessories",
         "rack_accessories": "rack accessories",
         "electrical_cable": "electrical cable",
+        "bearing": "bearing",
         "fastener": "fastener",
         "grounding": "grounding",
         "industrial_valve": "industrial valve",

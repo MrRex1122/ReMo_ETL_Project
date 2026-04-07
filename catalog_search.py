@@ -937,6 +937,8 @@ def classify_item_type(
         or "ball valve" in normalized
     ):
         return "industrial_valve"
+    if "подшип" in normalized or "bearing" in normalized:
+        return "bearing"
     if any(token in normalized for token in ("анкер", "болт", "шуруп", "шпильк", "дюбел", "гайк", "шайб")):
         return "fastener"
     if "заземл" in normalized and "шин" in normalized:
@@ -1118,6 +1120,8 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "cable_channel"
     if any(marker in normalized_branch for marker in ("затворы поворотные дисковые", "краны шаровые стальные")):
         return "industrial_valve"
+    if any(marker in normalized_branch for marker in ("подшипники роликовые цилиндрические", "подшипники шариковые радиальные")):
+        return "bearing"
 
     return effective_entity_type or raw_entity_type
 
@@ -1254,6 +1258,10 @@ def derive_branch_from_text(
                 if "кран" in merged and "шар" in merged:
                     return "краны шаровые стальные"
                 return "затворы поворотные дисковые стальные"
+            if effective_family == "bearing":
+                if "шарик" in merged or "радиальн" in merged:
+                    return "подшипники шариковые радиальные"
+                return "подшипники роликовые цилиндрические"
             if extracted_markers.get("installation_kind") == "cable_channel":
                 return "электрика > кабели > кабель-каналы"
             if effective_family in {"fire_detector", "fire_annunciator"}:
@@ -1300,6 +1308,10 @@ def derive_branch_from_text(
             if "кран" in merged and "шар" in merged:
                 return "краны шаровые стальные"
             return "затворы поворотные дисковые стальные"
+        if registry_family == "bearing":
+            if "шарик" in merged or "радиальн" in merged:
+                return "подшипники шариковые радиальные"
+            return "подшипники роликовые цилиндрические"
         if registry_family == "switch_wiring":
             if "рамк" in merged:
                 return "рамки"
@@ -1332,6 +1344,7 @@ def derive_branch_from_text(
             "box_accessory",
             "cable_channel",
             "industrial_valve",
+            "bearing",
             "patch_panel",
             "optical_cross",
             "optical_patch_cord",

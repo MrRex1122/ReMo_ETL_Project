@@ -4798,6 +4798,11 @@ class ReMoMatcher:
             or "ball valve" in search_text
         ):
             return "industrial_valve"
+        if any(token in branch_path for token in ("подшипники роликовые цилиндрические", "подшипники шариковые радиальные")) or (
+            "подшип" in search_text
+            or "bearing" in search_text
+        ):
+            return "bearing"
         if (
             "перфорированные кабель каналы" in branch_path
             or (
@@ -4892,6 +4897,7 @@ class ReMoMatcher:
             "box_accessory",
             "cable_channel",
             "industrial_valve",
+            "bearing",
             "switch_wiring",
         }
 

@@ -686,6 +686,24 @@ class CatalogSearchTests(unittest.TestCase):
             "краны шаровые стальные",
         )
 
+    def test_classify_item_type_detects_bearing_queries(self):
+        self.assertEqual(
+            classify_item_type("Подшипник роликовый цилиндрический 22210"),
+            "bearing",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Подшипник роликовый цилиндрический 22210"),
+            "подшипники роликовые цилиндрические",
+        )
+        self.assertEqual(
+            classify_item_type("Подшипник шариковый радиальный 6205"),
+            "bearing",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Подшипник шариковый радиальный 6205"),
+            "подшипники шариковые радиальные",
+        )
+
     def test_build_search_catalog_maps_perforated_cable_channels_to_cable_channel_family(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
@@ -737,6 +755,35 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(ball_valve["search_entity_type"], "industrial_valve")
             self.assertEqual(ball_valve["search_effective_entity_type"], "industrial_valve")
             self.assertEqual(ball_valve["search_effective_family"], "industrial_valve")
+
+    def test_build_search_catalog_maps_bearings_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Подшипник роликовый цилиндрический 22210;BEARING-1;10;Подшипники Роликовые Цилиндрические;CLS-1;Подшипник роликовый цилиндрический;;ReMo\n"
+                    "Подшипник шариковый радиальный 6205;BEARING-2;10;Подшипники Шариковые Радиальные;CLS-2;Подшипник шариковый радиальный;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+            roller_bearing = built.loc[built["Артикул"] == "BEARING-1"].iloc[0]
+            ball_bearing = built.loc[built["Артикул"] == "BEARING-2"].iloc[0]
+
+            self.assertEqual(roller_bearing["search_branch_path"], "подшипники роликовые цилиндрические")
+            self.assertEqual(roller_bearing["search_entity_type"], "bearing")
+            self.assertEqual(roller_bearing["search_effective_entity_type"], "bearing")
+            self.assertEqual(roller_bearing["search_effective_family"], "bearing")
+
+            self.assertEqual(ball_bearing["search_branch_path"], "подшипники шариковые радиальные")
+            self.assertEqual(ball_bearing["search_entity_type"], "bearing")
+            self.assertEqual(ball_bearing["search_effective_entity_type"], "bearing")
+            self.assertEqual(ball_bearing["search_effective_family"], "bearing")
 
     def test_derive_branch_from_text_skips_telecom_rack_for_control_cabinet(self):
         self.assertEqual(

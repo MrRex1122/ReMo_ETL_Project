@@ -118,5 +118,14 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(ball_valve.entity_type, "industrial_valve")
         self.assertEqual(ball_valve.branch_hint, "краны шаровые стальные")
 
+    def test_parse_query_spec_detects_bearing_queries(self):
+        roller_bearing = parse_query_spec("Подшипник роликовый цилиндрический 22210", taxonomy_rules=self.rules)
+        ball_bearing = parse_query_spec("Подшипник шариковый радиальный 6205", taxonomy_rules=self.rules)
+
+        self.assertEqual(roller_bearing.entity_type, "bearing")
+        self.assertEqual(roller_bearing.branch_hint, "подшипники роликовые цилиндрические")
+        self.assertEqual(ball_bearing.entity_type, "bearing")
+        self.assertEqual(ball_bearing.branch_hint, "подшипники шариковые радиальные")
+
 if __name__ == "__main__":
     unittest.main()
