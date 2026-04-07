@@ -4821,6 +4821,10 @@ class ReMoMatcher:
             or "transformer" in search_text
         ):
             return "transformer"
+        if "источники бесперебойного питания" in branch_path or "ибп" in branch_path or any(
+            token in search_text for token in ("источник бесперебойного питания", "ибп", "ups", "line interactive", "online ups", "uninterruptible")
+        ):
+            return "ups"
         if "плавкие предохранители" in branch_path or any(token in search_text for token in ("предохранител", "плавк", "fuse")):
             return "fuse"
         if (
@@ -4923,6 +4927,7 @@ class ReMoMatcher:
             "floor_convector",
             "heat_shrink",
             "transformer",
+            "ups",
             "fuse",
             "switch_wiring",
         }

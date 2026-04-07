@@ -947,6 +947,11 @@ def classify_item_type(
         return "heat_shrink"
     if "трансформатор" in normalized or "transformer" in normalized:
         return "transformer"
+    if any(
+        token in normalized
+        for token in ("источник бесперебойного питания", "ибп", "ups", "line interactive", "online ups", "uninterruptible")
+    ):
+        return "ups"
     if any(token in normalized for token in ("предохранител", "плавк", "fuse")):
         return "fuse"
     if "табло" in normalized and any(
@@ -1153,6 +1158,8 @@ def _normalize_effective_entity_type_by_catalog_branch(
         for marker in ("трансформаторы напряжения понижающие низковольтные", "трансформаторы тока низковольтные")
     ):
         return "transformer"
+    if "источники бесперебойного питания" in normalized_branch or "ибп" in normalized_branch:
+        return "ups"
     if "плавкие предохранители" in normalized_branch:
         return "fuse"
     if any(marker in normalized_branch for marker in ("световое табло", "свето звуковое табло")):
@@ -1321,6 +1328,8 @@ def derive_branch_from_text(
                 if "ток" in merged:
                     return "трансформаторы тока низковольтные"
                 return "трансформаторы напряжения понижающие низковольтные"
+            if effective_family == "ups":
+                return "источники бесперебойного питания (ибп)"
             if effective_family == "fuse":
                 return "плавкие предохранители"
             if effective_family == "light_signage":
@@ -1401,6 +1410,8 @@ def derive_branch_from_text(
             if "ток" in merged:
                 return "трансформаторы тока низковольтные"
             return "трансформаторы напряжения понижающие низковольтные"
+        if registry_family == "ups":
+            return "источники бесперебойного питания (ибп)"
         if registry_family == "fuse":
             return "плавкие предохранители"
         if registry_family == "light_signage":
@@ -1454,6 +1465,7 @@ def derive_branch_from_text(
             "floor_box",
             "ground_bar",
             "breaker",
+            "ups",
             "fuse",
             "socket",
             "lighting_fixture",
@@ -1505,6 +1517,8 @@ def derive_branch_from_text(
         return "телеком > аксессуары > заземление"
     if effective_entity_type == "breaker":
         return "электрика > автоматы"
+    if effective_entity_type == "ups":
+        return "источники бесперебойного питания (ибп)"
     if effective_entity_type == "fuse":
         return "плавкие предохранители"
     if effective_entity_type == "socket":

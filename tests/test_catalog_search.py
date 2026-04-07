@@ -845,6 +845,16 @@ class CatalogSearchTests(unittest.TestCase):
             "плавкие предохранители",
         )
 
+    def test_classify_item_type_detects_ups_queries(self):
+        self.assertEqual(
+            classify_item_type("Источник бесперебойного питания Line Interactive 2000VA"),
+            "ups",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Источник бесперебойного питания Line Interactive 2000VA"),
+            "источники бесперебойного питания (ибп)",
+        )
+
     def test_build_search_catalog_maps_perforated_cable_channels_to_cable_channel_family(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
@@ -1084,6 +1094,28 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(fuse["search_entity_type"], "fuse")
             self.assertEqual(fuse["search_effective_entity_type"], "fuse")
             self.assertEqual(fuse["search_effective_family"], "fuse")
+
+    def test_build_search_catalog_maps_ups_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Источник бесперебойного питания Line Interactive 2000VA;UPS-1;10;Источники Бесперебойного Питания (ИБП);CLS-1;Источник бесперебойного питания;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+            ups = built.loc[built["Артикул"] == "UPS-1"].iloc[0]
+
+            self.assertEqual(ups["search_branch_path"], "источники бесперебойного питания (ибп)")
+            self.assertEqual(ups["search_entity_type"], "ups")
+            self.assertEqual(ups["search_effective_entity_type"], "ups")
+            self.assertEqual(ups["search_effective_family"], "ups")
 
     def test_derive_branch_from_text_skips_telecom_rack_for_control_cabinet(self):
         self.assertEqual(

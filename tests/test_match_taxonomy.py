@@ -2050,6 +2050,22 @@ class MatchTaxonomyTests(unittest.TestCase):
             "fuse",
         )
 
+    def test_effective_candidate_family_maps_other_ups_branch(self):
+        features = self.matcher._extract_query_features("Источник бесперебойного питания Line Interactive 2000VA")
+        features["entity_type"] = "ups"
+        candidate = {
+            "name": "Источник бесперебойного питания Line Interactive 2000VA",
+            "normalized_name": "источник бесперебойного питания line interactive 2000va",
+            "branch_path": "источники бесперебойного питания (ибп)",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(features, candidate),
+            "ups",
+        )
+
     def test_collect_branch_candidates_relaxes_entity_filter_for_box_family(self):
         self.matcher._uses_duckdb_query_backend = lambda: True
         captured = {}

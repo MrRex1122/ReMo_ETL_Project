@@ -598,6 +598,18 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
             "positive_patterns": ["трансформатор", "transformer", "понижающ", "низковольтн", "трансформатор тока"],
         },
     },
+    "ups": {
+        "entity_types": ["ups"],
+        "default_branches": ["источники бесперебойного питания (ибп)"],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "audited": True,
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 55,
+            "positive_patterns": ["источник бесперебойного питания", "ибп", "ups", "line interactive", "online ups", "uninterruptible"],
+        },
+    },
     "iec_power_cable": {
         "entity_types": ["iec_power_cable"],
         "default_branches": ["электрика > кабели"],
@@ -1039,6 +1051,10 @@ DEFAULT_DOMAIN_REGISTRY: Dict[str, Any] = {
         "transformer": {
             "patterns": ["трансформатор", "transformer", "понижающ", "низковольтн", "трансформатор тока"],
             "families": ["transformer"],
+        },
+        "ups": {
+            "patterns": ["источник бесперебойного питания", "ибп", "ups", "line interactive", "online ups", "uninterruptible"],
+            "families": ["ups"],
         },
         "rack_accessory": {
             "patterns": ["полк", "рельс", "направля", "щеточ", "заглуш"],
@@ -2111,6 +2127,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "floor_convector",
         "heat_shrink",
         "transformer",
+        "ups",
         "iec_power_cable",
         "keystone",
         "optical_cross",
@@ -2136,6 +2153,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "floor_convector": "floor_convector",
         "heat_shrink": "heat_shrink",
         "transformer": "transformer",
+        "ups": "ups",
         "light_signage": "signage",
         "safety_sign": "signage",
         "patch_panel": "patch_panel",
@@ -2185,6 +2203,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "floor_convector": "floor convector",
         "heat_shrink": "heat shrink",
         "transformer": "transformer",
+        "ups": "ups",
         "signage": "signage",
         "fastener": "fastener",
         "grounding": "grounding",

@@ -187,5 +187,11 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(fuse.entity_type, "fuse")
         self.assertEqual(fuse.branch_hint, "плавкие предохранители")
 
+    def test_parse_query_spec_detects_ups_queries(self):
+        ups = parse_query_spec("Источник бесперебойного питания Line Interactive 2000VA", taxonomy_rules=self.rules)
+
+        self.assertEqual(ups.entity_type, "ups")
+        self.assertEqual(ups.branch_hint, "источники бесперебойного питания (ибп)")
+
 if __name__ == "__main__":
     unittest.main()
