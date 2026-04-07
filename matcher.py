@@ -4825,12 +4825,24 @@ class ReMoMatcher:
             return "transformer"
         if "манометры" in branch_path or "манометр" in search_text or "pressure gauge" in search_text:
             return "pressure_gauge"
+        if "клещи токоизмерительные" in branch_path or (
+            any(
+                token in search_text
+                for token in ("клещи токоизмерительные", "токоизмерительные клещи", "токовые клещи", "clamp meter", "current clamp")
+            )
+            or (
+                any(token in search_text for token in ("клещи", "clamp"))
+                and any(token in search_text for token in ("токоизмер", "токов", "ток", "amp", "current"))
+                and not any(token in search_text for token in ("обжим", "переставн", "монтажн", "изоляц", "press tool", "crimp"))
+            )
+        ):
+            return "clamp_meter"
         if "мультиметры" in branch_path or (
             ("мультиметр" in search_text or "multimeter" in search_text)
             or (
                 any(token in search_text for token in ("тестер", "tester"))
                 and any(token in search_text for token in ("цифров", "измер", "вольт", "напряж", "ампер", "ток", "ом", "сопротивл", "digital"))
-                and not any(token in search_text for token in ("кабельный", "кабеля", "cable", "network", "lan", "rj45", "ethernet", "сканер"))
+                and not any(token in search_text for token in ("кабельный", "кабеля", "cable", "network", "lan", "rj45", "ethernet", "сканер", "клещи", "clamp"))
             )
         ):
             return "multimeter"
@@ -5074,6 +5086,7 @@ class ReMoMatcher:
             "heat_shrink",
             "transformer",
             "ups",
+            "clamp_meter",
             "multimeter",
             "voltage_indicator",
             "voltage_stabilizer",

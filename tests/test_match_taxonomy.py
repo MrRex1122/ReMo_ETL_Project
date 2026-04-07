@@ -2063,6 +2063,22 @@ class MatchTaxonomyTests(unittest.TestCase):
             "multimeter",
         )
 
+    def test_effective_candidate_family_maps_other_clamp_meter_branch(self):
+        features = self.matcher._extract_query_features("Клещи токоизмерительные цифровые 600А")
+        features["entity_type"] = "clamp_meter"
+        candidate = {
+            "name": "Клещи токоизмерительные цифровые 600А",
+            "normalized_name": "клещи токоизмерительные цифровые 600а",
+            "branch_path": "клещи токоизмерительные",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(features, candidate),
+            "clamp_meter",
+        )
+
     def test_effective_candidate_family_maps_other_voltage_indicator_branch(self):
         features = self.matcher._extract_query_features("Индикатор напряжения двухполюсный 12-690В")
         features["entity_type"] = "voltage_indicator"
@@ -2590,6 +2606,28 @@ class MatchTaxonomyTests(unittest.TestCase):
             ["мультиметры"],
             limit=25,
             query_features={"entity_type": "multimeter"},
+        )
+
+        self.assertNotIn("search_entity_type", captured["where_sql"])
+        self.assertEqual(captured["limit"], 25)
+
+    def test_collect_branch_candidates_relaxes_entity_filter_for_clamp_meter_family(self):
+        self.matcher._uses_duckdb_query_backend = lambda: True
+        captured = {}
+
+        def fake_fetch_items(where_sql="", params=None, order_by_sql="", limit=None):
+            captured["where_sql"] = where_sql
+            captured["params"] = list(params or [])
+            captured["order_by_sql"] = order_by_sql
+            captured["limit"] = limit
+            return []
+
+        self.matcher._duckdb_fetch_items = fake_fetch_items
+
+        self.matcher._collect_branch_candidates(
+            ["клещи токоизмерительные"],
+            limit=25,
+            query_features={"entity_type": "clamp_meter"},
         )
 
         self.assertNotIn("search_entity_type", captured["where_sql"])

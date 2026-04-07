@@ -982,11 +982,23 @@ def classify_item_type(
     if "манометр" in normalized or "pressure gauge" in normalized or "gauge pressure" in normalized:
         return "pressure_gauge"
     if (
+        any(
+            token in normalized
+            for token in ("клещи токоизмерительные", "токоизмерительные клещи", "токовые клещи", "clamp meter", "current clamp")
+        )
+        or (
+            any(token in normalized for token in ("клещи", "clamp"))
+            and any(token in normalized for token in ("токоизмер", "токов", "ток", "amp", "current"))
+            and not any(token in normalized for token in ("обжим", "переставн", "монтажн", "изоляц", "press tool", "crimp"))
+        )
+    ):
+        return "clamp_meter"
+    if (
         ("мультиметр" in normalized or "multimeter" in normalized)
         or (
             any(token in normalized for token in ("тестер", "tester"))
             and any(token in normalized for token in ("цифров", "измер", "вольт", "напряж", "ампер", "ток", "ом", "сопротивл", "digital"))
-            and not any(token in normalized for token in ("кабельный", "кабеля", "cable", "network", "lan", "rj45", "ethernet", "сканер"))
+            and not any(token in normalized for token in ("кабельный", "кабеля", "cable", "network", "lan", "rj45", "ethernet", "сканер", "клещи", "clamp"))
         )
     ):
         return "multimeter"
@@ -1280,6 +1292,8 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "transformer"
     if "манометры" in normalized_branch:
         return "pressure_gauge"
+    if "клещи токоизмерительные" in normalized_branch:
+        return "clamp_meter"
     if "мультиметры" in normalized_branch:
         return "multimeter"
     if "индикаторы напряжения" in normalized_branch:
@@ -1555,6 +1569,8 @@ def derive_branch_from_text(
                 return "источники бесперебойного питания (ибп)"
             if effective_family == "pressure_gauge":
                 return "манометры"
+            if effective_family == "clamp_meter":
+                return "клещи токоизмерительные"
             if effective_family == "multimeter":
                 return "мультиметры"
             if effective_family == "voltage_indicator":
@@ -1685,6 +1701,8 @@ def derive_branch_from_text(
             return "источники бесперебойного питания (ибп)"
         if registry_family == "pressure_gauge":
             return "манометры"
+        if registry_family == "clamp_meter":
+            return "клещи токоизмерительные"
         if registry_family == "multimeter":
             return "мультиметры"
         if registry_family == "voltage_indicator":
@@ -1767,6 +1785,7 @@ def derive_branch_from_text(
             "transformer",
             "voltage_stabilizer",
             "frequency_drive",
+            "clamp_meter",
             "voltage_indicator",
             "patch_panel",
             "optical_cross",
@@ -1839,6 +1858,8 @@ def derive_branch_from_text(
         return "ограничители импульсного перенапряжения силовые модульные"
     if effective_entity_type == "ups":
         return "источники бесперебойного питания (ибп)"
+    if effective_entity_type == "clamp_meter":
+        return "клещи токоизмерительные"
     if effective_entity_type == "multimeter":
         return "мультиметры"
     if effective_entity_type == "voltage_indicator":

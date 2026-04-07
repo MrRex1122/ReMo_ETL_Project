@@ -891,6 +891,20 @@ class CatalogSearchTests(unittest.TestCase):
             "multimeter",
         )
 
+    def test_classify_item_type_detects_clamp_meter_queries(self):
+        self.assertEqual(
+            classify_item_type("Клещи токоизмерительные цифровые 600А"),
+            "clamp_meter",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Клещи токоизмерительные цифровые 600А"),
+            "клещи токоизмерительные",
+        )
+        self.assertNotEqual(
+            classify_item_type("Клещи обжимные для наконечников"),
+            "clamp_meter",
+        )
+
     def test_classify_item_type_detects_voltage_indicator_queries(self):
         self.assertEqual(
             classify_item_type("Индикатор напряжения двухполюсный 12-690В"),
@@ -1327,6 +1341,28 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(multimeter["search_entity_type"], "multimeter")
             self.assertEqual(multimeter["search_effective_entity_type"], "multimeter")
             self.assertEqual(multimeter["search_effective_family"], "multimeter")
+
+    def test_build_search_catalog_maps_clamp_meters_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Клещи токоизмерительные цифровые 600А;CLAMP-1;10;Клещи Токоизмерительные;CLS-1;Клещи токоизмерительные;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+            clamp_meter = built.loc[built["Артикул"] == "CLAMP-1"].iloc[0]
+
+            self.assertEqual(clamp_meter["search_branch_path"], "клещи токоизмерительные")
+            self.assertEqual(clamp_meter["search_entity_type"], "clamp_meter")
+            self.assertEqual(clamp_meter["search_effective_entity_type"], "clamp_meter")
+            self.assertEqual(clamp_meter["search_effective_family"], "clamp_meter")
 
     def test_build_search_catalog_maps_voltage_indicators_out_of_other(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
