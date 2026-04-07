@@ -879,6 +879,22 @@ class CatalogSearchTests(unittest.TestCase):
             "клеммные блоки зажимов на din-рейку",
         )
         self.assertEqual(
+            classify_item_type("Проходная клемма на DIN-рейку 4мм"),
+            "terminal_block",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Проходная клемма на DIN-рейку 4мм"),
+            "проходные клеммы на din-рейку",
+        )
+        self.assertEqual(
+            classify_item_type("Миниклемма на DIN-рейку 2,5мм"),
+            "terminal_block",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Миниклемма на DIN-рейку 2,5мм"),
+            "миниклеммы на din-рейку",
+        )
+        self.assertEqual(
             classify_item_type("Арматура светосигнальная зеленая 24В"),
             "signal_indicator",
         )
@@ -1219,6 +1235,8 @@ class CatalogSearchTests(unittest.TestCase):
                     "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
                     "Тип исполнения кабельного изделия;Производитель\n"
                     "Клеммный блок на DIN-рейку 2,5мм серый;TERM-1;10;Клеммные Блоки Зажимов На DIN-рейку;CLS-1;Клеммный блок;;ReMo\n"
+                    "Проходная клемма на DIN-рейку 4мм;TERM-2;10;Проходные Клеммы На DIN-рейку;CLS-2;Проходная клемма;;ReMo\n"
+                    "Миниклемма на DIN-рейку 2,5мм;TERM-3;10;Миниклеммы На DIN-рейку;CLS-3;Миниклемма;;ReMo\n"
                     "Арматура светосигнальная зеленая 24В;SIG-1;10;Светосигнальная Арматура;CLS-2;Арматура светосигнальная;;ReMo\n"
                 ),
                 encoding="utf-8",
@@ -1227,12 +1245,24 @@ class CatalogSearchTests(unittest.TestCase):
             search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
             built = pd.read_csv(search_path, sep=";", encoding="utf-8")
             terminal_block = built.loc[built["Артикул"] == "TERM-1"].iloc[0]
+            feed_through = built.loc[built["Артикул"] == "TERM-2"].iloc[0]
+            mini = built.loc[built["Артикул"] == "TERM-3"].iloc[0]
             signal_indicator = built.loc[built["Артикул"] == "SIG-1"].iloc[0]
 
             self.assertEqual(terminal_block["search_branch_path"], "клеммные блоки зажимов на din-рейку")
             self.assertEqual(terminal_block["search_entity_type"], "terminal_block")
             self.assertEqual(terminal_block["search_effective_entity_type"], "terminal_block")
             self.assertEqual(terminal_block["search_effective_family"], "terminal_block")
+
+            self.assertEqual(feed_through["search_branch_path"], "проходные клеммы на din-рейку")
+            self.assertEqual(feed_through["search_entity_type"], "terminal_block")
+            self.assertEqual(feed_through["search_effective_entity_type"], "terminal_block")
+            self.assertEqual(feed_through["search_effective_family"], "terminal_block")
+
+            self.assertEqual(mini["search_branch_path"], "миниклеммы на din-рейку")
+            self.assertEqual(mini["search_entity_type"], "terminal_block")
+            self.assertEqual(mini["search_effective_entity_type"], "terminal_block")
+            self.assertEqual(mini["search_effective_family"], "terminal_block")
 
             self.assertEqual(signal_indicator["search_branch_path"], "светосигнальная арматура")
             self.assertEqual(signal_indicator["search_entity_type"], "signal_indicator")

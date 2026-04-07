@@ -971,7 +971,17 @@ def classify_item_type(
         return "surge_protector"
     if any(
         token in normalized
-        for token in ("клеммный блок", "клеммные блоки", "клеммник", "клемма наборная", "terminal block", "din rail")
+        for token in (
+            "клеммный блок",
+            "клеммные блоки",
+            "клеммник",
+            "клемма наборная",
+            "проходная клемма",
+            "миниклем",
+            "клеммы на din",
+            "terminal block",
+            "din rail",
+        )
     ) and not any(token in normalized for token in ("заглушк", "маркиров", "аккумулятор", "акб")):
         return "terminal_block"
     if any(
@@ -1193,7 +1203,15 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "fuse"
     if any(marker in normalized_branch for marker in ("кнопки", "кнопочные посты")):
         return "push_button"
-    if "клеммные блоки зажимов на din рейку" in normalized_branch:
+    if any(
+        marker in normalized_branch
+        for marker in (
+            "клеммные блоки зажимов на din рейку",
+            "клеммы на din рейку",
+            "проходные клеммы на din рейку",
+            "миниклеммы на din рейку",
+        )
+    ):
         return "terminal_block"
     if "светосигнальная арматура" in normalized_branch:
         return "signal_indicator"
@@ -1464,6 +1482,12 @@ def derive_branch_from_text(
         if registry_family == "surge_protector":
             return "ограничители импульсного перенапряжения силовые модульные"
         if registry_family == "terminal_block":
+            if "мини" in merged and "клем" in merged:
+                return "миниклеммы на din-рейку"
+            if "проходн" in merged and "клем" in merged:
+                return "проходные клеммы на din-рейку"
+            if ("клем" in merged or "terminal block" in merged) and "блок" not in merged and "блоки" not in merged:
+                return "клеммы на din-рейку"
             return "клеммные блоки зажимов на din-рейку"
         if registry_family == "signal_indicator":
             return "светосигнальная арматура"
@@ -1587,6 +1611,12 @@ def derive_branch_from_text(
             return "кнопочные посты"
         return "кнопки"
     if effective_entity_type == "terminal_block":
+        if "мини" in merged and "клем" in merged:
+            return "миниклеммы на din-рейку"
+        if "проходн" in merged and "клем" in merged:
+            return "проходные клеммы на din-рейку"
+        if ("клем" in merged or "terminal block" in merged) and "блок" not in merged and "блоки" not in merged:
+            return "клеммы на din-рейку"
         return "клеммные блоки зажимов на din-рейку"
     if effective_entity_type == "signal_indicator":
         return "светосигнальная арматура"

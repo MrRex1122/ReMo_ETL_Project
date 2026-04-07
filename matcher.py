@@ -4851,8 +4851,29 @@ class ReMoMatcher:
             token in search_text for token in ("кнопк", "push button", "кнопочн пост")
         ):
             return "push_button"
-        if "клеммные блоки зажимов на din рейку" in branch_path or (
-            any(token in search_text for token in ("клеммный блок", "клеммные блоки", "клеммник", "клемма наборная", "terminal block", "din rail"))
+        if any(
+            token in branch_path
+            for token in (
+                "клеммные блоки зажимов на din рейку",
+                "клеммы на din рейку",
+                "проходные клеммы на din рейку",
+                "миниклеммы на din рейку",
+            )
+        ) or (
+            any(
+                token in search_text
+                for token in (
+                    "клеммный блок",
+                    "клеммные блоки",
+                    "клеммник",
+                    "клемма наборная",
+                    "проходная клемма",
+                    "миниклем",
+                    "клеммы на din",
+                    "terminal block",
+                    "din rail",
+                )
+            )
             and not any(token in search_text for token in ("заглушк", "маркир", "аккумулятор", "акб"))
         ):
             return "terminal_block"

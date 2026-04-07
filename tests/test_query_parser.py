@@ -205,9 +205,15 @@ class QueryParserTests(unittest.TestCase):
     def test_parse_query_spec_detects_terminal_block_and_signal_indicator_queries(self):
         terminal_block = parse_query_spec("Клеммный блок на DIN-рейку 2,5мм серый", taxonomy_rules=self.rules)
         signal_indicator = parse_query_spec("Арматура светосигнальная зеленая 24В", taxonomy_rules=self.rules)
+        feed_through = parse_query_spec("Проходная клемма на DIN-рейку 4мм", taxonomy_rules=self.rules)
+        mini = parse_query_spec("Миниклемма на DIN-рейку 2,5мм", taxonomy_rules=self.rules)
 
         self.assertEqual(terminal_block.entity_type, "terminal_block")
         self.assertEqual(terminal_block.branch_hint, "клеммные блоки зажимов на din-рейку")
+        self.assertEqual(feed_through.entity_type, "terminal_block")
+        self.assertEqual(feed_through.branch_hint, "проходные клеммы на din-рейку")
+        self.assertEqual(mini.entity_type, "terminal_block")
+        self.assertEqual(mini.branch_hint, "миниклеммы на din-рейку")
         self.assertEqual(signal_indicator.entity_type, "signal_indicator")
         self.assertEqual(signal_indicator.branch_hint, "светосигнальная арматура")
 

@@ -2105,6 +2105,24 @@ class MatchTaxonomyTests(unittest.TestCase):
             "entity_type": "other",
             "item_markers": {},
         }
+        feed_through_features = self.matcher._extract_query_features("Проходная клемма на DIN-рейку 4мм")
+        feed_through_features["entity_type"] = "terminal_block"
+        feed_through_candidate = {
+            "name": "Проходная клемма на DIN-рейку 4мм",
+            "normalized_name": "проходная клемма на din рейку 4мм",
+            "branch_path": "проходные клеммы на din-рейку",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        mini_features = self.matcher._extract_query_features("Миниклемма на DIN-рейку 2,5мм")
+        mini_features["entity_type"] = "terminal_block"
+        mini_candidate = {
+            "name": "Миниклемма на DIN-рейку 2,5мм",
+            "normalized_name": "миниклемма на din рейку 2 5мм",
+            "branch_path": "миниклеммы на din-рейку",
+            "entity_type": "other",
+            "item_markers": {},
+        }
         signal_features = self.matcher._extract_query_features("Арматура светосигнальная зеленая 24В")
         signal_features["entity_type"] = "signal_indicator"
         signal_candidate = {
@@ -2117,6 +2135,14 @@ class MatchTaxonomyTests(unittest.TestCase):
 
         self.assertEqual(
             self.matcher._effective_candidate_family_for_query(terminal_features, terminal_candidate),
+            "terminal_block",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(feed_through_features, feed_through_candidate),
+            "terminal_block",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(mini_features, mini_candidate),
             "terminal_block",
         )
         self.assertEqual(
