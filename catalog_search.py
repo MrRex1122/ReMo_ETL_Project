@@ -982,6 +982,11 @@ def classify_item_type(
     if "регулятор давления" in normalized or "pressure regulator" in normalized:
         return "pressure_regulator"
     if (
+        any(token in normalized for token in ("стабилизатор напряжения", "стабилизаторы напряжения", "voltage stabilizer", "avr"))
+        and not any(token in normalized for token in ("источник бесперебойного питания", "ибп", "ups", "реле контроля напряжения", "амортизатор"))
+    ):
+        return "voltage_stabilizer"
+    if (
         any(token in normalized for token in ("удлинител", "сетевой фильтр", "штепсель", "вилка", "power strip", "extension cord"))
         or (
             "переходник" in normalized
@@ -1240,6 +1245,8 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "pressure_gauge"
     if "регулятор давления" in normalized_branch:
         return "pressure_regulator"
+    if "стабилизаторы напряжения" in normalized_branch:
+        return "voltage_stabilizer"
     if "преобразователи частоты приводы" in normalized_branch:
         return "frequency_drive"
     if "удлинители сетевые фильтры переходники штепсельные вилки" in normalized_branch:
@@ -1296,6 +1303,13 @@ def _normalize_catalog_effective_entity_type(
             return raw_entity_type
         if candidate_family in {"keystone", "rj45_connector", "switch_wiring"}:
             return "power_accessory"
+    if any(token in normalized_text for token in ("стабилизатор напряжения", "стабилизаторы напряжения", "voltage stabilizer", "avr")) and not any(
+        token in normalized_text for token in ("источник бесперебойного питания", "ибп", "ups", "реле контроля напряжения", "амортизатор")
+    ):
+        if raw_family == "voltage_stabilizer":
+            return raw_entity_type or "voltage_stabilizer"
+        if candidate_family in {"ups", "transformer", "control_relay"}:
+            return "voltage_stabilizer"
     if any(
         token in normalized_text
         for token in (
@@ -1489,6 +1503,8 @@ def derive_branch_from_text(
                 return "манометры"
             if effective_family == "pressure_regulator":
                 return "регулятор давления"
+            if effective_family == "voltage_stabilizer":
+                return "стабилизаторы напряжения"
             if effective_family == "frequency_drive":
                 return "преобразователи частоты, приводы"
             if effective_family == "power_accessory":
@@ -1601,6 +1617,8 @@ def derive_branch_from_text(
             return "манометры"
         if registry_family == "pressure_regulator":
             return "регулятор давления"
+        if registry_family == "voltage_stabilizer":
+            return "стабилизаторы напряжения"
         if registry_family == "frequency_drive":
             return "преобразователи частоты, приводы"
         if registry_family == "fuse":
@@ -1670,6 +1688,7 @@ def derive_branch_from_text(
             "floor_convector",
             "heat_shrink",
             "transformer",
+            "voltage_stabilizer",
             "frequency_drive",
             "patch_panel",
             "optical_cross",
@@ -1741,6 +1760,8 @@ def derive_branch_from_text(
         return "ограничители импульсного перенапряжения силовые модульные"
     if effective_entity_type == "ups":
         return "источники бесперебойного питания (ибп)"
+    if effective_entity_type == "voltage_stabilizer":
+        return "стабилизаторы напряжения"
     if effective_entity_type == "frequency_drive":
         return "преобразователи частоты, приводы"
     if effective_entity_type == "fuse":

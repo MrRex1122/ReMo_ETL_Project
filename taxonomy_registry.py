@@ -711,6 +711,31 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
             "positive_patterns": ["регулятор давления", "pressure regulator"],
         },
     },
+    "voltage_stabilizer": {
+        "entity_types": ["voltage_stabilizer"],
+        "default_branches": ["стабилизаторы напряжения"],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "audited": True,
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 52,
+            "positive_patterns": [
+                "стабилизатор напряжения",
+                "стабилизаторы напряжения",
+                "voltage stabilizer",
+                "avr",
+            ],
+            "negative_patterns": [
+                "источник бесперебойного питания",
+                "ибп",
+                "ups",
+                "реле контроля напряжения",
+                "амортизатор",
+            ],
+            "required_any_tokens": [["стабилиз", "stabilizer", "avr"], ["напряж", "voltage", "220", "230", "380"]],
+        },
+    },
     "iec_power_cable": {
         "entity_types": ["iec_power_cable"],
         "default_branches": ["электрика > кабели"],
@@ -1336,6 +1361,10 @@ DEFAULT_DOMAIN_REGISTRY: Dict[str, Any] = {
         "pressure_regulator": {
             "patterns": ["регулятор давления", "pressure regulator"],
             "families": ["pressure_regulator"],
+        },
+        "voltage_stabilizer": {
+            "patterns": ["стабилизатор напряжения", "стабилизаторы напряжения", "voltage stabilizer", "avr"],
+            "families": ["voltage_stabilizer"],
         },
         "frequency_drive": {
             "patterns": ["преобразователь частоты", "частотный преобразователь", "частотный привод", "frequency drive", "variable frequency drive", "vfd"],
@@ -2429,6 +2458,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "ups",
         "pressure_gauge",
         "pressure_regulator",
+        "voltage_stabilizer",
         "frequency_drive",
         "iec_power_cable",
         "keystone",
@@ -2459,6 +2489,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "ups": "ups",
         "pressure_gauge": "pressure_gauge",
         "pressure_regulator": "pressure_regulator",
+        "voltage_stabilizer": "voltage_stabilizer",
         "frequency_drive": "frequency_drive",
         "light_signage": "signage",
         "safety_sign": "signage",
@@ -2518,6 +2549,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "ups": "ups",
         "pressure_gauge": "pressure gauge",
         "pressure_regulator": "pressure regulator",
+        "voltage_stabilizer": "voltage stabilizer",
         "frequency_drive": "frequency drive",
         "signage": "signage",
         "fastener": "fastener",

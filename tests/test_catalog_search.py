@@ -887,6 +887,16 @@ class CatalogSearchTests(unittest.TestCase):
             "регулятор давления",
         )
 
+    def test_classify_item_type_detects_voltage_stabilizer_queries(self):
+        self.assertEqual(
+            classify_item_type("Стабилизатор напряжения 10 кВА 220В"),
+            "voltage_stabilizer",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Стабилизатор напряжения 10 кВА 220В"),
+            "стабилизаторы напряжения",
+        )
+
     def test_classify_item_type_detects_frequency_drive_queries(self):
         self.assertEqual(
             classify_item_type("Преобразователь частоты 5,5 кВт 380В"),
@@ -1253,6 +1263,28 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(regulator["search_entity_type"], "pressure_regulator")
             self.assertEqual(regulator["search_effective_entity_type"], "pressure_regulator")
             self.assertEqual(regulator["search_effective_family"], "pressure_regulator")
+
+    def test_build_search_catalog_maps_voltage_stabilizers_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Стабилизатор напряжения 10 кВА 220В;STAB-1;10;Стабилизаторы Напряжения;CLS-1;Стабилизатор напряжения;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+            stabilizer = built.loc[built["Артикул"] == "STAB-1"].iloc[0]
+
+            self.assertEqual(stabilizer["search_branch_path"], "стабилизаторы напряжения")
+            self.assertEqual(stabilizer["search_entity_type"], "voltage_stabilizer")
+            self.assertEqual(stabilizer["search_effective_entity_type"], "voltage_stabilizer")
+            self.assertEqual(stabilizer["search_effective_family"], "voltage_stabilizer")
 
     def test_build_search_catalog_maps_frequency_drives_out_of_other(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

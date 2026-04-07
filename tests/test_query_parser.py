@@ -205,6 +205,12 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(regulator.entity_type, "pressure_regulator")
         self.assertEqual(regulator.branch_hint, "регулятор давления")
 
+    def test_parse_query_spec_detects_voltage_stabilizer_queries(self):
+        stabilizer = parse_query_spec("Стабилизатор напряжения 10 кВА 220В", taxonomy_rules=self.rules)
+
+        self.assertEqual(stabilizer.entity_type, "voltage_stabilizer")
+        self.assertEqual(stabilizer.branch_hint, "стабилизаторы напряжения")
+
     def test_parse_query_spec_detects_frequency_drive_queries(self):
         drive = parse_query_spec("Преобразователь частоты 5,5 кВт 380В", taxonomy_rules=self.rules)
 
