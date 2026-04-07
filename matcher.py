@@ -4823,6 +4823,8 @@ class ReMoMatcher:
             or "transformer" in search_text
         ):
             return "transformer"
+        if "манометры" in branch_path or "манометр" in search_text or "pressure gauge" in search_text:
+            return "pressure_gauge"
         if "источники бесперебойного питания" in branch_path or "ибп" in branch_path or any(
             token in search_text for token in ("источник бесперебойного питания", "ибп", "ups", "line interactive", "online ups", "uninterruptible")
         ):

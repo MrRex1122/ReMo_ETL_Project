@@ -2000,6 +2000,22 @@ class MatchTaxonomyTests(unittest.TestCase):
             "radiator",
         )
 
+    def test_effective_candidate_family_maps_other_pressure_gauge_branch(self):
+        features = self.matcher._extract_query_features("Манометр радиальный 0-10 бар")
+        features["entity_type"] = "pressure_gauge"
+        candidate = {
+            "name": "Манометр радиальный 0-10 бар",
+            "normalized_name": "манометр радиальный 0 10 бар",
+            "branch_path": "манометры",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(features, candidate),
+            "pressure_gauge",
+        )
+
     def test_effective_candidate_family_maps_other_floor_convector_branch(self):
         features = self.matcher._extract_query_features("Конвектор внутрипольный с вентилятором 2000мм")
         features["entity_type"] = "floor_convector"

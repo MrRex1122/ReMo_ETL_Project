@@ -952,6 +952,8 @@ def classify_item_type(
         for token in ("источник бесперебойного питания", "ибп", "ups", "line interactive", "online ups", "uninterruptible")
     ):
         return "ups"
+    if "манометр" in normalized or "pressure gauge" in normalized or "gauge pressure" in normalized:
+        return "pressure_gauge"
     if any(token in normalized for token in ("предохранител", "плавк", "fuse")):
         return "fuse"
     if any(token in normalized for token in ("кнопк", "push button", "кнопочн пост")):
@@ -1193,6 +1195,8 @@ def _normalize_effective_entity_type_by_catalog_branch(
         for marker in ("трансформаторы напряжения понижающие низковольтные", "трансформаторы тока низковольтные")
     ):
         return "transformer"
+    if "манометры" in normalized_branch:
+        return "pressure_gauge"
     if "ограничители импульсного перенапряжения силовые модульные" in normalized_branch:
         return "surge_protector"
     if any(marker in normalized_branch for marker in ("рубильники", "выключатели нагрузки", "выключатели разъединители")):
@@ -1391,6 +1395,8 @@ def derive_branch_from_text(
                 return "трансформаторы напряжения понижающие низковольтные"
             if effective_family == "ups":
                 return "источники бесперебойного питания (ибп)"
+            if effective_family == "pressure_gauge":
+                return "манометры"
             if effective_family == "fuse":
                 return "плавкие предохранители"
             if effective_family == "push_button":
@@ -1485,6 +1491,8 @@ def derive_branch_from_text(
             return "трансформаторы напряжения понижающие низковольтные"
         if registry_family == "ups":
             return "источники бесперебойного питания (ибп)"
+        if registry_family == "pressure_gauge":
+            return "манометры"
         if registry_family == "fuse":
             return "плавкие предохранители"
         if registry_family == "push_button":

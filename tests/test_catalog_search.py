@@ -867,6 +867,16 @@ class CatalogSearchTests(unittest.TestCase):
             "трансформаторы тока низковольтные",
         )
 
+    def test_classify_item_type_detects_pressure_gauge_queries(self):
+        self.assertEqual(
+            classify_item_type("Манометр радиальный 0-10 бар"),
+            "pressure_gauge",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Манометр радиальный 0-10 бар"),
+            "манометры",
+        )
+
     def test_classify_item_type_detects_fuse_queries(self):
         self.assertEqual(
             classify_item_type("Предохранитель плавкий 10А"),
@@ -1139,6 +1149,28 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(radiator["search_entity_type"], "radiator")
             self.assertEqual(radiator["search_effective_entity_type"], "radiator")
             self.assertEqual(radiator["search_effective_family"], "radiator")
+
+    def test_build_search_catalog_maps_pressure_gauges_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Манометр радиальный 0-10 бар;GAUGE-1;10;Манометры;CLS-1;Манометр;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+            gauge = built.loc[built["Артикул"] == "GAUGE-1"].iloc[0]
+
+            self.assertEqual(gauge["search_branch_path"], "манометры")
+            self.assertEqual(gauge["search_entity_type"], "pressure_gauge")
+            self.assertEqual(gauge["search_effective_entity_type"], "pressure_gauge")
+            self.assertEqual(gauge["search_effective_family"], "pressure_gauge")
 
     def test_build_search_catalog_maps_floor_convectors_out_of_other(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

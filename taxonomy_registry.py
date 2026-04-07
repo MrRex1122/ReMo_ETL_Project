@@ -589,6 +589,7 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
                 "упорн",
                 "самоустанавлива",
             ],
+            "required_any_tokens": [["подшип", "bearing"]],
         },
     },
     "radiator": {
@@ -650,6 +651,18 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
         "classifier": {
             "priority": 55,
             "positive_patterns": ["источник бесперебойного питания", "ибп", "ups", "line interactive", "online ups", "uninterruptible"],
+        },
+    },
+    "pressure_gauge": {
+        "entity_types": ["pressure_gauge"],
+        "default_branches": ["манометры"],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "audited": True,
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 52,
+            "positive_patterns": ["манометр", "pressure gauge", "gauge pressure"],
         },
     },
     "iec_power_cable": {
@@ -1210,6 +1223,10 @@ DEFAULT_DOMAIN_REGISTRY: Dict[str, Any] = {
         "ups": {
             "patterns": ["источник бесперебойного питания", "ибп", "ups", "line interactive", "online ups", "uninterruptible"],
             "families": ["ups"],
+        },
+        "pressure_gauge": {
+            "patterns": ["манометр", "pressure gauge", "gauge pressure"],
+            "families": ["pressure_gauge"],
         },
         "rack_accessory": {
             "patterns": ["полк", "рельс", "направля", "щеточ", "заглуш"],
@@ -2287,6 +2304,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "heat_shrink",
         "transformer",
         "ups",
+        "pressure_gauge",
         "iec_power_cable",
         "keystone",
         "optical_cross",
@@ -2313,6 +2331,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "heat_shrink": "heat_shrink",
         "transformer": "transformer",
         "ups": "ups",
+        "pressure_gauge": "pressure_gauge",
         "light_signage": "signage",
         "safety_sign": "signage",
         "patch_panel": "patch_panel",
@@ -2367,6 +2386,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "heat_shrink": "heat shrink",
         "transformer": "transformer",
         "ups": "ups",
+        "pressure_gauge": "pressure gauge",
         "signage": "signage",
         "fastener": "fastener",
         "surge_protector": "surge protector",
