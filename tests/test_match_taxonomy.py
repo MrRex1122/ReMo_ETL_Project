@@ -2066,6 +2066,35 @@ class MatchTaxonomyTests(unittest.TestCase):
             "ups",
         )
 
+    def test_effective_candidate_family_maps_other_push_button_branches(self):
+        button_features = self.matcher._extract_query_features("Кнопка управления красная 22мм")
+        button_features["entity_type"] = "push_button"
+        button_candidate = {
+            "name": "Кнопка управления красная 22мм",
+            "normalized_name": "кнопка управления красная 22мм",
+            "branch_path": "кнопки",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        post_features = self.matcher._extract_query_features("Кнопочный пост ПКЕ 2 кнопки")
+        post_features["entity_type"] = "push_button"
+        post_candidate = {
+            "name": "Кнопочный пост ПКЕ 2 кнопки",
+            "normalized_name": "кнопочный пост пке 2 кнопки",
+            "branch_path": "кнопочные посты",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(button_features, button_candidate),
+            "push_button",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(post_features, post_candidate),
+            "push_button",
+        )
+
     def test_collect_branch_candidates_relaxes_entity_filter_for_box_family(self):
         self.matcher._uses_duckdb_query_backend = lambda: True
         captured = {}

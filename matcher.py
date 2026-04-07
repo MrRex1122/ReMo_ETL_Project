@@ -4827,6 +4827,10 @@ class ReMoMatcher:
             return "ups"
         if "плавкие предохранители" in branch_path or any(token in search_text for token in ("предохранител", "плавк", "fuse")):
             return "fuse"
+        if any(token in branch_path for token in ("кнопки", "кнопочные посты")) or any(
+            token in search_text for token in ("кнопк", "push button", "кнопочн пост")
+        ):
+            return "push_button"
         if (
             "перфорированные кабель каналы" in branch_path
             or (
@@ -4929,6 +4933,7 @@ class ReMoMatcher:
             "transformer",
             "ups",
             "fuse",
+            "push_button",
             "switch_wiring",
         }
 

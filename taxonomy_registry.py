@@ -956,6 +956,19 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
             "positive_patterns": ["предохранител", "плавк", "fuse"],
         },
     },
+    "push_button": {
+        "entity_types": ["push_button"],
+        "default_branches": ["кнопки", "кнопочные посты"],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "audited": True,
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 56,
+            "positive_patterns": ["кнопк", "push button", "кнопочн пост"],
+            "negative_patterns": ["клавиатур", "кнопочн телефон", "кнопк мыш"],
+        },
+    },
     "socket": {
         "entity_types": ["socket"],
         "default_branches": ["электрика > розетки"],
@@ -1023,6 +1036,10 @@ DEFAULT_DOMAIN_REGISTRY: Dict[str, Any] = {
         "fuse": {
             "patterns": ["предохранител", "плавк", "fuse"],
             "families": ["fuse"],
+        },
+        "push_button": {
+            "patterns": ["кнопк", "push button", "кнопочн пост"],
+            "families": ["push_button"],
         },
         "grounding": {
             "patterns": ["заземл", "шина", "стержень"],
@@ -2118,6 +2135,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "floor_box",
         "fastener",
         "fuse",
+        "push_button",
         "ground_bar",
         "light_signage",
         "safety_sign",
@@ -2179,6 +2197,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "industrial_valve": "industrial_valve",
         "floor_box": "floor_box",
         "fuse": "fuse",
+        "push_button": "push_button",
         "rack": "rack",
         "sensor": "sensor",
         "switch_wiring": "switch_wiring",
@@ -2210,6 +2229,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "industrial_valve": "industrial valve",
         "floor_box": "floor_box",
         "fuse": "fuse",
+        "push_button": "push_button",
         "rack": "rack",
         "sensor": "sensor",
         "switch_wiring": "switch_wiring",

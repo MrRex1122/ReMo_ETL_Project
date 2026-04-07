@@ -855,6 +855,24 @@ class CatalogSearchTests(unittest.TestCase):
             "источники бесперебойного питания (ибп)",
         )
 
+    def test_classify_item_type_detects_push_button_queries(self):
+        self.assertEqual(
+            classify_item_type("Кнопка управления красная 22мм"),
+            "push_button",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Кнопка управления красная 22мм"),
+            "кнопки",
+        )
+        self.assertEqual(
+            classify_item_type("Кнопочный пост ПКЕ 2 кнопки"),
+            "push_button",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Кнопочный пост ПКЕ 2 кнопки"),
+            "кнопочные посты",
+        )
+
     def test_build_search_catalog_maps_perforated_cable_channels_to_cable_channel_family(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
@@ -1116,6 +1134,35 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(ups["search_entity_type"], "ups")
             self.assertEqual(ups["search_effective_entity_type"], "ups")
             self.assertEqual(ups["search_effective_family"], "ups")
+
+    def test_build_search_catalog_maps_push_buttons_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Кнопка управления красная 22мм;BTN-1;10;Кнопки;CLS-1;Кнопка;;ReMo\n"
+                    "Кнопочный пост ПКЕ 2 кнопки;BTN-2;10;Кнопочные Посты;CLS-2;Кнопочный пост;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+            button = built.loc[built["Артикул"] == "BTN-1"].iloc[0]
+            post = built.loc[built["Артикул"] == "BTN-2"].iloc[0]
+
+            self.assertEqual(button["search_branch_path"], "кнопки")
+            self.assertEqual(button["search_entity_type"], "push_button")
+            self.assertEqual(button["search_effective_entity_type"], "push_button")
+            self.assertEqual(button["search_effective_family"], "push_button")
+
+            self.assertEqual(post["search_branch_path"], "кнопочные посты")
+            self.assertEqual(post["search_entity_type"], "push_button")
+            self.assertEqual(post["search_effective_entity_type"], "push_button")
+            self.assertEqual(post["search_effective_family"], "push_button")
 
     def test_derive_branch_from_text_skips_telecom_rack_for_control_cabinet(self):
         self.assertEqual(

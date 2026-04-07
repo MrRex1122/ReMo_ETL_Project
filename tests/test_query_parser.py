@@ -193,5 +193,14 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(ups.entity_type, "ups")
         self.assertEqual(ups.branch_hint, "источники бесперебойного питания (ибп)")
 
+    def test_parse_query_spec_detects_push_button_queries(self):
+        button = parse_query_spec("Кнопка управления красная 22мм", taxonomy_rules=self.rules)
+        post = parse_query_spec("Кнопочный пост ПКЕ 2 кнопки", taxonomy_rules=self.rules)
+
+        self.assertEqual(button.entity_type, "push_button")
+        self.assertEqual(button.branch_hint, "кнопки")
+        self.assertEqual(post.entity_type, "push_button")
+        self.assertEqual(post.branch_hint, "кнопочные посты")
+
 if __name__ == "__main__":
     unittest.main()
