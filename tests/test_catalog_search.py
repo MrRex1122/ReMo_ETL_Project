@@ -1082,6 +1082,22 @@ class CatalogSearchTests(unittest.TestCase):
             derive_branch_from_text("Корпус распределительный встраиваемый пластиковый на 24 модуля"),
             "корпуса распределительные встраиваемые пластиковые",
         )
+        self.assertEqual(
+            classify_item_type("Щит распределительный навесной металлический ЩРН-36"),
+            "distribution_enclosure",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Щит распределительный навесной металлический ЩРН-36"),
+            "корпуса учетно-распределительные навесные металлические",
+        )
+        self.assertEqual(
+            classify_item_type("Корпус распределительный навесной пластиковый ЩРН-П 24"),
+            "distribution_enclosure",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Корпус распределительный навесной пластиковый ЩРН-П 24"),
+            "корпуса распределительные навесные пластиковые",
+        )
 
     def test_classify_item_type_detects_power_accessory_queries(self):
         self.assertEqual(
@@ -1764,6 +1780,8 @@ class CatalogSearchTests(unittest.TestCase):
                     "Тип исполнения кабельного изделия;Производитель\n"
                     "Щит распределительный встраиваемый металлический на 36 модулей;ENC-1;10;Корпуса Учетно-Распределительные Встраиваемые Металлические;CLS-1;Щит распределительный;;ReMo\n"
                     "Корпус распределительный встраиваемый пластиковый на 24 модуля;ENC-2;10;Корпуса Распределительные Встраиваемые Пластиковые;CLS-2;Корпус распределительный;;ReMo\n"
+                    "Щит распределительный навесной металлический ЩРН-36;ENC-3;10;Корпуса Учетно-Распределительные Навесные Металлические;CLS-3;Щит распределительный;;ReMo\n"
+                    "Корпус распределительный навесной пластиковый ЩРН-П 24;ENC-4;10;Корпуса Распределительные Навесные Пластиковые;CLS-4;Корпус распределительный;;ReMo\n"
                 ),
                 encoding="utf-8",
             )
@@ -1772,6 +1790,8 @@ class CatalogSearchTests(unittest.TestCase):
             built = pd.read_csv(search_path, sep=";", encoding="utf-8")
             metal = built.loc[built["Артикул"] == "ENC-1"].iloc[0]
             plastic = built.loc[built["Артикул"] == "ENC-2"].iloc[0]
+            metal_wall = built.loc[built["Артикул"] == "ENC-3"].iloc[0]
+            plastic_wall = built.loc[built["Артикул"] == "ENC-4"].iloc[0]
 
             self.assertEqual(metal["search_branch_path"], "корпуса учетно-распределительные встраиваемые металлические")
             self.assertEqual(metal["search_entity_type"], "distribution_enclosure")
@@ -1782,6 +1802,16 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(plastic["search_entity_type"], "distribution_enclosure")
             self.assertEqual(plastic["search_effective_entity_type"], "distribution_enclosure")
             self.assertEqual(plastic["search_effective_family"], "distribution_enclosure")
+
+            self.assertEqual(metal_wall["search_branch_path"], "корпуса учетно-распределительные навесные металлические")
+            self.assertEqual(metal_wall["search_entity_type"], "distribution_enclosure")
+            self.assertEqual(metal_wall["search_effective_entity_type"], "distribution_enclosure")
+            self.assertEqual(metal_wall["search_effective_family"], "distribution_enclosure")
+
+            self.assertEqual(plastic_wall["search_branch_path"], "корпуса распределительные навесные пластиковые")
+            self.assertEqual(plastic_wall["search_entity_type"], "distribution_enclosure")
+            self.assertEqual(plastic_wall["search_effective_entity_type"], "distribution_enclosure")
+            self.assertEqual(plastic_wall["search_effective_family"], "distribution_enclosure")
 
     def test_build_search_catalog_maps_cable_conduits_out_of_other(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

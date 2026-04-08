@@ -1075,8 +1075,8 @@ def classify_item_type(
     ) and not any(token in normalized for token in ("кабельн лот", "keystone", "rj45", "патч", "din рейк", "din-рейк")):
         return "power_accessory"
     if (
-        any(token in normalized for token in ("щит распредел", "щиток", "электрощит", "корпус распредел", "корпус учетно"))
-        and any(token in normalized for token in ("встраив", "модул", "распредел", "учет"))
+        any(token in normalized for token in ("щит распредел", "щиток", "электрощит", "корпус распредел", "корпус учетно", "щрв", "щрн", "щурв", "щурн"))
+        and any(token in normalized for token in ("встраив", "навес", "модул", "распредел", "учет", "щит"))
         and not any(token in normalized for token in ("заглуш", "двер", "панел", "рамк", "аксессуар", "комплектующ"))
     ):
         return "distribution_enclosure"
@@ -1379,7 +1379,9 @@ def _normalize_effective_entity_type_by_catalog_branch(
         marker in normalized_branch
         for marker in (
             "корпуса учетно распределительные встраиваемые металлические",
+            "корпуса учетно распределительные навесные металлические",
             "корпуса распределительные встраиваемые пластиковые",
+            "корпуса распределительные навесные пластиковые",
         )
     ):
         return "distribution_enclosure"
@@ -1675,6 +1677,10 @@ def derive_branch_from_text(
             if effective_family == "power_accessory":
                 return "удлинители, сетевые фильтры, переходники, штепсельные вилки"
             if effective_family == "distribution_enclosure":
+                if any(token in merged for token in ("навес", "щрн", "щурн")):
+                    if "пластик" in merged:
+                        return "корпуса распределительные навесные пластиковые"
+                    return "корпуса учетно-распределительные навесные металлические"
                 if "пластик" in merged:
                     return "корпуса распределительные встраиваемые пластиковые"
                 return "корпуса учетно-распределительные встраиваемые металлические"
@@ -1737,6 +1743,10 @@ def derive_branch_from_text(
         if registry_family == "power_accessory":
             return "удлинители, сетевые фильтры, переходники, штепсельные вилки"
         if registry_family == "distribution_enclosure":
+            if any(token in merged for token in ("навес", "щрн", "щурн")):
+                if "пластик" in merged:
+                    return "корпуса распределительные навесные пластиковые"
+                return "корпуса учетно-распределительные навесные металлические"
             if "пластик" in merged:
                 return "корпуса распределительные встраиваемые пластиковые"
             return "корпуса учетно-распределительные встраиваемые металлические"
@@ -2021,6 +2031,10 @@ def derive_branch_from_text(
     if effective_entity_type == "power_accessory":
         return "удлинители, сетевые фильтры, переходники, штепсельные вилки"
     if effective_entity_type == "distribution_enclosure":
+        if any(token in merged for token in ("навес", "щрн", "щурн")):
+            if "пластик" in merged:
+                return "корпуса распределительные навесные пластиковые"
+            return "корпуса учетно-распределительные навесные металлические"
         if "пластик" in merged:
             return "корпуса распределительные встраиваемые пластиковые"
         return "корпуса учетно-распределительные встраиваемые металлические"

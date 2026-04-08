@@ -2290,6 +2290,24 @@ class MatchTaxonomyTests(unittest.TestCase):
             "entity_type": "other",
             "item_markers": {},
         }
+        metal_wall_features = self.matcher._extract_query_features("Щит распределительный навесной металлический ЩРН-36")
+        metal_wall_features["entity_type"] = "distribution_enclosure"
+        metal_wall_candidate = {
+            "name": "Щит распределительный навесной металлический ЩРН-36",
+            "normalized_name": "щит распределительный навесной металлический щрн 36",
+            "branch_path": "корпуса учетно-распределительные навесные металлические",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        plastic_wall_features = self.matcher._extract_query_features("Корпус распределительный навесной пластиковый ЩРН-П 24")
+        plastic_wall_features["entity_type"] = "distribution_enclosure"
+        plastic_wall_candidate = {
+            "name": "Корпус распределительный навесной пластиковый ЩРН-П 24",
+            "normalized_name": "корпус распределительный навесной пластиковый щрн п 24",
+            "branch_path": "корпуса распределительные навесные пластиковые",
+            "entity_type": "other",
+            "item_markers": {},
+        }
 
         self.assertEqual(
             self.matcher._effective_candidate_family_for_query(metal_features, metal_candidate),
@@ -2297,6 +2315,14 @@ class MatchTaxonomyTests(unittest.TestCase):
         )
         self.assertEqual(
             self.matcher._effective_candidate_family_for_query(plastic_features, plastic_candidate),
+            "distribution_enclosure",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(metal_wall_features, metal_wall_candidate),
+            "distribution_enclosure",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(plastic_wall_features, plastic_wall_candidate),
             "distribution_enclosure",
         )
 

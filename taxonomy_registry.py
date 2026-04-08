@@ -214,7 +214,9 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
         "entity_types": ["distribution_enclosure"],
         "default_branches": [
             "корпуса учетно-распределительные встраиваемые металлические",
+            "корпуса учетно-распределительные навесные металлические",
             "корпуса распределительные встраиваемые пластиковые",
+            "корпуса распределительные навесные пластиковые",
         ],
         "retrieval_mode": "branch_limited",
         "strictness": "semi_strict",
@@ -225,9 +227,14 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
             "positive_patterns": [
                 "щит распределительный",
                 "встраиваемый щит",
+                "навесной щит",
                 "электрощит",
                 "корпус распределительный",
                 "корпус учетно-распределительный",
+                "щрв",
+                "щрн",
+                "щурв",
+                "щурн",
                 "distribution enclosure",
                 "distribution board",
             ],
@@ -241,7 +248,7 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
                 "din-рейк",
                 "din рейк",
             ],
-            "required_any_tokens": [["щит", "щиток", "корпус"], ["распредел", "учет", "встраив", "модул", "электрощит"]],
+            "required_any_tokens": [["щит", "щиток", "корпус", "щрв", "щрн", "щурв", "щурн"], ["распредел", "учет", "встраив", "навес", "модул", "электрощит"]],
         },
     },
     "cable_channel": {
@@ -1873,7 +1880,7 @@ DEFAULT_DOMAIN_REGISTRY: Dict[str, Any] = {
             "families": ["power_accessory"],
         },
         "distribution_enclosure": {
-            "patterns": ["щит распредел", "щиток", "электрощит", "корпус распредел", "корпус учетно", "встраиваемый щит"],
+            "patterns": ["щит распредел", "щиток", "электрощит", "корпус распредел", "корпус учетно", "встраиваемый щит", "навесной щит", "щрв", "щрн", "щурв", "щурн"],
             "families": ["distribution_enclosure"],
         },
         "cable_conduit": {

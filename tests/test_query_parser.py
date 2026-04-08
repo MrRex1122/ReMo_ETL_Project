@@ -286,11 +286,17 @@ class QueryParserTests(unittest.TestCase):
     def test_parse_query_spec_detects_distribution_enclosure_queries(self):
         metal = parse_query_spec("Щит распределительный встраиваемый металлический на 36 модулей", taxonomy_rules=self.rules)
         plastic = parse_query_spec("Корпус распределительный встраиваемый пластиковый на 24 модуля", taxonomy_rules=self.rules)
+        metal_wall = parse_query_spec("Щит распределительный навесной металлический ЩРН-36", taxonomy_rules=self.rules)
+        plastic_wall = parse_query_spec("Корпус распределительный навесной пластиковый ЩРН-П 24", taxonomy_rules=self.rules)
 
         self.assertEqual(metal.entity_type, "distribution_enclosure")
         self.assertEqual(metal.branch_hint, "корпуса учетно-распределительные встраиваемые металлические")
         self.assertEqual(plastic.entity_type, "distribution_enclosure")
         self.assertEqual(plastic.branch_hint, "корпуса распределительные встраиваемые пластиковые")
+        self.assertEqual(metal_wall.entity_type, "distribution_enclosure")
+        self.assertEqual(metal_wall.branch_hint, "корпуса учетно-распределительные навесные металлические")
+        self.assertEqual(plastic_wall.entity_type, "distribution_enclosure")
+        self.assertEqual(plastic_wall.branch_hint, "корпуса распределительные навесные пластиковые")
 
     def test_parse_query_spec_detects_power_accessory_queries(self):
         strip = parse_query_spec("Удлинитель силовой на 4 розетки 3м", taxonomy_rules=self.rules)
