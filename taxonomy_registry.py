@@ -568,6 +568,32 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
             "required_any_tokens": [["заземл"], ["шин"]],
         },
     },
+    "neutral_busbar": {
+        "entity_types": ["neutral_busbar"],
+        "default_branches": ["нулевые шины на din-рейку"],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "audited": True,
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 53,
+            "positive_patterns": [
+                "нулевая шина",
+                "нулевые шины",
+                "шина нулевая",
+                "neutral bus",
+                "n busbar",
+            ],
+            "negative_patterns": [
+                "заземл",
+                "pe",
+                "клемм",
+                "клеммник",
+                "terminal block",
+            ],
+            "required_any_tokens": [["нулев", "neutral"], ["шин", "bus"]],
+        },
+    },
     "industrial_valve": {
         "entity_types": ["industrial_valve"],
         "default_branches": [
@@ -647,6 +673,33 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
                 "die holder",
             ],
             "required_any_tokens": [["метчик", "tap"]],
+        },
+    },
+    "thread_die": {
+        "entity_types": ["thread_die"],
+        "default_branches": ["плашки"],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "audited": True,
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 53,
+            "positive_patterns": [
+                "плашка",
+                "плашки",
+                "thread die",
+                "round die",
+            ],
+            "negative_patterns": [
+                "метчик",
+                "сверл",
+                "держател",
+                "вороток",
+                "tap",
+                "thread tap",
+                "die holder",
+            ],
+            "required_any_tokens": [["плашк", "thread die", "round die"]],
         },
     },
     "drill_bit_metal": {
@@ -1680,6 +1733,10 @@ DEFAULT_DOMAIN_REGISTRY: Dict[str, Any] = {
             "patterns": ["заземл", "шина", "стержень"],
             "families": ["ground_bar"],
         },
+        "neutral_busbar": {
+            "patterns": ["нулевая шина", "нулевые шины", "шина нулевая", "neutral bus", "n busbar"],
+            "families": ["neutral_busbar"],
+        },
         "industrial_valve": {
             "patterns": [
                 "затвор",
@@ -1699,6 +1756,10 @@ DEFAULT_DOMAIN_REGISTRY: Dict[str, Any] = {
         "thread_tap": {
             "patterns": ["метчик", "метчики", "tap", "thread tap", "машинно-ручной метчик"],
             "families": ["thread_tap"],
+        },
+        "thread_die": {
+            "patterns": ["плашка", "плашки", "thread die", "round die"],
+            "families": ["thread_die"],
         },
         "drill_bit_metal": {
             "patterns": ["сверло по металлу", "сверла по металлу", "drill bit", "metal drill", "hss drill"],
@@ -2894,7 +2955,9 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "safety_sign",
         "industrial_valve",
         "industrial_pump",
+        "neutral_busbar",
         "thread_tap",
+        "thread_die",
         "drill_bit_metal",
         "masonry_drill_bit",
         "concrete_hole_saw",
@@ -2952,7 +3015,9 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "light_signage": "signage",
         "safety_sign": "signage",
         "industrial_pump": "industrial_pump",
+        "neutral_busbar": "neutral_busbar",
         "thread_tap": "thread_tap",
+        "thread_die": "thread_die",
         "drill_bit_metal": "drill_bit_metal",
         "masonry_drill_bit": "masonry_drill_bit",
         "concrete_hole_saw": "concrete_hole_saw",
@@ -3023,7 +3088,9 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "electric_motor": "electric motor",
         "signage": "signage",
         "industrial_pump": "industrial pump",
+        "neutral_busbar": "neutral busbar",
         "thread_tap": "thread tap",
+        "thread_die": "thread die",
         "drill_bit_metal": "drill bit metal",
         "masonry_drill_bit": "masonry drill bit",
         "concrete_hole_saw": "concrete hole saw",

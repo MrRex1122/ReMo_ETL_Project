@@ -995,6 +995,20 @@ class CatalogSearchTests(unittest.TestCase):
             "thread_tap",
         )
 
+    def test_classify_item_type_detects_thread_die_queries(self):
+        self.assertEqual(
+            classify_item_type("Плашка круглая М8"),
+            "thread_die",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Плашка круглая М8"),
+            "плашки",
+        )
+        self.assertNotEqual(
+            classify_item_type("Метчик машинно-ручной М8"),
+            "thread_die",
+        )
+
     def test_classify_item_type_detects_drill_bit_metal_queries(self):
         self.assertEqual(
             classify_item_type("Сверло по металлу HSS 8 мм"),
@@ -1179,6 +1193,20 @@ class CatalogSearchTests(unittest.TestCase):
         self.assertEqual(
             derive_branch_from_text("Арматура светосигнальная зеленая 24В"),
             "светосигнальная арматура",
+        )
+
+    def test_classify_item_type_detects_neutral_busbar_queries(self):
+        self.assertEqual(
+            classify_item_type("Нулевая шина на DIN-рейку 12 групп"),
+            "neutral_busbar",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Нулевая шина на DIN-рейку 12 групп"),
+            "нулевые шины на din-рейку",
+        )
+        self.assertNotEqual(
+            classify_item_type("Шина заземления медная"),
+            "neutral_busbar",
         )
 
     def test_classify_item_type_detects_wire_ferrule_queries(self):
@@ -1616,6 +1644,28 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(tap["search_effective_entity_type"], "thread_tap")
             self.assertEqual(tap["search_effective_family"], "thread_tap")
 
+    def test_build_search_catalog_maps_thread_dies_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Плашка круглая М8;DIE-1;10;Плашки;CLS-1;Плашка;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+            die = built.loc[built["Артикул"] == "DIE-1"].iloc[0]
+
+            self.assertEqual(die["search_branch_path"], "плашки")
+            self.assertEqual(die["search_entity_type"], "thread_die")
+            self.assertEqual(die["search_effective_entity_type"], "thread_die")
+            self.assertEqual(die["search_effective_family"], "thread_die")
+
     def test_build_search_catalog_maps_drill_bits_out_of_other(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
@@ -1986,6 +2036,28 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(signal_indicator["search_entity_type"], "signal_indicator")
             self.assertEqual(signal_indicator["search_effective_entity_type"], "signal_indicator")
             self.assertEqual(signal_indicator["search_effective_family"], "signal_indicator")
+
+    def test_build_search_catalog_maps_neutral_busbars_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Нулевая шина на DIN-рейку 12 групп;BUS-1;10;Нулевые Шины На DIN-Рейку;CLS-1;Шина нулевая;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+            busbar = built.loc[built["Артикул"] == "BUS-1"].iloc[0]
+
+            self.assertEqual(busbar["search_branch_path"], "нулевые шины на din-рейку")
+            self.assertEqual(busbar["search_entity_type"], "neutral_busbar")
+            self.assertEqual(busbar["search_effective_entity_type"], "neutral_busbar")
+            self.assertEqual(busbar["search_effective_family"], "neutral_busbar")
 
     def test_build_search_catalog_maps_wire_ferrules_out_of_other(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

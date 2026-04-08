@@ -980,6 +980,11 @@ def classify_item_type(
     ):
         return "thread_tap"
     if (
+        any(token in normalized for token in ("плашка", "плашки", "thread die", "round die"))
+        and not any(token in normalized for token in ("метчик", "сверл", "держател", "вороток", "tap", "thread tap", "die holder"))
+    ):
+        return "thread_die"
+    if (
         any(token in normalized for token in ("сверло по металлу", "сверла по металлу", "drill bit", "metal drill", "hss drill"))
         and not any(token in normalized for token in ("метчик", "плашк", "коронк", "зенкер", "держател", "tap", "thread tap"))
     ):
@@ -1139,6 +1144,11 @@ def classify_item_type(
         return "fastener"
     if "заземл" in normalized and "шин" in normalized:
         return "ground_bar"
+    if (
+        any(token in normalized for token in ("нулевая шина", "нулевые шины", "шина нулевая", "neutral bus", "n busbar"))
+        and not any(token in normalized for token in ("заземл", "pe", "клемм", "клеммник", "terminal block"))
+    ):
+        return "neutral_busbar"
     if has_iec_connector_markers and not _looks_like_pdu_device(normalized):
         return "iec_power_cable"
     if _looks_like_patch_panel(normalized, phrase_normalized):
@@ -1322,6 +1332,8 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "industrial_pump"
     if "метчики" in normalized_branch:
         return "thread_tap"
+    if "плашки" in normalized_branch:
+        return "thread_die"
     if "сверла по металлу" in normalized_branch:
         return "drill_bit_metal"
     if any(marker in normalized_branch for marker in ("буры sds-plus", "буры sds-max", "сверла по бетону")):
@@ -1330,6 +1342,8 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "concrete_hole_saw"
     if any(marker in normalized_branch for marker in ("зубила sds-plus", "зубила sds-max")):
         return "sds_chisel"
+    if "нулевые шины на din-рейку" in normalized_branch:
+        return "neutral_busbar"
     if any(marker in normalized_branch for marker in ("подшипники роликовые цилиндрические", "подшипники роликовые сферические", "подшипники роликовые конические", "подшипники шариковые радиальные", "подшипники шариковые радиально-упорные", "упорные подшипники", "самоустанавливающиеся шарикоподшипники", "игольчатые подшипники")):
         return "bearing"
     if "радиаторы стальные панельные" in normalized_branch:
@@ -1598,6 +1612,8 @@ def derive_branch_from_text(
                 return "промышленные вертикальные центробежные насосы"
             if effective_family == "thread_tap":
                 return "метчики"
+            if effective_family == "thread_die":
+                return "плашки"
             if effective_family == "drill_bit_metal":
                 return "сверла по металлу"
             if effective_family == "masonry_drill_bit":
@@ -1750,6 +1766,8 @@ def derive_branch_from_text(
             return "промышленные вертикальные центробежные насосы"
         if registry_family == "thread_tap":
             return "метчики"
+        if registry_family == "thread_die":
+            return "плашки"
         if registry_family == "drill_bit_metal":
             return "сверла по металлу"
         if registry_family == "masonry_drill_bit":
@@ -1828,6 +1846,8 @@ def derive_branch_from_text(
             if ("клем" in merged or "terminal block" in merged) and "блок" not in merged and "блоки" not in merged:
                 return "клеммы на din-рейку"
             return "клеммные блоки зажимов на din-рейку"
+        if registry_family == "neutral_busbar":
+            return "нулевые шины на din-рейку"
         if registry_family == "wire_ferrule":
             return "штыревые втулочные наконечники (ншв и ншви)"
         if registry_family == "signal_indicator":
@@ -1874,7 +1894,9 @@ def derive_branch_from_text(
             "cable_channel",
             "industrial_valve",
             "industrial_pump",
+            "neutral_busbar",
             "thread_tap",
+            "thread_die",
             "drill_bit_metal",
             "masonry_drill_bit",
             "concrete_hole_saw",
@@ -1952,6 +1974,8 @@ def derive_branch_from_text(
         return "телеком > аксессуары > лючки"
     if effective_entity_type == "ground_bar":
         return "телеком > аксессуары > заземление"
+    if effective_entity_type == "neutral_busbar":
+        return "нулевые шины на din-рейку"
     if effective_entity_type == "breaker":
         if any(token in merged for token in ("рубильник", "выключатель нагрузки", "выключатель разъединитель")):
             return "рубильники"
@@ -1976,6 +2000,8 @@ def derive_branch_from_text(
         return "промышленные вертикальные центробежные насосы"
     if effective_entity_type == "thread_tap":
         return "метчики"
+    if effective_entity_type == "thread_die":
+        return "плашки"
     if effective_entity_type == "drill_bit_metal":
         return "сверла по металлу"
     if effective_entity_type == "masonry_drill_bit":

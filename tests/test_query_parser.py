@@ -253,6 +253,12 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(tap.entity_type, "thread_tap")
         self.assertEqual(tap.branch_hint, "метчики")
 
+    def test_parse_query_spec_detects_thread_die_queries(self):
+        die = parse_query_spec("Плашка круглая М8", taxonomy_rules=self.rules)
+
+        self.assertEqual(die.entity_type, "thread_die")
+        self.assertEqual(die.branch_hint, "плашки")
+
     def test_parse_query_spec_detects_drill_bit_metal_queries(self):
         drill = parse_query_spec("Сверло по металлу HSS 8 мм", taxonomy_rules=self.rules)
 
@@ -342,6 +348,12 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(mini.branch_hint, "миниклеммы на din-рейку")
         self.assertEqual(signal_indicator.entity_type, "signal_indicator")
         self.assertEqual(signal_indicator.branch_hint, "светосигнальная арматура")
+
+    def test_parse_query_spec_detects_neutral_busbar_queries(self):
+        busbar = parse_query_spec("Нулевая шина на DIN-рейку 12 групп", taxonomy_rules=self.rules)
+
+        self.assertEqual(busbar.entity_type, "neutral_busbar")
+        self.assertEqual(busbar.branch_hint, "нулевые шины на din-рейку")
 
     def test_parse_query_spec_detects_wire_ferrule_queries(self):
         ferrule = parse_query_spec("Наконечник штыревой втулочный НШВИ 1,5-8", taxonomy_rules=self.rules)

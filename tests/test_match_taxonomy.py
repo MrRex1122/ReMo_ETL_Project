@@ -2191,6 +2191,22 @@ class MatchTaxonomyTests(unittest.TestCase):
             "thread_tap",
         )
 
+    def test_effective_candidate_family_maps_other_thread_die_branch(self):
+        features = self.matcher._extract_query_features("Плашка круглая М8")
+        features["entity_type"] = "thread_die"
+        candidate = {
+            "name": "Плашка круглая М8",
+            "normalized_name": "плашка круглая м8",
+            "branch_path": "плашки",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(features, candidate),
+            "thread_die",
+        )
+
     def test_effective_candidate_family_maps_other_drill_bit_metal_branch(self):
         features = self.matcher._extract_query_features("Сверло по металлу HSS 8 мм")
         features["entity_type"] = "drill_bit_metal"
@@ -2537,6 +2553,22 @@ class MatchTaxonomyTests(unittest.TestCase):
             "wire_ferrule",
         )
 
+    def test_effective_candidate_family_maps_other_neutral_busbar_branch(self):
+        features = self.matcher._extract_query_features("Нулевая шина на DIN-рейку 12 групп")
+        features["entity_type"] = "neutral_busbar"
+        candidate = {
+            "name": "Нулевая шина на DIN-рейку 12 групп",
+            "normalized_name": "нулевая шина на din рейку 12 групп",
+            "branch_path": "нулевые шины на din-рейку",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(features, candidate),
+            "neutral_busbar",
+        )
+
     def test_effective_candidate_family_maps_other_rubilniki_branch(self):
         features = self.matcher._extract_query_features("Выключатель нагрузки 3P 63A")
         features["entity_type"] = "breaker"
@@ -2652,6 +2684,28 @@ class MatchTaxonomyTests(unittest.TestCase):
             ["штыревые втулочные наконечники (ншв и ншви)"],
             limit=25,
             query_features={"entity_type": "wire_ferrule"},
+        )
+
+        self.assertNotIn("search_entity_type", captured["where_sql"])
+        self.assertEqual(captured["limit"], 25)
+
+    def test_collect_branch_candidates_relaxes_entity_filter_for_neutral_busbar_family(self):
+        self.matcher._uses_duckdb_query_backend = lambda: True
+        captured = {}
+
+        def fake_fetch_items(where_sql="", params=None, order_by_sql="", limit=None):
+            captured["where_sql"] = where_sql
+            captured["params"] = list(params or [])
+            captured["order_by_sql"] = order_by_sql
+            captured["limit"] = limit
+            return []
+
+        self.matcher._duckdb_fetch_items = fake_fetch_items
+
+        self.matcher._collect_branch_candidates(
+            ["нулевые шины на din-рейку"],
+            limit=25,
+            query_features={"entity_type": "neutral_busbar"},
         )
 
         self.assertNotIn("search_entity_type", captured["where_sql"])
@@ -2850,6 +2904,28 @@ class MatchTaxonomyTests(unittest.TestCase):
             ["метчики"],
             limit=25,
             query_features={"entity_type": "thread_tap"},
+        )
+
+        self.assertNotIn("search_entity_type", captured["where_sql"])
+        self.assertEqual(captured["limit"], 25)
+
+    def test_collect_branch_candidates_relaxes_entity_filter_for_thread_die_family(self):
+        self.matcher._uses_duckdb_query_backend = lambda: True
+        captured = {}
+
+        def fake_fetch_items(where_sql="", params=None, order_by_sql="", limit=None):
+            captured["where_sql"] = where_sql
+            captured["params"] = list(params or [])
+            captured["order_by_sql"] = order_by_sql
+            captured["limit"] = limit
+            return []
+
+        self.matcher._duckdb_fetch_items = fake_fetch_items
+
+        self.matcher._collect_branch_candidates(
+            ["плашки"],
+            limit=25,
+            query_features={"entity_type": "thread_die"},
         )
 
         self.assertNotIn("search_entity_type", captured["where_sql"])

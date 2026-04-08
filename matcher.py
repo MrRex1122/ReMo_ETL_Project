@@ -4816,6 +4816,11 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("сверл", "плашк", "держател", "вороток", "набор сверл", "drill", "die holder"))
         ):
             return "thread_tap"
+        if "плашки" in branch_path or (
+            any(token in search_text for token in ("плашка", "плашки", "thread die", "round die"))
+            and not any(token in search_text for token in ("метчик", "сверл", "держател", "вороток", "tap", "thread tap", "die holder"))
+        ):
+            return "thread_die"
         if "сверла по металлу" in branch_path or (
             any(
                 token in search_text
@@ -5015,6 +5020,11 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("заглушк", "маркир", "аккумулятор", "акб"))
         ):
             return "terminal_block"
+        if "нулевые шины на din-рейку" in branch_path or (
+            any(token in search_text for token in ("нулевая шина", "нулевые шины", "шина нулевая", "neutral bus", "n busbar"))
+            and not any(token in search_text for token in ("заземл", "pe", "клемм", "клеммник", "terminal block"))
+        ):
+            return "neutral_busbar"
         if "штыревые втулочные наконечники" in branch_path or (
             any(token in search_text for token in ("штыревые втулочные наконечники", "втулочный наконечник", "втулочные наконечники", "ншв", "ншви", "ferrule", "bootlace ferrule"))
             and not any(token in search_text for token in ("клеммный блок", "клеммник", "din рейк", "din-рейк", "terminal block"))
@@ -5131,7 +5141,9 @@ class ReMoMatcher:
             "cable_channel",
             "industrial_valve",
             "industrial_pump",
+            "neutral_busbar",
             "thread_tap",
+            "thread_die",
             "drill_bit_metal",
             "masonry_drill_bit",
             "concrete_hole_saw",
