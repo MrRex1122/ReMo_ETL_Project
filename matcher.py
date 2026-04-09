@@ -4876,6 +4876,16 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("алмазная коронка", "затвор дисковый", "тормозной диск", "пильный диск по дереву"))
         ):
             return "diamond_blade"
+        if "картриджи для печатной техники" in branch_path or (
+            any(token in search_text for token in ("картридж для печатной техники", "картриджи для печатной техники", "картридж для принтера", "тонер картридж", "print cartridge", "printer cartridge", "toner cartridge"))
+            and not any(token in search_text for token in ("смеситель", "фильтр картридж", "картридж для фильтра", "чернильница", "печатная плата"))
+        ):
+            return "printer_cartridge"
+        if "крестовые отвертки" in branch_path or (
+            any(token in search_text for token in ("крестовая отвертка", "отвертка крестовая", "крестовые отвертки", "отвертка phillips", "phillips screwdriver", "pozidriv screwdriver"))
+            and not any(token in search_text for token in ("шлицевая отвертка", "torx", "имбус", "битодержатель", "бита"))
+        ):
+            return "phillips_screwdriver"
         if "сверла по металлу" in branch_path or (
             any(
                 token in search_text
@@ -5212,6 +5222,8 @@ class ReMoMatcher:
             "caliper",
             "wood_saw_blade",
             "diamond_blade",
+            "printer_cartridge",
+            "phillips_screwdriver",
             "drill_bit_metal",
             "masonry_drill_bit",
             "concrete_hole_saw",

@@ -301,6 +301,15 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(diamond_blade.entity_type, "diamond_blade")
         self.assertEqual(diamond_blade.branch_hint, "алмазные диски")
 
+    def test_parse_query_spec_detects_cartridge_and_screwdriver_queries(self):
+        cartridge = parse_query_spec("Картридж для принтера HP 85A", taxonomy_rules=self.rules)
+        screwdriver = parse_query_spec("Отвертка крестовая PH2x100", taxonomy_rules=self.rules)
+
+        self.assertEqual(cartridge.entity_type, "printer_cartridge")
+        self.assertEqual(cartridge.branch_hint, "картриджи для печатной техники")
+        self.assertEqual(screwdriver.entity_type, "phillips_screwdriver")
+        self.assertEqual(screwdriver.branch_hint, "крестовые отвертки")
+
     def test_parse_query_spec_detects_drill_bit_metal_queries(self):
         drill = parse_query_spec("Сверло по металлу HSS 8 мм", taxonomy_rules=self.rules)
 

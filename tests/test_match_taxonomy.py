@@ -2359,6 +2359,35 @@ class MatchTaxonomyTests(unittest.TestCase):
             "diamond_blade",
         )
 
+    def test_effective_candidate_family_maps_other_cartridge_and_screwdriver_branches(self):
+        cartridge_features = self.matcher._extract_query_features("Картридж для принтера HP 85A")
+        cartridge_features["entity_type"] = "printer_cartridge"
+        cartridge_candidate = {
+            "name": "Картридж для принтера HP 85A",
+            "normalized_name": "картридж для принтера hp 85a",
+            "branch_path": "картриджи для печатной техники",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        screwdriver_features = self.matcher._extract_query_features("Отвертка крестовая PH2x100")
+        screwdriver_features["entity_type"] = "phillips_screwdriver"
+        screwdriver_candidate = {
+            "name": "Отвертка крестовая PH2x100",
+            "normalized_name": "отвертка крестовая ph2x100",
+            "branch_path": "крестовые отвертки",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(cartridge_features, cartridge_candidate),
+            "printer_cartridge",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(screwdriver_features, screwdriver_candidate),
+            "phillips_screwdriver",
+        )
+
     def test_effective_candidate_family_maps_other_drill_bit_metal_branch(self):
         features = self.matcher._extract_query_features("Сверло по металлу HSS 8 мм")
         features["entity_type"] = "drill_bit_metal"

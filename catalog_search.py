@@ -1040,6 +1040,16 @@ def classify_item_type(
     ):
         return "diamond_blade"
     if (
+        any(token in normalized for token in ("картридж для печатной техники", "картриджи для печатной техники", "картридж для принтера", "тонер картридж", "print cartridge", "printer cartridge", "toner cartridge"))
+        and not any(token in normalized for token in ("смеситель", "фильтр картридж", "картридж для фильтра", "чернильница", "печатная плата"))
+    ):
+        return "printer_cartridge"
+    if (
+        any(token in normalized for token in ("крестовая отвертка", "отвертка крестовая", "крестовые отвертки", "отвертка phillips", "phillips screwdriver", "pozidriv screwdriver"))
+        and not any(token in normalized for token in ("шлицевая отвертка", "torx", "имбус", "битодержатель", "бита"))
+    ):
+        return "phillips_screwdriver"
+    if (
         any(token in normalized for token in ("сверло по металлу", "сверла по металлу", "drill bit", "metal drill", "hss drill"))
         and not any(token in normalized for token in ("метчик", "плашк", "коронк", "зенкер", "держател", "tap", "thread tap"))
     ):
@@ -1412,6 +1422,10 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "wood_saw_blade"
     if "алмазные диски" in normalized_branch:
         return "diamond_blade"
+    if "картриджи для печатной техники" in normalized_branch:
+        return "printer_cartridge"
+    if "крестовые отвертки" in normalized_branch:
+        return "phillips_screwdriver"
     if "сверла по металлу" in normalized_branch:
         return "drill_bit_metal"
     if any(marker in normalized_branch for marker in ("буры sds-plus", "буры sds-max", "сверла по бетону")):
@@ -1720,6 +1734,10 @@ def derive_branch_from_text(
                 return "пильные диски по дереву"
             if effective_family == "diamond_blade":
                 return "алмазные диски"
+            if effective_family == "printer_cartridge":
+                return "картриджи для печатной техники"
+            if effective_family == "phillips_screwdriver":
+                return "крестовые отвертки"
             if effective_family == "drill_bit_metal":
                 return "сверла по металлу"
             if effective_family == "masonry_drill_bit":
@@ -1908,6 +1926,10 @@ def derive_branch_from_text(
             return "пильные диски по дереву"
         if registry_family == "diamond_blade":
             return "алмазные диски"
+        if registry_family == "printer_cartridge":
+            return "картриджи для печатной техники"
+        if registry_family == "phillips_screwdriver":
+            return "крестовые отвертки"
         if registry_family == "drill_bit_metal":
             return "сверла по металлу"
         if registry_family == "masonry_drill_bit":
@@ -2048,6 +2070,8 @@ def derive_branch_from_text(
             "caliper",
             "wood_saw_blade",
             "diamond_blade",
+            "printer_cartridge",
+            "phillips_screwdriver",
             "drill_bit_metal",
             "masonry_drill_bit",
             "concrete_hole_saw",
@@ -2179,6 +2203,10 @@ def derive_branch_from_text(
         return "пильные диски по дереву"
     if effective_entity_type == "diamond_blade":
         return "алмазные диски"
+    if effective_entity_type == "printer_cartridge":
+        return "картриджи для печатной техники"
+    if effective_entity_type == "phillips_screwdriver":
+        return "крестовые отвертки"
     if effective_entity_type == "drill_bit_metal":
         return "сверла по металлу"
     if effective_entity_type == "masonry_drill_bit":

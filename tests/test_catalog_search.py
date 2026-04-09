@@ -1058,6 +1058,16 @@ class CatalogSearchTests(unittest.TestCase):
             classify_item_type("Алмазный диск 125 мм по бетону"),
             "diamond_blade",
         )
+
+    def test_classify_item_type_detects_cartridge_and_screwdriver_queries(self):
+        self.assertEqual(
+            classify_item_type("Картридж для принтера HP 85A"),
+            "printer_cartridge",
+        )
+        self.assertEqual(
+            classify_item_type("Отвертка крестовая PH2x100"),
+            "phillips_screwdriver",
+        )
         self.assertEqual(
             derive_branch_from_text("Плашка круглая М8"),
             "плашки",
@@ -1849,6 +1859,31 @@ class CatalogSearchTests(unittest.TestCase):
 
             self.assertEqual(diamond_blade["search_branch_path"], "алмазные диски")
             self.assertEqual(diamond_blade["search_effective_family"], "diamond_blade")
+
+    def test_build_search_catalog_maps_cartridges_and_screwdrivers_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Картридж для принтера HP 85A;CRT-1;10;Картриджи Для Печатной Техники;CLS-1;Тонер картридж;;ReMo\n"
+                    "Отвертка крестовая PH2x100;SCR-1;10;Крестовые Отвертки;CLS-2;Крестовая отвертка;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+            cartridge = built.loc[built["Артикул"] == "CRT-1"].iloc[0]
+            screwdriver = built.loc[built["Артикул"] == "SCR-1"].iloc[0]
+
+            self.assertEqual(cartridge["search_branch_path"], "картриджи для печатной техники")
+            self.assertEqual(cartridge["search_effective_family"], "printer_cartridge")
+
+            self.assertEqual(screwdriver["search_branch_path"], "крестовые отвертки")
+            self.assertEqual(screwdriver["search_effective_family"], "phillips_screwdriver")
 
     def test_build_search_catalog_maps_drill_bits_out_of_other(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
