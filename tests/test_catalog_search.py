@@ -338,6 +338,8 @@ class CatalogSearchTests(unittest.TestCase):
                     "Прибор объектовый Риф Стринг;OBJ-1;10;Дополнительное оборудование для ос;CLS-13;Устройство объектовое;;Риф\n"
                     "Блок бесперебойного питания 12В;BPS-1;10;Дополнительное оборудование для пс;CLS-14;Блок питания;;Аякс\n"
                     "Блок искрозащиты шлейфа;ISO-1;10;Дополнительное оборудование для пс;CLS-15;Барьер искрозащиты;;Аякс\n"
+                    "Метка адресная пожарная со встроенным изолятором короткого замыкания;TAG-1;10;Дополнительное оборудование для пс;CLS-16;Метка адресная;;Аякс\n"
+                    "Брелок радиоканальный для охранной системы;KEY-1;10;Дополнительное оборудование для ос;CLS-17;Брелок;;Риф\n"
                 ),
                 encoding="utf-8",
             )
@@ -360,6 +362,8 @@ class CatalogSearchTests(unittest.TestCase):
             object_device = built.loc[built["Артикул"] == "OBJ-1"].iloc[0]
             backup_ps = built.loc[built["Артикул"] == "BPS-1"].iloc[0]
             barrier = built.loc[built["Артикул"] == "ISO-1"].iloc[0]
+            address_marker = built.loc[built["Артикул"] == "TAG-1"].iloc[0]
+            keyfob = built.loc[built["Артикул"] == "KEY-1"].iloc[0]
 
             self.assertEqual(detector["search_branch_path"], "извещатели пожарные")
             self.assertEqual(detector["search_effective_family"], "fire_detector")
@@ -417,6 +421,14 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(barrier["search_branch_path"], "дополнительное оборудование для пс")
             self.assertEqual(barrier["search_effective_family"], "security_module_device")
             self.assertEqual(barrier["search_effective_entity_type"], "security_module_device")
+
+            self.assertEqual(address_marker["search_branch_path"], "дополнительное оборудование для пс")
+            self.assertEqual(address_marker["search_effective_family"], "security_module_device")
+            self.assertEqual(address_marker["search_effective_entity_type"], "security_module_device")
+
+            self.assertEqual(keyfob["search_branch_path"], "дополнительное оборудование для ос")
+            self.assertEqual(keyfob["search_effective_family"], "security_control_device")
+            self.assertEqual(keyfob["search_effective_entity_type"], "security_control_device")
 
     def test_build_search_catalog_assigns_signage_families(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

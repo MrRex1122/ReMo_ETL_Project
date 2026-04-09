@@ -3453,6 +3453,24 @@ class MatchTaxonomyTests(unittest.TestCase):
             "entity_type": "other",
             "item_markers": {},
         }
+        tag_features = self.matcher._extract_query_features("Метка адресная пожарная со встроенным изолятором короткого замыкания")
+        tag_features["entity_type"] = "security_module_device"
+        tag_candidate = {
+            "name": "Метка адресная пожарная со встроенным изолятором короткого замыкания",
+            "normalized_name": "метка адресная пожарная со встроенным изолятором короткого замыкания",
+            "branch_path": "дополнительное оборудование для пс",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        keyfob_features = self.matcher._extract_query_features("Брелок радиоканальный для охранной системы")
+        keyfob_features["entity_type"] = "security_control_device"
+        keyfob_candidate = {
+            "name": "Брелок радиоканальный для охранной системы",
+            "normalized_name": "брелок радиоканальный для охранной системы",
+            "branch_path": "дополнительное оборудование для ос",
+            "entity_type": "other",
+            "item_markers": {},
+        }
 
         self.assertEqual(
             self.matcher._effective_candidate_family_for_query(detector_features, detector_candidate),
@@ -3493,6 +3511,14 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.assertEqual(
             self.matcher._effective_candidate_family_for_query(message_features, message_candidate),
             "security_interface_device",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(tag_features, tag_candidate),
+            "security_module_device",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(keyfob_features, keyfob_candidate),
+            "security_control_device",
         )
 
     def test_strict_fallback_allows_fastener_like_candidate_after_family_normalization(self):
