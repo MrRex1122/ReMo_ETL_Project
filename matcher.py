@@ -4856,6 +4856,26 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("боксерские", "варежки", "митенки"))
         ):
             return "protective_gloves"
+        if "комбинированные ключи" in branch_path or (
+            any(token in search_text for token in ("комбинированный ключ", "ключ комбинированный", "комбинированные ключи", "рожково накидной ключ", "ключ рожково накидной", "combination wrench", "combination spanner"))
+            and not any(token in search_text for token in ("имбус", "шестигранник", "разводной", "трубный ключ", "ключ доступа"))
+        ):
+            return "combination_wrench"
+        if "штангенциркули" in branch_path or (
+            any(token in search_text for token in ("штангенциркуль", "штангенциркули", "vernier caliper", "digital caliper"))
+            and not any(token in search_text for token in ("суппорт", "скоба", "индикатор часового типа"))
+        ):
+            return "caliper"
+        if "пильные диски по дереву" in branch_path or (
+            any(token in search_text for token in ("пильный диск по дереву", "пильные диски по дереву", "диск по дереву", "saw blade wood", "wood saw blade"))
+            and not any(token in search_text for token in ("алмазн", "отрезн", "затвор дисковый", "тормозной диск"))
+        ):
+            return "wood_saw_blade"
+        if "алмазные диски" in branch_path or (
+            any(token in search_text for token in ("алмазный диск", "алмазные диски", "diamond blade", "diamond cutting disc"))
+            and not any(token in search_text for token in ("алмазная коронка", "затвор дисковый", "тормозной диск", "пильный диск по дереву"))
+        ):
+            return "diamond_blade"
         if "сверла по металлу" in branch_path or (
             any(
                 token in search_text
@@ -5188,6 +5208,10 @@ class ReMoMatcher:
             "metal_turning_tool",
             "workwear",
             "protective_gloves",
+            "combination_wrench",
+            "caliper",
+            "wood_saw_blade",
+            "diamond_blade",
             "drill_bit_metal",
             "masonry_drill_bit",
             "concrete_hole_saw",

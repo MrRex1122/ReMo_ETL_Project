@@ -1040,6 +1040,24 @@ class CatalogSearchTests(unittest.TestCase):
             classify_item_type("Резец по металлу токарный проходной 16x16"),
             "metal_turning_tool",
         )
+
+    def test_classify_item_type_detects_wrench_caliper_and_blade_queries(self):
+        self.assertEqual(
+            classify_item_type("Ключ комбинированный 17 мм"),
+            "combination_wrench",
+        )
+        self.assertEqual(
+            classify_item_type("Штангенциркуль цифровой 150 мм"),
+            "caliper",
+        )
+        self.assertEqual(
+            classify_item_type("Пильный диск по дереву 190x30x24T"),
+            "wood_saw_blade",
+        )
+        self.assertEqual(
+            classify_item_type("Алмазный диск 125 мм по бетону"),
+            "diamond_blade",
+        )
         self.assertEqual(
             derive_branch_from_text("Плашка круглая М8"),
             "плашки",
@@ -1796,6 +1814,41 @@ class CatalogSearchTests(unittest.TestCase):
 
             self.assertEqual(turning_tool["search_branch_path"], "резцы по металлу")
             self.assertEqual(turning_tool["search_effective_family"], "metal_turning_tool")
+
+    def test_build_search_catalog_maps_wrench_caliper_and_blades_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Ключ комбинированный 17 мм;WR-1;10;Комбинированные Ключи;CLS-1;Ключ комбинированный;;ReMo\n"
+                    "Штангенциркуль цифровой 150 мм;CAL-1;10;Штангенциркули;CLS-2;Штангенциркуль;;ReMo\n"
+                    "Пильный диск по дереву 190x30x24T;WB-1;10;Пильные Диски По Дереву;CLS-3;Пильный диск;;ReMo\n"
+                    "Алмазный диск 125 мм по бетону;DB-1;10;Алмазные Диски;CLS-4;Алмазный диск;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+            wrench = built.loc[built["Артикул"] == "WR-1"].iloc[0]
+            caliper = built.loc[built["Артикул"] == "CAL-1"].iloc[0]
+            wood_blade = built.loc[built["Артикул"] == "WB-1"].iloc[0]
+            diamond_blade = built.loc[built["Артикул"] == "DB-1"].iloc[0]
+
+            self.assertEqual(wrench["search_branch_path"], "комбинированные ключи")
+            self.assertEqual(wrench["search_effective_family"], "combination_wrench")
+
+            self.assertEqual(caliper["search_branch_path"], "штангенциркули")
+            self.assertEqual(caliper["search_effective_family"], "caliper")
+
+            self.assertEqual(wood_blade["search_branch_path"], "пильные диски по дереву")
+            self.assertEqual(wood_blade["search_effective_family"], "wood_saw_blade")
+
+            self.assertEqual(diamond_blade["search_branch_path"], "алмазные диски")
+            self.assertEqual(diamond_blade["search_effective_family"], "diamond_blade")
 
     def test_build_search_catalog_maps_drill_bits_out_of_other(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

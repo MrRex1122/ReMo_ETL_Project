@@ -2304,6 +2304,61 @@ class MatchTaxonomyTests(unittest.TestCase):
             "metal_turning_tool",
         )
 
+    def test_effective_candidate_family_maps_other_wrench_caliper_and_blade_branches(self):
+        wrench_features = self.matcher._extract_query_features("Ключ комбинированный 17 мм")
+        wrench_features["entity_type"] = "combination_wrench"
+        wrench_candidate = {
+            "name": "Ключ комбинированный 17 мм",
+            "normalized_name": "ключ комбинированный 17 мм",
+            "branch_path": "комбинированные ключи",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        caliper_features = self.matcher._extract_query_features("Штангенциркуль цифровой 150 мм")
+        caliper_features["entity_type"] = "caliper"
+        caliper_candidate = {
+            "name": "Штангенциркуль цифровой 150 мм",
+            "normalized_name": "штангенциркуль цифровой 150 мм",
+            "branch_path": "штангенциркули",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        wood_blade_features = self.matcher._extract_query_features("Пильный диск по дереву 190x30x24T")
+        wood_blade_features["entity_type"] = "wood_saw_blade"
+        wood_blade_candidate = {
+            "name": "Пильный диск по дереву 190x30x24T",
+            "normalized_name": "пильный диск по дереву 190x30x24t",
+            "branch_path": "пильные диски по дереву",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        diamond_blade_features = self.matcher._extract_query_features("Алмазный диск 125 мм по бетону")
+        diamond_blade_features["entity_type"] = "diamond_blade"
+        diamond_blade_candidate = {
+            "name": "Алмазный диск 125 мм по бетону",
+            "normalized_name": "алмазный диск 125 мм по бетону",
+            "branch_path": "алмазные диски",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(wrench_features, wrench_candidate),
+            "combination_wrench",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(caliper_features, caliper_candidate),
+            "caliper",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(wood_blade_features, wood_blade_candidate),
+            "wood_saw_blade",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(diamond_blade_features, diamond_blade_candidate),
+            "diamond_blade",
+        )
+
     def test_effective_candidate_family_maps_other_drill_bit_metal_branch(self):
         features = self.matcher._extract_query_features("Сверло по металлу HSS 8 мм")
         features["entity_type"] = "drill_bit_metal"

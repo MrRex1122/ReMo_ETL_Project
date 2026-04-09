@@ -286,6 +286,21 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(turning_tool.entity_type, "metal_turning_tool")
         self.assertEqual(turning_tool.branch_hint, "резцы по металлу")
 
+    def test_parse_query_spec_detects_wrench_caliper_and_blade_queries(self):
+        wrench = parse_query_spec("Ключ комбинированный 17 мм", taxonomy_rules=self.rules)
+        caliper = parse_query_spec("Штангенциркуль цифровой 150 мм", taxonomy_rules=self.rules)
+        wood_blade = parse_query_spec("Пильный диск по дереву 190x30x24T", taxonomy_rules=self.rules)
+        diamond_blade = parse_query_spec("Алмазный диск 125 мм по бетону", taxonomy_rules=self.rules)
+
+        self.assertEqual(wrench.entity_type, "combination_wrench")
+        self.assertEqual(wrench.branch_hint, "комбинированные ключи")
+        self.assertEqual(caliper.entity_type, "caliper")
+        self.assertEqual(caliper.branch_hint, "штангенциркули")
+        self.assertEqual(wood_blade.entity_type, "wood_saw_blade")
+        self.assertEqual(wood_blade.branch_hint, "пильные диски по дереву")
+        self.assertEqual(diamond_blade.entity_type, "diamond_blade")
+        self.assertEqual(diamond_blade.branch_hint, "алмазные диски")
+
     def test_parse_query_spec_detects_drill_bit_metal_queries(self):
         drill = parse_query_spec("Сверло по металлу HSS 8 мм", taxonomy_rules=self.rules)
 

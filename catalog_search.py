@@ -1020,6 +1020,26 @@ def classify_item_type(
     ):
         return "protective_gloves"
     if (
+        any(token in normalized for token in ("комбинированный ключ", "ключ комбинированный", "комбинированные ключи", "рожково накидной ключ", "ключ рожково накидной", "combination wrench", "combination spanner"))
+        and not any(token in normalized for token in ("имбус", "шестигранник", "разводной", "трубный ключ", "ключ доступа"))
+    ):
+        return "combination_wrench"
+    if (
+        any(token in normalized for token in ("штангенциркуль", "штангенциркули", "vernier caliper", "digital caliper"))
+        and not any(token in normalized for token in ("суппорт", "скоба", "индикатор часового типа"))
+    ):
+        return "caliper"
+    if (
+        any(token in normalized for token in ("пильный диск по дереву", "пильные диски по дереву", "диск по дереву", "saw blade wood", "wood saw blade"))
+        and not any(token in normalized for token in ("алмазн", "отрезн", "затвор дисковый", "тормозной диск"))
+    ):
+        return "wood_saw_blade"
+    if (
+        any(token in normalized for token in ("алмазный диск", "алмазные диски", "diamond blade", "diamond cutting disc"))
+        and not any(token in normalized for token in ("алмазная коронка", "затвор дисковый", "тормозной диск", "пильный диск по дереву"))
+    ):
+        return "diamond_blade"
+    if (
         any(token in normalized for token in ("сверло по металлу", "сверла по металлу", "drill bit", "metal drill", "hss drill"))
         and not any(token in normalized for token in ("метчик", "плашк", "коронк", "зенкер", "держател", "tap", "thread tap"))
     ):
@@ -1384,6 +1404,14 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "workwear"
     if "антипорезные и защитные перчатки" in normalized_branch:
         return "protective_gloves"
+    if "комбинированные ключи" in normalized_branch:
+        return "combination_wrench"
+    if "штангенциркули" in normalized_branch:
+        return "caliper"
+    if "пильные диски по дереву" in normalized_branch:
+        return "wood_saw_blade"
+    if "алмазные диски" in normalized_branch:
+        return "diamond_blade"
     if "сверла по металлу" in normalized_branch:
         return "drill_bit_metal"
     if any(marker in normalized_branch for marker in ("буры sds-plus", "буры sds-max", "сверла по бетону")):
@@ -1684,6 +1712,14 @@ def derive_branch_from_text(
                 return "костюмы летние"
             if effective_family == "protective_gloves":
                 return "антипорезные и защитные перчатки"
+            if effective_family == "combination_wrench":
+                return "комбинированные ключи"
+            if effective_family == "caliper":
+                return "штангенциркули"
+            if effective_family == "wood_saw_blade":
+                return "пильные диски по дереву"
+            if effective_family == "diamond_blade":
+                return "алмазные диски"
             if effective_family == "drill_bit_metal":
                 return "сверла по металлу"
             if effective_family == "masonry_drill_bit":
@@ -1864,6 +1900,14 @@ def derive_branch_from_text(
             return "костюмы летние"
         if registry_family == "protective_gloves":
             return "антипорезные и защитные перчатки"
+        if registry_family == "combination_wrench":
+            return "комбинированные ключи"
+        if registry_family == "caliper":
+            return "штангенциркули"
+        if registry_family == "wood_saw_blade":
+            return "пильные диски по дереву"
+        if registry_family == "diamond_blade":
+            return "алмазные диски"
         if registry_family == "drill_bit_metal":
             return "сверла по металлу"
         if registry_family == "masonry_drill_bit":
@@ -2000,6 +2044,10 @@ def derive_branch_from_text(
             "metal_turning_tool",
             "workwear",
             "protective_gloves",
+            "combination_wrench",
+            "caliper",
+            "wood_saw_blade",
+            "diamond_blade",
             "drill_bit_metal",
             "masonry_drill_bit",
             "concrete_hole_saw",
@@ -2123,6 +2171,14 @@ def derive_branch_from_text(
         return "костюмы летние"
     if effective_entity_type == "protective_gloves":
         return "антипорезные и защитные перчатки"
+    if effective_entity_type == "combination_wrench":
+        return "комбинированные ключи"
+    if effective_entity_type == "caliper":
+        return "штангенциркули"
+    if effective_entity_type == "wood_saw_blade":
+        return "пильные диски по дереву"
+    if effective_entity_type == "diamond_blade":
+        return "алмазные диски"
     if effective_entity_type == "drill_bit_metal":
         return "сверла по металлу"
     if effective_entity_type == "masonry_drill_bit":
