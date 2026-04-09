@@ -109,11 +109,16 @@ class QueryParserTests(unittest.TestCase):
             "Блок расширения адресных шлейфов",
             taxonomy_rules=self.rules,
         )
+        remote_indicator = parse_query_spec(
+            "Блок выносной индикации на 32 ППКОП",
+            taxonomy_rules=self.rules,
+        )
 
         self.assertEqual(backup_block.entity_type, "power_backup")
         self.assertEqual(relay_block.entity_type, "security_module_device")
         self.assertEqual(ppkop_panel.entity_type, "security_control_panel")
         self.assertEqual(expansion_module.entity_type, "security_module_device")
+        self.assertEqual(remote_indicator.entity_type, "security_control_panel")
 
     def test_parse_query_spec_uses_subfamily_split_for_boxes_and_switch_wiring(self):
         box_spec = parse_query_spec("Коробка монтажная огнестойкая", taxonomy_rules=self.rules)

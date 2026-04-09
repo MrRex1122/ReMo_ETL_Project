@@ -333,6 +333,11 @@ class CatalogSearchTests(unittest.TestCase):
                     "Блок питания универсальный 12В 3А;PSU-1;10;Дополнительное оборудование для ос;CLS-8;Блок питания;;Ритм\n"
                     "Блок расширения адресных шлейфов;MOD-1;10;Дополнительное оборудование для ос;CLS-9;Блок расширения;;Болид\n"
                     "Конвертер интерфейсов RS485/Ethernet;CNV-1;10;Дополнительное оборудование для пс;CLS-10;Конвертер;;Болид\n"
+                    "Блок выносной индикации на 32 ППКОП;IND-1;10;Дополнительное оборудование для ос;CLS-11;Блок выносной индикации;;Риф\n"
+                    "Модуль передачи сообщений Ethernet;MSG-1;10;Дополнительное оборудование для ос;CLS-12;Модуль передачи сообщений;;Риф\n"
+                    "Прибор объектовый Риф Стринг;OBJ-1;10;Дополнительное оборудование для ос;CLS-13;Устройство объектовое;;Риф\n"
+                    "Блок бесперебойного питания 12В;BPS-1;10;Дополнительное оборудование для пс;CLS-14;Блок питания;;Аякс\n"
+                    "Блок искрозащиты шлейфа;ISO-1;10;Дополнительное оборудование для пс;CLS-15;Барьер искрозащиты;;Аякс\n"
                 ),
                 encoding="utf-8",
             )
@@ -350,6 +355,11 @@ class CatalogSearchTests(unittest.TestCase):
             power_supply = built.loc[built["Артикул"] == "PSU-1"].iloc[0]
             module = built.loc[built["Артикул"] == "MOD-1"].iloc[0]
             converter = built.loc[built["Артикул"] == "CNV-1"].iloc[0]
+            indicator = built.loc[built["Артикул"] == "IND-1"].iloc[0]
+            message_module = built.loc[built["Артикул"] == "MSG-1"].iloc[0]
+            object_device = built.loc[built["Артикул"] == "OBJ-1"].iloc[0]
+            backup_ps = built.loc[built["Артикул"] == "BPS-1"].iloc[0]
+            barrier = built.loc[built["Артикул"] == "ISO-1"].iloc[0]
 
             self.assertEqual(detector["search_branch_path"], "извещатели пожарные")
             self.assertEqual(detector["search_effective_family"], "fire_detector")
@@ -387,6 +397,26 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(converter["search_branch_path"], "дополнительное оборудование для пс")
             self.assertEqual(converter["search_effective_family"], "security_interface_device")
             self.assertEqual(converter["search_effective_entity_type"], "security_interface_device")
+
+            self.assertEqual(indicator["search_branch_path"], "дополнительное оборудование для ос")
+            self.assertEqual(indicator["search_effective_family"], "security_control_panel")
+            self.assertEqual(indicator["search_effective_entity_type"], "security_control_panel")
+
+            self.assertEqual(message_module["search_branch_path"], "дополнительное оборудование для ос")
+            self.assertEqual(message_module["search_effective_family"], "security_interface_device")
+            self.assertEqual(message_module["search_effective_entity_type"], "security_interface_device")
+
+            self.assertEqual(object_device["search_branch_path"], "дополнительное оборудование для ос")
+            self.assertEqual(object_device["search_effective_family"], "security_control_device")
+            self.assertEqual(object_device["search_effective_entity_type"], "security_control_device")
+
+            self.assertEqual(backup_ps["search_branch_path"], "дополнительное оборудование для пс")
+            self.assertEqual(backup_ps["search_effective_family"], "power_backup")
+            self.assertEqual(backup_ps["search_effective_entity_type"], "power_backup")
+
+            self.assertEqual(barrier["search_branch_path"], "дополнительное оборудование для пс")
+            self.assertEqual(barrier["search_effective_family"], "security_module_device")
+            self.assertEqual(barrier["search_effective_entity_type"], "security_module_device")
 
     def test_build_search_catalog_assigns_signage_families(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

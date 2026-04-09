@@ -3435,6 +3435,24 @@ class MatchTaxonomyTests(unittest.TestCase):
             "entity_type": "other",
             "item_markers": {},
         }
+        object_features = self.matcher._extract_query_features("Прибор объектовый Риф Стринг")
+        object_features["entity_type"] = "security_control_device"
+        object_candidate = {
+            "name": "Прибор объектовый Риф Стринг",
+            "normalized_name": "прибор объектовый риф стринг",
+            "branch_path": "дополнительное оборудование для ос",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        message_features = self.matcher._extract_query_features("Модуль передачи сообщений Ethernet")
+        message_features["entity_type"] = "security_interface_device"
+        message_candidate = {
+            "name": "Модуль передачи сообщений Ethernet",
+            "normalized_name": "модуль передачи сообщений ethernet",
+            "branch_path": "дополнительное оборудование для ос",
+            "entity_type": "other",
+            "item_markers": {},
+        }
 
         self.assertEqual(
             self.matcher._effective_candidate_family_for_query(detector_features, detector_candidate),
@@ -3466,6 +3484,14 @@ class MatchTaxonomyTests(unittest.TestCase):
         )
         self.assertEqual(
             self.matcher._effective_candidate_family_for_query(converter_features, converter_candidate),
+            "security_interface_device",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(object_features, object_candidate),
+            "security_control_device",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(message_features, message_candidate),
             "security_interface_device",
         )
 

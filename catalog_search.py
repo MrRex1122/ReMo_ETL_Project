@@ -1321,6 +1321,7 @@ def _has_ops_control_panel_signal(normalized_text: str) -> bool:
             "прибор приемо контрольн",
             "прибор управления",
             "блок индикации и управления",
+            "блок выносной индикации",
         )
     ):
         return True
@@ -1365,7 +1366,7 @@ def _has_ops_power_supply_signal(normalized_text: str) -> bool:
         return False
     if any(token in normalized for token in ("источник бесперебойного питания", "ибп", "ups")):
         return False
-    if "преобразователь напряжения" in normalized:
+    if "преобразователь напряжения" in normalized or "блок бесперебойного питания" in normalized:
         return True
     return any(token in normalized for token in ("блок питания", "источник питания"))
 
@@ -1409,10 +1410,12 @@ def _has_ops_module_expansion_signal(normalized_text: str) -> bool:
         for token in (
             "блок расширения",
             "блок коммутации",
+            "блок искрозащиты",
             "устройство коммутационное",
             "модуль сопряжения",
             "изолятор шлейфа",
             "изолятор короткого замыкания",
+            "изолятор коротких замыканий",
             "барьер искрозащиты",
             "элемент дистанционного управления",
             "модуль индивидуальной индикации",
@@ -1424,11 +1427,23 @@ def _has_ops_interface_device_signal(normalized_text: str) -> bool:
     normalized = normalize_text(normalized_text)
     if not normalized:
         return False
-    if any(token in normalized for token in ("конвертер", "модем", "преобразователь интерфейса", "преобразователь интерфейсов")):
+    if any(
+        token in normalized
+        for token in (
+            "конвертер",
+            "модем",
+            "преобразователь интерфейса",
+            "преобразователь интерфейсов",
+            "интернет модуль",
+            "модуль передачи сообщений",
+            "модуль автодозвона",
+            "автодозвона",
+        )
+    ):
         return True
     return (
-        any(token in normalized for token in ("ethernet", "lan", "rs485", "rs-485", "rs232", "rs 232", "usb", "modbus", "протокол"))
-        and any(token in normalized for token in ("интерфейс", "преобразоват", "конвертер", "модем"))
+        any(token in normalized for token in ("ethernet", "lan", "rs485", "rs-485", "rs232", "rs 232", "usb", "modbus", "протокол", "gsm", "gprs"))
+        and any(token in normalized for token in ("интерфейс", "преобразоват", "конвертер", "модем", "модуль", "передач"))
     )
 
 
@@ -1439,13 +1454,27 @@ def _has_ops_control_device_signal(normalized_text: str) -> bool:
     return any(
         token in normalized
         for token in (
+            "абонентский блок",
+            "блок связи",
+            "блок приема передачи",
+            "блок приемо передачи",
+            "блок приёмо передачи",
+            "блок приема-передачи",
+            "блок приемо-передачи",
+            "блок приёмо-передачи",
+            "блок сбора и управления",
+            "бсу",
             "коммуникатор",
             "ретранслятор",
             "радиорасширител",
+            "радиоприемник",
+            "радиоприёмник",
             "расширитель",
             "считыватель",
             "клавиатура",
             "концентратор",
+            "прибор объектовый",
+            "устройство объектовое",
             "приемник",
             "приёмник",
             "контроллер",
