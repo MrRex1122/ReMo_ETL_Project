@@ -31,7 +31,12 @@ from catalog_search import (
     DUCKDB_AVAILABLE as SEARCH_DUCKDB_AVAILABLE,
     SEARCH_CATALOG_FILENAME,
     SEARCH_CATALOG_TABLE,
+    _has_ops_control_device_signal as shared_has_ops_control_device_signal,
+    _has_ops_control_panel_signal as shared_has_ops_control_panel_signal,
+    _has_ops_interface_device_signal as shared_has_ops_interface_device_signal,
+    _has_ops_module_expansion_signal as shared_has_ops_module_expansion_signal,
     _has_ops_power_backup_signal as shared_has_ops_power_backup_signal,
+    _has_ops_power_supply_signal as shared_has_ops_power_supply_signal,
     _has_ops_relay_module_signal as shared_has_ops_relay_module_signal,
     _looks_like_cable_channel_box as shared_looks_like_cable_channel_box,
     clean_text_value as shared_clean_text_value,
@@ -4752,27 +4757,20 @@ class ReMoMatcher:
             any(token in search_text for token in ("извещател", "оповещател")) and "табло" not in search_text
         ):
             return "fire_alarm_device"
-        if any(token in branch_path for token in ("дополнительное оборудование для пс", "дополнительное оборудование систем оповещения", "дополнительное оборудование для ос")) and (
-            any(token in search_text for token in ("преобразоват", "повторител", "интерфейс"))
-            and any(token in search_text for token in ("rs485", "modbus", "ethernet", "интерфейс", "протокол"))
-        ):
-            return "security_interface_device"
-        if any(token in branch_path for token in ("приборы приемно контрольные для опс", "дополнительное оборудование для пс", "дополнительное оборудование для ос")) and shared_has_ops_power_backup_signal(search_text):
-            return "power_backup"
-        if any(token in branch_path for token in ("приборы приемно контрольные для опс", "дополнительное оборудование для пс", "дополнительное оборудование для ос")) and shared_has_ops_relay_module_signal(search_text):
-            return "security_module_device"
-        if "приборы приемно контрольные для опс" in branch_path and (
-            any(token in search_text for token in ("пульт", "панель", "блок"))
-            and any(token in search_text for token in ("управл", "контрол", "индикац"))
-            and not any(token in search_text for token in ("интерфейс", "modbus", "rs485"))
-        ):
+        if any(token in branch_path for token in ("приборы приемно контрольные для опс", "дополнительное оборудование для пс", "дополнительное оборудование для ос")) and shared_has_ops_control_panel_signal(search_text):
             return "security_control_panel"
         if any(token in branch_path for token in ("приборы приемно контрольные для опс", "дополнительное оборудование для пс", "дополнительное оборудование для ос")) and (
-            any(token in search_text for token in ("модуль", "блок", "устройство"))
-            and any(token in search_text for token in ("пуск", "коммутац", "линии связи", "нагрузк", "изолир", "разветв", "адресн", "реле", "релейн", "бру"))
-            and not any(token in search_text for token in ("интерфейс", "modbus", "rs485", "пульт", "индикац", "промежуточное реле", "промежуточные реле", "реле контроля напряжения", "тепловое реле"))
+            shared_has_ops_power_backup_signal(search_text) or shared_has_ops_power_supply_signal(search_text)
+        ):
+            return "power_backup"
+        if any(token in branch_path for token in ("приборы приемно контрольные для опс", "дополнительное оборудование для пс", "дополнительное оборудование систем оповещения", "дополнительное оборудование для ос")) and shared_has_ops_interface_device_signal(search_text):
+            return "security_interface_device"
+        if any(token in branch_path for token in ("приборы приемно контрольные для опс", "дополнительное оборудование для пс", "дополнительное оборудование для ос")) and (
+            shared_has_ops_module_expansion_signal(search_text) or shared_has_ops_relay_module_signal(search_text)
         ):
             return "security_module_device"
+        if any(token in branch_path for token in ("приборы приемно контрольные для опс", "дополнительное оборудование для пс", "дополнительное оборудование систем оповещения", "дополнительное оборудование для ос")) and shared_has_ops_control_device_signal(search_text):
+            return "security_control_device"
         if any(
             token in branch_path
             for token in (

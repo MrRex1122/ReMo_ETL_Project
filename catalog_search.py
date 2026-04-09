@@ -936,9 +936,11 @@ def classify_item_type(
         if "meter" in normalized or "измерител" in normalized:
             return "pdu_metered"
         return "pdu_basic"
+    if _has_ops_control_panel_signal(normalized):
+        return "security_control_panel"
     if _has_ops_power_backup_signal(normalized):
         return "power_backup"
-    if _has_ops_relay_module_signal(normalized):
+    if _has_ops_module_expansion_signal(normalized) or _has_ops_relay_module_signal(normalized):
         return "security_module_device"
     if _looks_like_optical_patch_cord(normalized, phrase_normalized):
         return "optical_patch_cord"
@@ -1305,6 +1307,69 @@ def _has_ops_power_backup_signal(normalized_text: str) -> bool:
     )
 
 
+def _has_ops_control_panel_signal(normalized_text: str) -> bool:
+    normalized = normalize_text(normalized_text)
+    if not normalized:
+        return False
+    if any(token in normalized for token in ("ппкоп", "ппко")):
+        return True
+    if any(
+        token in normalized
+        for token in (
+            "прибор приемно контрольн",
+            "прибор приёмно контрольн",
+            "прибор приемо контрольн",
+            "прибор управления",
+            "блок индикации и управления",
+        )
+    ):
+        return True
+    if any(
+        token in normalized
+        for token in (
+            "станция мониторинга",
+            "мониторинговая станция",
+            "система мониторинга",
+        )
+    ) and _has_strong_security_domain_signal(normalized):
+        return True
+    return (
+        any(token in normalized for token in ("пульт", "панель", "блок"))
+        and any(token in normalized for token in ("управл", "контрол", "индикац"))
+        and not any(
+            token in normalized
+            for token in (
+                "интерфейс",
+                "modbus",
+                "rs485",
+                "rs-485",
+                "rs232",
+                "rs 232",
+                "резервного питания",
+                "блок реле",
+                "бру",
+                "акб",
+                "плавного пуска",
+                "soft starter",
+                "авр",
+                "частотн",
+                "frequency drive",
+            )
+        )
+    )
+
+
+def _has_ops_power_supply_signal(normalized_text: str) -> bool:
+    normalized = normalize_text(normalized_text)
+    if not normalized or _has_ops_power_backup_signal(normalized):
+        return False
+    if any(token in normalized for token in ("источник бесперебойного питания", "ибп", "ups")):
+        return False
+    if "преобразователь напряжения" in normalized:
+        return True
+    return any(token in normalized for token in ("блок питания", "источник питания"))
+
+
 def _has_ops_relay_module_signal(normalized_text: str) -> bool:
     normalized = normalize_text(normalized_text)
     if not normalized:
@@ -1331,6 +1396,59 @@ def _has_ops_relay_module_signal(normalized_text: str) -> bool:
                     "с2000",
                 )
             )
+        )
+    )
+
+
+def _has_ops_module_expansion_signal(normalized_text: str) -> bool:
+    normalized = normalize_text(normalized_text)
+    if not normalized or _has_ops_relay_module_signal(normalized):
+        return False
+    return any(
+        token in normalized
+        for token in (
+            "блок расширения",
+            "блок коммутации",
+            "устройство коммутационное",
+            "модуль сопряжения",
+            "изолятор шлейфа",
+            "изолятор короткого замыкания",
+            "барьер искрозащиты",
+            "элемент дистанционного управления",
+            "модуль индивидуальной индикации",
+        )
+    )
+
+
+def _has_ops_interface_device_signal(normalized_text: str) -> bool:
+    normalized = normalize_text(normalized_text)
+    if not normalized:
+        return False
+    if any(token in normalized for token in ("конвертер", "модем", "преобразователь интерфейса", "преобразователь интерфейсов")):
+        return True
+    return (
+        any(token in normalized for token in ("ethernet", "lan", "rs485", "rs-485", "rs232", "rs 232", "usb", "modbus", "протокол"))
+        and any(token in normalized for token in ("интерфейс", "преобразоват", "конвертер", "модем"))
+    )
+
+
+def _has_ops_control_device_signal(normalized_text: str) -> bool:
+    normalized = normalize_text(normalized_text)
+    if not normalized:
+        return False
+    return any(
+        token in normalized
+        for token in (
+            "коммуникатор",
+            "ретранслятор",
+            "радиорасширител",
+            "расширитель",
+            "считыватель",
+            "клавиатура",
+            "концентратор",
+            "приемник",
+            "приёмник",
+            "контроллер",
         )
     )
 
@@ -1474,10 +1592,16 @@ def _normalize_effective_entity_type_by_catalog_branch(
             "дополнительное оборудование для ос",
         )
     ):
-        if _has_ops_power_backup_signal(normalized_catalog_text):
+        if _has_ops_control_panel_signal(normalized_catalog_text):
+            return "security_control_panel"
+        if _has_ops_power_backup_signal(normalized_catalog_text) or _has_ops_power_supply_signal(normalized_catalog_text):
             return "power_backup"
-        if _has_ops_relay_module_signal(normalized_catalog_text):
+        if _has_ops_interface_device_signal(normalized_catalog_text):
+            return "security_interface_device"
+        if _has_ops_module_expansion_signal(normalized_catalog_text) or _has_ops_relay_module_signal(normalized_catalog_text):
             return "security_module_device"
+        if _has_ops_control_device_signal(normalized_catalog_text):
+            return "security_control_device"
     if any(marker in normalized_branch for marker in ("металлорукав с изоляцией", "гофрированные трубы для прокладки кабеля", "трубы жесткие двустенные")):
         return "cable_conduit"
     if any(marker in normalized_branch for marker in ("затворы поворотные дисковые", "краны шаровые стальные", "краны шаровые латунные для воды", "краны шаровые пнд", "клапаны электромагнитные соленоидные")):
@@ -1661,24 +1785,58 @@ def _normalize_catalog_effective_entity_type(
         if raw_entity_type:
             return raw_entity_type
         return "other"
-    if _has_ops_power_backup_signal(normalized_text) and candidate_family in {
+    if _has_ops_control_panel_signal(normalized_text) and candidate_family in {
+        "other",
+        "security_control_device",
+        "security_control_panel",
+        "security_module_device",
+    }:
+        return "security_control_panel"
+    if (_has_ops_power_backup_signal(normalized_text) or _has_ops_power_supply_signal(normalized_text)) and candidate_family in {
         "other",
         "power_backup",
         "security_control_panel",
         "security_control_device",
+        "security_module_device",
     }:
         return "power_backup"
-    if _has_ops_relay_module_signal(normalized_text) and candidate_family in {
+    if _has_ops_interface_device_signal(normalized_text) and candidate_family in {
+        "other",
+        "security_control_device",
+        "security_control_panel",
+        "security_module_device",
+        "security_interface_device",
+    }:
+        return "security_interface_device"
+    if (_has_ops_module_expansion_signal(normalized_text) or _has_ops_relay_module_signal(normalized_text)) and candidate_family in {
         "other",
         "control_relay",
         "security_control_panel",
         "security_control_device",
         "security_module_device",
+        "security_interface_device",
     }:
         return "security_module_device"
+    if _has_ops_control_device_signal(normalized_text) and candidate_family in {
+        "other",
+        "security_control_panel",
+        "security_control_device",
+        "security_module_device",
+    }:
+        return "security_control_device"
+    if candidate_family == "security_control_panel" and _has_ops_control_panel_signal(normalized_text):
+        return candidate_entity_type
     if candidate_family == "power_backup" and _has_ops_power_backup_signal(normalized_text):
         return candidate_entity_type
+    if candidate_family == "power_backup" and _has_ops_power_supply_signal(normalized_text):
+        return candidate_entity_type
+    if candidate_family == "security_interface_device" and _has_ops_interface_device_signal(normalized_text):
+        return candidate_entity_type
+    if candidate_family == "security_module_device" and _has_ops_module_expansion_signal(normalized_text):
+        return candidate_entity_type
     if candidate_family == "security_module_device" and _has_ops_relay_module_signal(normalized_text):
+        return candidate_entity_type
+    if candidate_family == "security_control_device" and _has_ops_control_device_signal(normalized_text):
         return candidate_entity_type
     if candidate_family == "optical_cross":
         if "кросс" in normalized_text:
@@ -2436,9 +2594,19 @@ def normalize_catalog_branch_from_row(
     if normalized_class_name in {
         "приборы приемно контрольные для опс",
         "приборы приёмно контрольные для опс",
+        "дополнительное оборудование для пс",
+        "дополнительное оборудование для ос",
     }:
         ops_source_text = " ".join(filter(None, [name, item_type, class_name]))
-        if _has_ops_power_backup_signal(ops_source_text) or _has_ops_relay_module_signal(ops_source_text):
+        if (
+            _has_ops_control_panel_signal(ops_source_text)
+            or _has_ops_power_backup_signal(ops_source_text)
+            or _has_ops_power_supply_signal(ops_source_text)
+            or _has_ops_interface_device_signal(ops_source_text)
+            or _has_ops_module_expansion_signal(ops_source_text)
+            or _has_ops_relay_module_signal(ops_source_text)
+            or _has_ops_control_device_signal(ops_source_text)
+        ):
             return normalize_branch_path([class_name]) or "прочее"
     if _looks_like_cable_infrastructure_class_name(normalized_class_name):
         return normalize_branch_path([class_name]) or "прочее"

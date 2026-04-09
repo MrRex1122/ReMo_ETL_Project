@@ -3408,6 +3408,33 @@ class MatchTaxonomyTests(unittest.TestCase):
             "entity_type": "other",
             "item_markers": {},
         }
+        ppkop_features = self.matcher._extract_query_features("Прибор приемно-контрольный охранно-пожарный Гранит-5А GSM")
+        ppkop_features["entity_type"] = "security_control_panel"
+        ppkop_candidate = {
+            "name": "Прибор приемно-контрольный охранно-пожарный Гранит-5А GSM",
+            "normalized_name": "прибор приемно контрольный охранно пожарный гранит 5а gsm",
+            "branch_path": "приборы приёмно-контрольные для опс",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        module_features = self.matcher._extract_query_features("Блок расширения адресных шлейфов")
+        module_features["entity_type"] = "security_module_device"
+        module_candidate = {
+            "name": "Блок расширения адресных шлейфов",
+            "normalized_name": "блок расширения адресных шлейфов",
+            "branch_path": "дополнительное оборудование для ос",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        converter_features = self.matcher._extract_query_features("Конвертер интерфейсов RS485/Ethernet")
+        converter_features["entity_type"] = "security_interface_device"
+        converter_candidate = {
+            "name": "Конвертер интерфейсов RS485/Ethernet",
+            "normalized_name": "конвертер интерфейсов rs485 ethernet",
+            "branch_path": "дополнительное оборудование для пс",
+            "entity_type": "other",
+            "item_markers": {},
+        }
 
         self.assertEqual(
             self.matcher._effective_candidate_family_for_query(detector_features, detector_candidate),
@@ -3428,6 +3455,18 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.assertEqual(
             self.matcher._effective_candidate_family_for_query(relay_features, relay_candidate),
             "security_module_device",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(ppkop_features, ppkop_candidate),
+            "security_control_panel",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(module_features, module_candidate),
+            "security_module_device",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(converter_features, converter_candidate),
+            "security_interface_device",
         )
 
     def test_strict_fallback_allows_fastener_like_candidate_after_family_normalization(self):

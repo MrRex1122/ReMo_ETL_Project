@@ -101,9 +101,19 @@ class QueryParserTests(unittest.TestCase):
             "Блок реле ВЭРС-БРУ 16 версия 3.1, 16 реле с тремя контактами перекидного типа",
             taxonomy_rules=self.rules,
         )
+        ppkop_panel = parse_query_spec(
+            "Прибор приемно-контрольный охранно-пожарный Гранит-5А GSM",
+            taxonomy_rules=self.rules,
+        )
+        expansion_module = parse_query_spec(
+            "Блок расширения адресных шлейфов",
+            taxonomy_rules=self.rules,
+        )
 
         self.assertEqual(backup_block.entity_type, "power_backup")
         self.assertEqual(relay_block.entity_type, "security_module_device")
+        self.assertEqual(ppkop_panel.entity_type, "security_control_panel")
+        self.assertEqual(expansion_module.entity_type, "security_module_device")
 
     def test_parse_query_spec_uses_subfamily_split_for_boxes_and_switch_wiring(self):
         box_spec = parse_query_spec("Коробка монтажная огнестойкая", taxonomy_rules=self.rules)
