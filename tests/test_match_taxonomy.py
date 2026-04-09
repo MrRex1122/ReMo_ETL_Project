@@ -3390,6 +3390,24 @@ class MatchTaxonomyTests(unittest.TestCase):
             "entity_type": "other",
             "item_markers": {},
         }
+        backup_features = self.matcher._extract_query_features("Блок резервного питания 12В 2.5А в корпусе под АКБ 1.2Ач")
+        backup_features["entity_type"] = "power_backup"
+        backup_candidate = {
+            "name": "Блок резервного питания 12В 2.5А в корпусе под АКБ 1.2Ач",
+            "normalized_name": "блок резервного питания 12в 2 5а в корпусе под акб 1 2ач",
+            "branch_path": "приборы приёмно-контрольные для опс",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        relay_features = self.matcher._extract_query_features("Блок реле ВЭРС-БРУ 16")
+        relay_features["entity_type"] = "security_module_device"
+        relay_candidate = {
+            "name": "Блок реле ВЭРС-БРУ 16 версия 3.1",
+            "normalized_name": "блок реле вэрс бру 16 версия 3 1",
+            "branch_path": "приборы приёмно-контрольные для опс",
+            "entity_type": "other",
+            "item_markers": {},
+        }
 
         self.assertEqual(
             self.matcher._effective_candidate_family_for_query(detector_features, detector_candidate),
@@ -3402,6 +3420,14 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.assertEqual(
             self.matcher._effective_candidate_family_for_query(panel_features, panel_candidate),
             "security_control_panel",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(backup_features, backup_candidate),
+            "power_backup",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(relay_features, relay_candidate),
+            "security_module_device",
         )
 
     def test_strict_fallback_allows_fastener_like_candidate_after_family_normalization(self):

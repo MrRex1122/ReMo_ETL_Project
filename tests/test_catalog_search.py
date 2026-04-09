@@ -327,6 +327,8 @@ class CatalogSearchTests(unittest.TestCase):
                     "Кабель интерфейсный RS-485 2х2х0,75;IFC-1;10;Кабели Интерфейсные;CLS-2;Кабель интерфейса;;ReMo\n"
                     "Устройство плавного пуска 15кВт со съемным пультом управления;SS-1;10;Устройства Плавного Пуска;CLS-3;Устройство плавного пуска;;ReMo\n"
                     "Блок управления внешний АВР-ATSE1-100R100/3F 100А;AVR-1;10;Моноблочные АВР На Базе Ва;CLS-4;Автоматический ввод резерва (АВР);;ReMo\n"
+                    "Блок резервного питания 12В 2.5А в компактном корпусе под АКБ 1.2Ач;PWR-1;10;Приборы Приёмно-Контрольные Для Опс;CLS-5;Блок резервного питания;;Ритм\n"
+                    "Блок реле ВЭРС-БРУ 16 версия 3.1, 16 реле с тремя контактами перекидного типа;REL-1;10;Приборы Приёмно-Контрольные Для Опс;CLS-6;Блок реле;;ВЭРС\n"
                 ),
                 encoding="utf-8",
             )
@@ -338,6 +340,8 @@ class CatalogSearchTests(unittest.TestCase):
             interface_cable = built.loc[built["Артикул"] == "IFC-1"].iloc[0]
             soft_starter = built.loc[built["Артикул"] == "SS-1"].iloc[0]
             avr = built.loc[built["Артикул"] == "AVR-1"].iloc[0]
+            backup_block = built.loc[built["Артикул"] == "PWR-1"].iloc[0]
+            relay_block = built.loc[built["Артикул"] == "REL-1"].iloc[0]
 
             self.assertEqual(detector["search_branch_path"], "извещатели пожарные")
             self.assertEqual(detector["search_effective_family"], "fire_detector")
@@ -351,6 +355,14 @@ class CatalogSearchTests(unittest.TestCase):
 
             self.assertEqual(avr["search_effective_family"], "breaker")
             self.assertEqual(avr["search_effective_entity_type"], "breaker")
+
+            self.assertEqual(backup_block["search_branch_path"], "приборы приёмно-контрольные для опс")
+            self.assertEqual(backup_block["search_effective_family"], "power_backup")
+            self.assertEqual(backup_block["search_effective_entity_type"], "power_backup")
+
+            self.assertEqual(relay_block["search_branch_path"], "приборы приёмно-контрольные для опс")
+            self.assertEqual(relay_block["search_effective_family"], "security_module_device")
+            self.assertEqual(relay_block["search_effective_entity_type"], "security_module_device")
 
     def test_build_search_catalog_assigns_signage_families(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

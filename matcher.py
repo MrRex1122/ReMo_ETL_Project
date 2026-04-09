@@ -31,6 +31,8 @@ from catalog_search import (
     DUCKDB_AVAILABLE as SEARCH_DUCKDB_AVAILABLE,
     SEARCH_CATALOG_FILENAME,
     SEARCH_CATALOG_TABLE,
+    _has_ops_power_backup_signal as shared_has_ops_power_backup_signal,
+    _has_ops_relay_module_signal as shared_has_ops_relay_module_signal,
     _looks_like_cable_channel_box as shared_looks_like_cable_channel_box,
     clean_text_value as shared_clean_text_value,
     classify_item_type as shared_classify_item_type,
@@ -4755,6 +4757,10 @@ class ReMoMatcher:
             and any(token in search_text for token in ("rs485", "modbus", "ethernet", "интерфейс", "протокол"))
         ):
             return "security_interface_device"
+        if any(token in branch_path for token in ("приборы приемно контрольные для опс", "дополнительное оборудование для пс", "дополнительное оборудование для ос")) and shared_has_ops_power_backup_signal(search_text):
+            return "power_backup"
+        if any(token in branch_path for token in ("приборы приемно контрольные для опс", "дополнительное оборудование для пс", "дополнительное оборудование для ос")) and shared_has_ops_relay_module_signal(search_text):
+            return "security_module_device"
         if "приборы приемно контрольные для опс" in branch_path and (
             any(token in search_text for token in ("пульт", "панель", "блок"))
             and any(token in search_text for token in ("управл", "контрол", "индикац"))
@@ -4763,8 +4769,8 @@ class ReMoMatcher:
             return "security_control_panel"
         if any(token in branch_path for token in ("приборы приемно контрольные для опс", "дополнительное оборудование для пс", "дополнительное оборудование для ос")) and (
             any(token in search_text for token in ("модуль", "блок", "устройство"))
-            and any(token in search_text for token in ("пуск", "коммутац", "линии связи", "нагрузк", "изолир", "разветв", "адресн"))
-            and not any(token in search_text for token in ("интерфейс", "modbus", "rs485", "пульт", "индикац"))
+            and any(token in search_text for token in ("пуск", "коммутац", "линии связи", "нагрузк", "изолир", "разветв", "адресн", "реле", "релейн", "бру"))
+            and not any(token in search_text for token in ("интерфейс", "modbus", "rs485", "пульт", "индикац", "промежуточное реле", "промежуточные реле", "реле контроля напряжения", "тепловое реле"))
         ):
             return "security_module_device"
         if any(

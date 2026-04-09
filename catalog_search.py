@@ -936,6 +936,10 @@ def classify_item_type(
         if "meter" in normalized or "измерител" in normalized:
             return "pdu_metered"
         return "pdu_basic"
+    if _has_ops_power_backup_signal(normalized):
+        return "power_backup"
+    if _has_ops_relay_module_signal(normalized):
+        return "security_module_device"
     if _looks_like_optical_patch_cord(normalized, phrase_normalized):
         return "optical_patch_cord"
     if ("оптическ" in normalized and "кросс" in normalized) or ("кросс" in normalized and "волокон" in normalized):
@@ -1268,6 +1272,69 @@ def _has_strong_security_domain_signal(normalized_text: str) -> bool:
     )
 
 
+def _has_ops_power_backup_signal(normalized_text: str) -> bool:
+    normalized = normalize_text(normalized_text)
+    if not normalized:
+        return False
+    if any(
+        token in normalized
+        for token in (
+            "блок резервного питания",
+            "резервный источник питания",
+            "резервированн источник питания",
+        )
+    ):
+        return True
+    return (
+        any(token in normalized for token in ("источник питания", "блок питания"))
+        and any(token in normalized for token in ("акб", "аккумулятор", "резерв"))
+        and any(
+            token in normalized
+            for token in (
+                "опс",
+                "охран",
+                "пожар",
+                "приемно контрольн",
+                "приёмно контрольн",
+                "вэрс",
+                "болид",
+                "с2000",
+                "ритм",
+            )
+        )
+    )
+
+
+def _has_ops_relay_module_signal(normalized_text: str) -> bool:
+    normalized = normalize_text(normalized_text)
+    if not normalized:
+        return False
+    if any(
+        token in normalized
+        for token in ("промежуточное реле", "промежуточные реле", "реле контроля напряжения", "тепловое реле")
+    ):
+        return False
+    return (
+        any(token in normalized for token in ("блок реле", "релейный блок", "бру"))
+        and (
+            "бру" in normalized
+            or any(
+                token in normalized
+                for token in (
+                    "опс",
+                    "охран",
+                    "пожар",
+                    "приемно контрольн",
+                    "приёмно контрольн",
+                    "вэрс",
+                    "болид",
+                    "с2000",
+                )
+            )
+        )
+    )
+
+
 def _has_strong_breaker_domain_signal(normalized_text: str) -> bool:
     normalized = normalize_text(normalized_text)
     if not normalized:
@@ -1356,11 +1423,13 @@ def _normalize_effective_entity_type_by_catalog_branch(
     branch_path: str,
     effective_entity_type: str,
     raw_entity_type: str,
+    normalized_text: str,
     rules: Mapping[str, Any],
 ) -> str:
     normalized_branch = normalize_branch_path([branch_path])
     if not normalized_branch:
         return effective_entity_type
+    normalized_catalog_text = normalize_text(normalized_text)
 
     tray_sheet_branch_markers = (
         "кабельные лотки",
@@ -1395,6 +1464,20 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "tray_sheet"
     if any(marker in normalized_branch for marker in cable_channel_body_branch_markers):
         return "cable_channel"
+    if any(
+        marker in normalized_branch
+        for marker in (
+            "приёмно-контрольные для опс",
+            "приборы приемно-контрольные для опс",
+            "приборы приёмно-контрольные для опс",
+            "дополнительное оборудование для пс",
+            "дополнительное оборудование для ос",
+        )
+    ):
+        if _has_ops_power_backup_signal(normalized_catalog_text):
+            return "power_backup"
+        if _has_ops_relay_module_signal(normalized_catalog_text):
+            return "security_module_device"
     if any(marker in normalized_branch for marker in ("металлорукав с изоляцией", "гофрированные трубы для прокладки кабеля", "трубы жесткие двустенные")):
         return "cable_conduit"
     if any(marker in normalized_branch for marker in ("затворы поворотные дисковые", "краны шаровые стальные", "краны шаровые латунные для воды", "краны шаровые пнд", "клапаны электромагнитные соленоидные")):
@@ -1578,6 +1661,25 @@ def _normalize_catalog_effective_entity_type(
         if raw_entity_type:
             return raw_entity_type
         return "other"
+    if _has_ops_power_backup_signal(normalized_text) and candidate_family in {
+        "other",
+        "power_backup",
+        "security_control_panel",
+        "security_control_device",
+    }:
+        return "power_backup"
+    if _has_ops_relay_module_signal(normalized_text) and candidate_family in {
+        "other",
+        "control_relay",
+        "security_control_panel",
+        "security_control_device",
+        "security_module_device",
+    }:
+        return "security_module_device"
+    if candidate_family == "power_backup" and _has_ops_power_backup_signal(normalized_text):
+        return candidate_entity_type
+    if candidate_family == "security_module_device" and _has_ops_relay_module_signal(normalized_text):
+        return candidate_entity_type
     if candidate_family == "optical_cross":
         if "кросс" in normalized_text:
             return candidate_entity_type
@@ -2054,7 +2156,13 @@ def derive_branch_from_text(
             return "световой оповещатель"
         if registry_family == "security_control_panel":
             return "приборы приёмно-контрольные для опс"
+        if registry_family == "power_backup":
+            if _has_ops_power_backup_signal(merged):
+                return "приборы приёмно-контрольные для опс"
+            return "дополнительное оборудование для ос"
         if registry_family in {"security_interface_device", "security_module_device"}:
+            if registry_family == "security_module_device" and _has_ops_relay_module_signal(merged):
+                return "приборы приёмно-контрольные для опс"
             return "дополнительное оборудование для пс"
         if registry_family in {
             "airflow_blanking_panel",
@@ -2325,6 +2433,13 @@ def normalize_catalog_branch_from_row(
     normalized_class_name = normalize_text(class_name, synonyms=synonyms)
     if normalized_class_name and normalized_class_name in class_name_map:
         return class_name_map[normalized_class_name]
+    if normalized_class_name in {
+        "приборы приемно контрольные для опс",
+        "приборы приёмно контрольные для опс",
+    }:
+        ops_source_text = " ".join(filter(None, [name, item_type, class_name]))
+        if _has_ops_power_backup_signal(ops_source_text) or _has_ops_relay_module_signal(ops_source_text):
+            return normalize_branch_path([class_name]) or "прочее"
     if _looks_like_cable_infrastructure_class_name(normalized_class_name):
         return normalize_branch_path([class_name]) or "прочее"
 
@@ -2583,6 +2698,7 @@ def build_search_projection_row(
         branch_path=branch_path,
         effective_entity_type=effective_entity_type,
         raw_entity_type=entity_type,
+        normalized_text=normalize_text(combined_text, synonyms=synonyms),
         rules=rules,
     )
     effective_family = entity_family_for_type(effective_entity_type or entity_type, rules)

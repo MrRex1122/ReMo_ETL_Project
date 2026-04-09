@@ -93,6 +93,18 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(battery.entity_type, "power_backup")
         self.assertEqual(firestop.entity_type, "firestop_material")
 
+        backup_block = parse_query_spec(
+            "Блок резервного питания 12В 2.5А в компактном корпусе под АКБ 1.2Ач",
+            taxonomy_rules=self.rules,
+        )
+        relay_block = parse_query_spec(
+            "Блок реле ВЭРС-БРУ 16 версия 3.1, 16 реле с тремя контактами перекидного типа",
+            taxonomy_rules=self.rules,
+        )
+
+        self.assertEqual(backup_block.entity_type, "power_backup")
+        self.assertEqual(relay_block.entity_type, "security_module_device")
+
     def test_parse_query_spec_uses_subfamily_split_for_boxes_and_switch_wiring(self):
         box_spec = parse_query_spec("Коробка монтажная огнестойкая", taxonomy_rules=self.rules)
         box_accessory_spec = parse_query_spec("Аксессуары для установочных коробок", taxonomy_rules=self.rules)
