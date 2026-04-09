@@ -1052,6 +1052,33 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
             "required_any_tokens": [["отвертк", "screwdriver"], ["крест", "phillips", "pozidriv", "pz", "ph"]],
         },
     },
+    "self_tapping_screw": {
+        "entity_types": ["self_tapping_screw"],
+        "default_branches": ["саморезы универсальные"],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "audited": True,
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 52,
+            "positive_patterns": [
+                "саморез универсальный",
+                "саморезы универсальные",
+                "универсальный саморез",
+                "универсальные саморезы",
+                "self-tapping screw",
+                "self tapping screw",
+            ],
+            "negative_patterns": [
+                "шуруповерт",
+                "бита",
+                "битодержатель",
+                "анкер",
+                "дюбель",
+            ],
+            "required_any_tokens": [["саморез", "screw"], ["универс", "tapping"]],
+        },
+    },
     "drill_bit_metal": {
         "entity_types": ["drill_bit_metal"],
         "default_branches": ["сверла по металлу"],
@@ -2162,6 +2189,10 @@ DEFAULT_DOMAIN_REGISTRY: Dict[str, Any] = {
         "phillips_screwdriver": {
             "patterns": ["крестовая отвертка", "отвертка крестовая", "крестовые отвертки", "отвертка phillips", "phillips screwdriver", "pozidriv screwdriver"],
             "families": ["phillips_screwdriver"],
+        },
+        "self_tapping_screw": {
+            "patterns": ["саморез универсальный", "саморезы универсальные", "универсальный саморез", "универсальные саморезы", "self-tapping screw", "self tapping screw"],
+            "families": ["self_tapping_screw"],
         },
         "drill_bit_metal": {
             "patterns": ["сверло по металлу", "сверла по металлу", "drill bit", "metal drill", "hss drill"],
@@ -3373,6 +3404,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "diamond_blade",
         "printer_cartridge",
         "phillips_screwdriver",
+        "self_tapping_screw",
         "drill_bit_metal",
         "masonry_drill_bit",
         "concrete_hole_saw",
@@ -3446,6 +3478,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "diamond_blade": "diamond_blade",
         "printer_cartridge": "printer_cartridge",
         "phillips_screwdriver": "phillips_screwdriver",
+        "self_tapping_screw": "self_tapping_screw",
         "drill_bit_metal": "drill_bit_metal",
         "masonry_drill_bit": "masonry_drill_bit",
         "concrete_hole_saw": "concrete_hole_saw",
@@ -3532,6 +3565,7 @@ DEFAULT_AUDIT_SCOPE: Dict[str, Any] = {
         "diamond_blade": "diamond blade",
         "printer_cartridge": "printer cartridge",
         "phillips_screwdriver": "phillips screwdriver",
+        "self_tapping_screw": "self tapping screw",
         "drill_bit_metal": "drill bit metal",
         "masonry_drill_bit": "masonry drill bit",
         "concrete_hole_saw": "concrete hole saw",

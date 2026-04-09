@@ -1068,6 +1068,12 @@ class CatalogSearchTests(unittest.TestCase):
             classify_item_type("Отвертка крестовая PH2x100"),
             "phillips_screwdriver",
         )
+
+    def test_classify_item_type_detects_self_tapping_screw_queries(self):
+        self.assertEqual(
+            classify_item_type("Саморез универсальный 4.2x32"),
+            "self_tapping_screw",
+        )
         self.assertEqual(
             derive_branch_from_text("Плашка круглая М8"),
             "плашки",
@@ -1884,6 +1890,26 @@ class CatalogSearchTests(unittest.TestCase):
 
             self.assertEqual(screwdriver["search_branch_path"], "крестовые отвертки")
             self.assertEqual(screwdriver["search_effective_family"], "phillips_screwdriver")
+
+    def test_build_search_catalog_maps_self_tapping_screws_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Саморез универсальный 4.2x32;STS-1;10;Саморезы Универсальные;CLS-1;Саморез;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+            screw = built.loc[built["Артикул"] == "STS-1"].iloc[0]
+
+            self.assertEqual(screw["search_branch_path"], "саморезы универсальные")
+            self.assertEqual(screw["search_effective_family"], "self_tapping_screw")
 
     def test_build_search_catalog_maps_drill_bits_out_of_other(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

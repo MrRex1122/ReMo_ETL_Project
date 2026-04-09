@@ -4886,6 +4886,11 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("шлицевая отвертка", "torx", "имбус", "битодержатель", "бита"))
         ):
             return "phillips_screwdriver"
+        if "саморезы универсальные" in branch_path or (
+            any(token in search_text for token in ("саморез универсальный", "саморезы универсальные", "универсальный саморез", "универсальные саморезы", "self-tapping screw", "self tapping screw"))
+            and not any(token in search_text for token in ("шуруповерт", "бита", "битодержатель", "анкер", "дюбель"))
+        ):
+            return "self_tapping_screw"
         if "сверла по металлу" in branch_path or (
             any(
                 token in search_text
@@ -5224,6 +5229,7 @@ class ReMoMatcher:
             "diamond_blade",
             "printer_cartridge",
             "phillips_screwdriver",
+            "self_tapping_screw",
             "drill_bit_metal",
             "masonry_drill_bit",
             "concrete_hole_saw",

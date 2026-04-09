@@ -310,6 +310,12 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(screwdriver.entity_type, "phillips_screwdriver")
         self.assertEqual(screwdriver.branch_hint, "крестовые отвертки")
 
+    def test_parse_query_spec_detects_self_tapping_screw_queries(self):
+        screw = parse_query_spec("Саморез универсальный 4.2x32", taxonomy_rules=self.rules)
+
+        self.assertEqual(screw.entity_type, "self_tapping_screw")
+        self.assertEqual(screw.branch_hint, "саморезы универсальные")
+
     def test_parse_query_spec_detects_drill_bit_metal_queries(self):
         drill = parse_query_spec("Сверло по металлу HSS 8 мм", taxonomy_rules=self.rules)
 

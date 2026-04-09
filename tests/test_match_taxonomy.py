@@ -2388,6 +2388,22 @@ class MatchTaxonomyTests(unittest.TestCase):
             "phillips_screwdriver",
         )
 
+    def test_effective_candidate_family_maps_other_self_tapping_screw_branch(self):
+        screw_features = self.matcher._extract_query_features("Саморез универсальный 4.2x32")
+        screw_features["entity_type"] = "self_tapping_screw"
+        screw_candidate = {
+            "name": "Саморез универсальный 4.2x32",
+            "normalized_name": "саморез универсальный 4.2x32",
+            "branch_path": "саморезы универсальные",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(screw_features, screw_candidate),
+            "self_tapping_screw",
+        )
+
     def test_effective_candidate_family_maps_other_drill_bit_metal_branch(self):
         features = self.matcher._extract_query_features("Сверло по металлу HSS 8 мм")
         features["entity_type"] = "drill_bit_metal"
