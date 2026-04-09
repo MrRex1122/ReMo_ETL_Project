@@ -471,6 +471,7 @@ class CatalogSearchTests(unittest.TestCase):
                     "Переходник левый 200/100 для кабельного лотка;TR-2;10;Переходники Для Кабельных Лотков Оцинкованные (Метод Сендзимира);CLS-2;Переходник;;ReMo\n"
                     "Подвес потолочный для кабельного лотка;TR-3;10;Подвесы И Крепления Для Кабельных Лотков Оцинкованные (Метод Сендзимира);CLS-3;Подвес;;ReMo\n"
                     "Перегородка продольная для кабельного лотка;TR-4;10;Разделители И Перегородки Для Кабельных Лотков Оцинкованные (Метод Сендзимира);CLS-4;Перегородка;;ReMo\n"
+                    "Пластина для заземления PTCE;TR-5;10;Аксессуары Вспомогательные Для Кабеленесущих Систем;CLS-5;Пластина;;ReMo\n"
                 ),
                 encoding="utf-8",
             )
@@ -482,6 +483,7 @@ class CatalogSearchTests(unittest.TestCase):
             adapter = built.loc[built["Артикул"] == "TR-2"].iloc[0]
             hanger = built.loc[built["Артикул"] == "TR-3"].iloc[0]
             divider = built.loc[built["Артикул"] == "TR-4"].iloc[0]
+            helper_accessory = built.loc[built["Артикул"] == "TR-5"].iloc[0]
 
             self.assertEqual(
                 tray["search_branch_path"],
@@ -506,6 +508,12 @@ class CatalogSearchTests(unittest.TestCase):
                 "разделители и перегородки для кабельных лотков оцинкованные (метод сендзимира)",
             )
             self.assertEqual(divider["search_effective_family"], "tray_sheet")
+
+            self.assertEqual(
+                helper_accessory["search_branch_path"],
+                "аксессуары вспомогательные для кабеленесущих систем",
+            )
+            self.assertEqual(helper_accessory["search_effective_family"], "rack_accessory_strict")
 
     def test_classify_item_type_does_not_treat_ascii_ups_ports_as_iec_power_cable(self):
         self.assertNotEqual(
