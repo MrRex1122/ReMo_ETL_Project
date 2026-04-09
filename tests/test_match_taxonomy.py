@@ -2249,6 +2249,61 @@ class MatchTaxonomyTests(unittest.TestCase):
             "brass_threaded_fitting",
         )
 
+    def test_effective_candidate_family_maps_other_workwear_gloves_polypropylene_fitting_and_turning_tool_branches(self):
+        suit_features = self.matcher._extract_query_features("Костюм летний рабочий мужской")
+        suit_features["entity_type"] = "workwear"
+        suit_candidate = {
+            "name": "Костюм летний рабочий мужской",
+            "normalized_name": "костюм летний рабочий мужской",
+            "branch_path": "костюмы летние",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        gloves_features = self.matcher._extract_query_features("Перчатки защитные антипорезные размер 10")
+        gloves_features["entity_type"] = "protective_gloves"
+        gloves_candidate = {
+            "name": "Перчатки защитные антипорезные размер 10",
+            "normalized_name": "перчатки защитные антипорезные размер 10",
+            "branch_path": "антипорезные и защитные перчатки",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        fitting_features = self.matcher._extract_query_features("Фитинг полипропиленовый муфта 25 мм")
+        fitting_features["entity_type"] = "polypropylene_fitting"
+        fitting_candidate = {
+            "name": "Фитинг полипропиленовый муфта 25 мм",
+            "normalized_name": "фитинг полипропиленовый муфта 25 мм",
+            "branch_path": "фитинги для полипропиленовых труб",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        tool_features = self.matcher._extract_query_features("Резец по металлу токарный проходной 16x16")
+        tool_features["entity_type"] = "metal_turning_tool"
+        tool_candidate = {
+            "name": "Резец по металлу токарный проходной 16x16",
+            "normalized_name": "резец по металлу токарный проходной 16x16",
+            "branch_path": "резцы по металлу",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(suit_features, suit_candidate),
+            "workwear",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(gloves_features, gloves_candidate),
+            "protective_gloves",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(fitting_features, fitting_candidate),
+            "polypropylene_fitting",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(tool_features, tool_candidate),
+            "metal_turning_tool",
+        )
+
     def test_effective_candidate_family_maps_other_drill_bit_metal_branch(self):
         features = self.matcher._extract_query_features("Сверло по металлу HSS 8 мм")
         features["entity_type"] = "drill_bit_metal"

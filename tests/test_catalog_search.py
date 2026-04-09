@@ -1022,6 +1022,24 @@ class CatalogSearchTests(unittest.TestCase):
             classify_item_type("Фитинг резьбовой латунный угольник 1/2"),
             "brass_threaded_fitting",
         )
+
+    def test_classify_item_type_detects_workwear_gloves_polypropylene_fitting_and_turning_tool_queries(self):
+        self.assertEqual(
+            classify_item_type("Костюм летний рабочий мужской"),
+            "workwear",
+        )
+        self.assertEqual(
+            classify_item_type("Перчатки защитные антипорезные размер 10"),
+            "protective_gloves",
+        )
+        self.assertEqual(
+            classify_item_type("Фитинг полипропиленовый муфта 25 мм"),
+            "polypropylene_fitting",
+        )
+        self.assertEqual(
+            classify_item_type("Резец по металлу токарный проходной 16x16"),
+            "metal_turning_tool",
+        )
         self.assertEqual(
             derive_branch_from_text("Плашка круглая М8"),
             "плашки",
@@ -1739,6 +1757,45 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(fitting["search_entity_type"], "brass_threaded_fitting")
             self.assertEqual(fitting["search_effective_entity_type"], "brass_threaded_fitting")
             self.assertEqual(fitting["search_effective_family"], "brass_threaded_fitting")
+
+    def test_build_search_catalog_maps_workwear_gloves_polypropylene_fittings_and_turning_tools_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Костюм летний рабочий мужской;WW-1;10;Костюмы Летние;CLS-1;Костюм рабочий;;ReMo\n"
+                    "Костюм утепленный рабочий;WW-2;10;Костюмы Утепленные;CLS-2;Костюм рабочий утепленный;;ReMo\n"
+                    "Перчатки защитные антипорезные размер 10;GL-1;10;Антипорезные И Защитные Перчатки;CLS-3;Перчатки защитные;;ReMo\n"
+                    "Фитинг полипропиленовый муфта 25 мм;PP-1;10;Фитинги Для Полипропиленовых Труб;CLS-4;Фитинг полипропиленовый;;ReMo\n"
+                    "Резец по металлу токарный проходной 16x16;TURN-1;10;Резцы По Металлу;CLS-5;Токарный резец;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+            suit = built.loc[built["Артикул"] == "WW-1"].iloc[0]
+            insulated_suit = built.loc[built["Артикул"] == "WW-2"].iloc[0]
+            gloves = built.loc[built["Артикул"] == "GL-1"].iloc[0]
+            fitting = built.loc[built["Артикул"] == "PP-1"].iloc[0]
+            turning_tool = built.loc[built["Артикул"] == "TURN-1"].iloc[0]
+
+            self.assertEqual(suit["search_branch_path"], "костюмы летние")
+            self.assertEqual(suit["search_effective_family"], "workwear")
+            self.assertEqual(insulated_suit["search_branch_path"], "костюмы утепленные")
+            self.assertEqual(insulated_suit["search_effective_family"], "workwear")
+
+            self.assertEqual(gloves["search_branch_path"], "антипорезные и защитные перчатки")
+            self.assertEqual(gloves["search_effective_family"], "protective_gloves")
+
+            self.assertEqual(fitting["search_branch_path"], "фитинги для полипропиленовых труб")
+            self.assertEqual(fitting["search_effective_family"], "polypropylene_fitting")
+
+            self.assertEqual(turning_tool["search_branch_path"], "резцы по металлу")
+            self.assertEqual(turning_tool["search_effective_family"], "metal_turning_tool")
 
     def test_build_search_catalog_maps_drill_bits_out_of_other(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -271,6 +271,21 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(fitting.entity_type, "brass_threaded_fitting")
         self.assertEqual(fitting.branch_hint, "фитинги резьбовые латунные")
 
+    def test_parse_query_spec_detects_workwear_gloves_polypropylene_fitting_and_turning_tool_queries(self):
+        suit = parse_query_spec("Костюм летний рабочий мужской", taxonomy_rules=self.rules)
+        gloves = parse_query_spec("Перчатки защитные антипорезные размер 10", taxonomy_rules=self.rules)
+        fitting = parse_query_spec("Фитинг полипропиленовый муфта 25 мм", taxonomy_rules=self.rules)
+        turning_tool = parse_query_spec("Резец по металлу токарный проходной 16x16", taxonomy_rules=self.rules)
+
+        self.assertEqual(suit.entity_type, "workwear")
+        self.assertEqual(suit.branch_hint, "костюмы летние")
+        self.assertEqual(gloves.entity_type, "protective_gloves")
+        self.assertEqual(gloves.branch_hint, "антипорезные и защитные перчатки")
+        self.assertEqual(fitting.entity_type, "polypropylene_fitting")
+        self.assertEqual(fitting.branch_hint, "фитинги для полипропиленовых труб")
+        self.assertEqual(turning_tool.entity_type, "metal_turning_tool")
+        self.assertEqual(turning_tool.branch_hint, "резцы по металлу")
+
     def test_parse_query_spec_detects_drill_bit_metal_queries(self):
         drill = parse_query_spec("Сверло по металлу HSS 8 мм", taxonomy_rules=self.rules)
 

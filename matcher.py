@@ -4836,6 +4836,26 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("полипропилен", "ппр", "ppr", "пнд", "press", "пресс", "обжим", "сварной"))
         ):
             return "brass_threaded_fitting"
+        if "фитинги для полипропиленовых труб" in branch_path or (
+            any(token in search_text for token in ("фитинги для полипропиленовых труб", "фитинг полипропиленовый", "полипропиленовый фитинг", "ppr fitting", "pp-r fitting"))
+            and not any(token in search_text for token in ("латун", "brass", "резьбовой латунный", "обжим", "пресс", "press"))
+        ):
+            return "polypropylene_fitting"
+        if "резцы по металлу" in branch_path or (
+            any(token in search_text for token in ("резец по металлу", "резцы по металлу", "токарный резец", "lathe tool", "turning tool"))
+            and not any(token in search_text for token in ("сверл", "коронк", "диск", "плашк", "метчик", "зенкер"))
+        ):
+            return "metal_turning_tool"
+        if any(token in branch_path for token in ("костюмы летние", "костюмы утепленные")) or (
+            any(token in search_text for token in ("костюм летний", "костюмы летние", "костюм утепленный", "костюмы утепленные", "workwear suit"))
+            and not any(token in search_text for token in ("купальник", "маскарад", "карнавальн"))
+        ):
+            return "workwear"
+        if "антипорезные и защитные перчатки" in branch_path or (
+            any(token in search_text for token in ("антипорезные перчатки", "защитные перчатки", "перчатки защитные", "перчатки защитные антипорезные", "рабочие перчатки", "protective gloves", "cut resistant gloves"))
+            and not any(token in search_text for token in ("боксерские", "варежки", "митенки"))
+        ):
+            return "protective_gloves"
         if "сверла по металлу" in branch_path or (
             any(
                 token in search_text
@@ -5164,6 +5184,10 @@ class ReMoMatcher:
             "socket_head_set",
             "drive_belt",
             "brass_threaded_fitting",
+            "polypropylene_fitting",
+            "metal_turning_tool",
+            "workwear",
+            "protective_gloves",
             "drill_bit_metal",
             "masonry_drill_bit",
             "concrete_hole_saw",

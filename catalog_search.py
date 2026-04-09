@@ -1000,6 +1000,26 @@ def classify_item_type(
     ):
         return "brass_threaded_fitting"
     if (
+        any(token in normalized for token in ("фитинги для полипропиленовых труб", "фитинг полипропиленовый", "полипропиленовый фитинг", "ppr fitting", "pp-r fitting"))
+        and not any(token in normalized for token in ("латун", "brass", "резьбовой латунный", "обжим", "пресс", "press"))
+    ):
+        return "polypropylene_fitting"
+    if (
+        any(token in normalized for token in ("резец по металлу", "резцы по металлу", "токарный резец", "lathe tool", "turning tool"))
+        and not any(token in normalized for token in ("сверл", "коронк", "диск", "плашк", "метчик", "зенкер"))
+    ):
+        return "metal_turning_tool"
+    if (
+        any(token in normalized for token in ("костюм летний", "костюмы летние", "костюм утепленный", "костюмы утепленные", "workwear suit"))
+        and not any(token in normalized for token in ("купальник", "маскарад", "карнавальн"))
+    ):
+        return "workwear"
+    if (
+        any(token in normalized for token in ("антипорезные перчатки", "защитные перчатки", "перчатки защитные", "перчатки защитные антипорезные", "рабочие перчатки", "protective gloves", "cut resistant gloves"))
+        and not any(token in normalized for token in ("боксерские", "варежки", "митенки"))
+    ):
+        return "protective_gloves"
+    if (
         any(token in normalized for token in ("сверло по металлу", "сверла по металлу", "drill bit", "metal drill", "hss drill"))
         and not any(token in normalized for token in ("метчик", "плашк", "коронк", "зенкер", "держател", "tap", "thread tap"))
     ):
@@ -1356,6 +1376,14 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "drive_belt"
     if "фитинги резьбовые латунные" in normalized_branch:
         return "brass_threaded_fitting"
+    if "фитинги для полипропиленовых труб" in normalized_branch:
+        return "polypropylene_fitting"
+    if "резцы по металлу" in normalized_branch:
+        return "metal_turning_tool"
+    if any(marker in normalized_branch for marker in ("костюмы летние", "костюмы утепленные")):
+        return "workwear"
+    if "антипорезные и защитные перчатки" in normalized_branch:
+        return "protective_gloves"
     if "сверла по металлу" in normalized_branch:
         return "drill_bit_metal"
     if any(marker in normalized_branch for marker in ("буры sds-plus", "буры sds-max", "сверла по бетону")):
@@ -1646,6 +1674,16 @@ def derive_branch_from_text(
                 return "ремни клиновые приводные"
             if effective_family == "brass_threaded_fitting":
                 return "фитинги резьбовые латунные"
+            if effective_family == "polypropylene_fitting":
+                return "фитинги для полипропиленовых труб"
+            if effective_family == "metal_turning_tool":
+                return "резцы по металлу"
+            if effective_family == "workwear":
+                if "утеплен" in merged:
+                    return "костюмы утепленные"
+                return "костюмы летние"
+            if effective_family == "protective_gloves":
+                return "антипорезные и защитные перчатки"
             if effective_family == "drill_bit_metal":
                 return "сверла по металлу"
             if effective_family == "masonry_drill_bit":
@@ -1816,6 +1854,16 @@ def derive_branch_from_text(
             return "ремни клиновые приводные"
         if registry_family == "brass_threaded_fitting":
             return "фитинги резьбовые латунные"
+        if registry_family == "polypropylene_fitting":
+            return "фитинги для полипропиленовых труб"
+        if registry_family == "metal_turning_tool":
+            return "резцы по металлу"
+        if registry_family == "workwear":
+            if "утеплен" in merged:
+                return "костюмы утепленные"
+            return "костюмы летние"
+        if registry_family == "protective_gloves":
+            return "антипорезные и защитные перчатки"
         if registry_family == "drill_bit_metal":
             return "сверла по металлу"
         if registry_family == "masonry_drill_bit":
@@ -1948,6 +1996,10 @@ def derive_branch_from_text(
             "socket_head_set",
             "drive_belt",
             "brass_threaded_fitting",
+            "polypropylene_fitting",
+            "metal_turning_tool",
+            "workwear",
+            "protective_gloves",
             "drill_bit_metal",
             "masonry_drill_bit",
             "concrete_hole_saw",
@@ -2061,6 +2113,16 @@ def derive_branch_from_text(
         return "ремни клиновые приводные"
     if effective_entity_type == "brass_threaded_fitting":
         return "фитинги резьбовые латунные"
+    if effective_entity_type == "polypropylene_fitting":
+        return "фитинги для полипропиленовых труб"
+    if effective_entity_type == "metal_turning_tool":
+        return "резцы по металлу"
+    if effective_entity_type == "workwear":
+        if "утеплен" in merged:
+            return "костюмы утепленные"
+        return "костюмы летние"
+    if effective_entity_type == "protective_gloves":
+        return "антипорезные и защитные перчатки"
     if effective_entity_type == "drill_bit_metal":
         return "сверла по металлу"
     if effective_entity_type == "masonry_drill_bit":
