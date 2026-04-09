@@ -1147,6 +1147,72 @@ class CatalogSearchTests(unittest.TestCase):
             "phillips_screwdriver",
         )
 
+    def test_classify_item_type_detects_thread_gauge_bits_wrenches_and_fitting_queries(self):
+        self.assertEqual(
+            classify_item_type("Резьбомер метрический М60"),
+            "thread_gauge",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Резьбомер метрический М60"),
+            "резьбомеры",
+        )
+        self.assertEqual(
+            classify_item_type("Бита TORX T25 25 мм"),
+            "torx_bit",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Бита TORX T25 25 мм"),
+            "биты TORX",
+        )
+        self.assertEqual(
+            classify_item_type("Бита крест PH2 50 мм"),
+            "phillips_bit",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Бита крест PH2 50 мм"),
+            "биты крест PH (Phillips)",
+        )
+        self.assertEqual(
+            classify_item_type("Отвертка шлицевая SL6x100"),
+            "slotted_screwdriver",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Отвертка шлицевая SL6x100"),
+            "шлицевые отвертки",
+        )
+        self.assertEqual(
+            classify_item_type("Ключ рожковый 17x19 мм"),
+            "open_end_wrench",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Ключ рожковый 17x19 мм"),
+            "рожковые ключи",
+        )
+        self.assertEqual(
+            classify_item_type("Ключ имбусовый шестигранный HEX 6 мм"),
+            "hex_key",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Ключ имбусовый шестигранный HEX 6 мм"),
+            "ключи имбусовые шестигранные (HEX)",
+        )
+        self.assertEqual(
+            classify_item_type("Фитинг аксиальный для PEX 16x1/2"),
+            "axial_pex_fitting",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Фитинг аксиальный для PEX 16x1/2"),
+            "фитинги аксиальные для PEX, PERT",
+        )
+        self.assertEqual(
+            classify_item_type("Фитинг компрессионный ПНД 32x1 наружная резьба"),
+            "pnd_compression_fitting",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Фитинг компрессионный ПНД 32x1 наружная резьба"),
+            "фитинги компрессионные для ПНД труб пластиковые",
+        )
+
     def test_classify_item_type_detects_self_tapping_screw_queries(self):
         self.assertEqual(
             classify_item_type("Саморез универсальный 4.2x32"),
@@ -1988,6 +2054,47 @@ class CatalogSearchTests(unittest.TestCase):
 
             self.assertEqual(screw["search_branch_path"], "саморезы универсальные")
             self.assertEqual(screw["search_effective_family"], "self_tapping_screw")
+
+    def test_build_search_catalog_maps_thread_gauges_bits_wrenches_and_fittings_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Резьбомер метрический М60;GAUGE-1;10;Резьбомеры;CLS-1;Резьбомер;;ReMo\n"
+                    "Бита TORX T25 25 мм;TORX-1;10;Биты TORX;CLS-2;Бита;;ReMo\n"
+                    "Бита крест PH2 50 мм;PHBIT-1;10;Биты Крест PH (Phillips);CLS-3;Бита;;ReMo\n"
+                    "Отвертка шлицевая SL6x100;SL-1;10;Шлицевые Отвертки;CLS-4;Отвертка;;ReMo\n"
+                    "Ключ рожковый 17x19 мм;WRENCH-1;10;Рожковые Ключи;CLS-5;Ключ;;ReMo\n"
+                    "Ключ имбусовый шестигранный HEX 6 мм;HEX-1;10;Ключи Имбусовые Шестигранные (HEX);CLS-6;Ключ;;ReMo\n"
+                    "Фитинг аксиальный для PEX 16x1/2;PEX-1;10;Фитинги Аксиальные Для PEX, PERT;CLS-7;Фитинг;;ReMo\n"
+                    "Фитинг компрессионный ПНД 32x1 наружная резьба;PND-1;10;Фитинги Компрессионные Для ПНД Труб Пластиковые;CLS-8;Фитинг;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+
+            expectations = {
+                "GAUGE-1": ("резьбомеры", "thread_gauge"),
+                "TORX-1": ("биты TORX", "torx_bit"),
+                "PHBIT-1": ("биты крест PH (Phillips)", "phillips_bit"),
+                "SL-1": ("шлицевые отвертки", "slotted_screwdriver"),
+                "WRENCH-1": ("рожковые ключи", "open_end_wrench"),
+                "HEX-1": ("ключи имбусовые шестигранные (HEX)", "hex_key"),
+                "PEX-1": ("фитинги аксиальные для PEX, PERT", "axial_pex_fitting"),
+                "PND-1": ("фитинги компрессионные для ПНД труб пластиковые", "pnd_compression_fitting"),
+            }
+
+            for article, (branch_path, family) in expectations.items():
+                row = built.loc[built["Артикул"] == article].iloc[0]
+                self.assertEqual(row["search_branch_path"], branch_path)
+                self.assertEqual(row["search_entity_type"], family)
+                self.assertEqual(row["search_effective_entity_type"], family)
+                self.assertEqual(row["search_effective_family"], family)
 
     def test_build_search_catalog_maps_drill_bits_out_of_other(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

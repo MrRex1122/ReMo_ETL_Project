@@ -1,5 +1,6 @@
 import unittest
 
+from catalog_search import normalize_text
 from matcher import MATCH_MODE_ASSEMBLY, ReMoMatcher
 
 
@@ -2387,6 +2388,73 @@ class MatchTaxonomyTests(unittest.TestCase):
             self.matcher._effective_candidate_family_for_query(screwdriver_features, screwdriver_candidate),
             "phillips_screwdriver",
         )
+
+    def test_effective_candidate_family_maps_other_thread_gauge_bits_wrenches_and_fitting_branches(self):
+        cases = [
+            (
+                "Резьбомер метрический М60",
+                "thread_gauge",
+                "резьбомеры",
+                "Резьбомер метрический М60",
+            ),
+            (
+                "Бита TORX T25 25 мм",
+                "torx_bit",
+                "биты torx",
+                "Бита TORX T25 25 мм",
+            ),
+            (
+                "Бита крест PH2 50 мм",
+                "phillips_bit",
+                "биты крест ph (phillips)",
+                "Бита крест PH2 50 мм",
+            ),
+            (
+                "Отвертка шлицевая SL6x100",
+                "slotted_screwdriver",
+                "шлицевые отвертки",
+                "Отвертка шлицевая SL6x100",
+            ),
+            (
+                "Ключ рожковый 17x19 мм",
+                "open_end_wrench",
+                "рожковые ключи",
+                "Ключ рожковый 17x19 мм",
+            ),
+            (
+                "Ключ имбусовый шестигранный HEX 6 мм",
+                "hex_key",
+                "ключи имбусовые шестигранные (hex)",
+                "Ключ имбусовый шестигранный HEX 6 мм",
+            ),
+            (
+                "Фитинг аксиальный для PEX 16x1/2",
+                "axial_pex_fitting",
+                "фитинги аксиальные для pex, pert",
+                "Фитинг аксиальный для PEX 16x1/2",
+            ),
+            (
+                "Фитинг компрессионный ПНД 32x1 наружная резьба",
+                "pnd_compression_fitting",
+                "фитинги компрессионные для пнд труб пластиковые",
+                "Фитинг компрессионный ПНД 32x1 наружная резьба",
+            ),
+        ]
+
+        for query, family, branch_path, candidate_name in cases:
+            features = self.matcher._extract_query_features(query)
+            features["entity_type"] = family
+            candidate = {
+                "name": candidate_name,
+                "normalized_name": normalize_text(candidate_name),
+                "branch_path": branch_path,
+                "entity_type": "other",
+                "item_markers": {},
+            }
+            self.assertEqual(
+                self.matcher._effective_candidate_family_for_query(features, candidate),
+                family,
+            )
 
     def test_effective_candidate_family_maps_other_self_tapping_screw_branch(self):
         screw_features = self.matcher._extract_query_features("Саморез универсальный 4.2x32")

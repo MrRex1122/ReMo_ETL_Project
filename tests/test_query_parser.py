@@ -342,6 +342,33 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(screwdriver.entity_type, "phillips_screwdriver")
         self.assertEqual(screwdriver.branch_hint, "крестовые отвертки")
 
+    def test_parse_query_spec_detects_thread_gauge_bits_wrenches_and_fitting_queries(self):
+        gauge = parse_query_spec("Резьбомер метрический М60", taxonomy_rules=self.rules)
+        torx_bit = parse_query_spec("Бита TORX T25 25 мм", taxonomy_rules=self.rules)
+        phillips_bit = parse_query_spec("Бита крест PH2 50 мм", taxonomy_rules=self.rules)
+        slotted = parse_query_spec("Отвертка шлицевая SL6x100", taxonomy_rules=self.rules)
+        open_end = parse_query_spec("Ключ рожковый 17x19 мм", taxonomy_rules=self.rules)
+        hex_key = parse_query_spec("Ключ имбусовый шестигранный HEX 6 мм", taxonomy_rules=self.rules)
+        axial = parse_query_spec("Фитинг аксиальный для PEX 16x1/2", taxonomy_rules=self.rules)
+        pnd = parse_query_spec("Фитинг компрессионный ПНД 32x1 наружная резьба", taxonomy_rules=self.rules)
+
+        self.assertEqual(gauge.entity_type, "thread_gauge")
+        self.assertEqual(gauge.branch_hint, "резьбомеры")
+        self.assertEqual(torx_bit.entity_type, "torx_bit")
+        self.assertEqual(torx_bit.branch_hint, "биты TORX")
+        self.assertEqual(phillips_bit.entity_type, "phillips_bit")
+        self.assertEqual(phillips_bit.branch_hint, "биты крест PH (Phillips)")
+        self.assertEqual(slotted.entity_type, "slotted_screwdriver")
+        self.assertEqual(slotted.branch_hint, "шлицевые отвертки")
+        self.assertEqual(open_end.entity_type, "open_end_wrench")
+        self.assertEqual(open_end.branch_hint, "рожковые ключи")
+        self.assertEqual(hex_key.entity_type, "hex_key")
+        self.assertEqual(hex_key.branch_hint, "ключи имбусовые шестигранные (HEX)")
+        self.assertEqual(axial.entity_type, "axial_pex_fitting")
+        self.assertEqual(axial.branch_hint, "фитинги аксиальные для PEX, PERT")
+        self.assertEqual(pnd.entity_type, "pnd_compression_fitting")
+        self.assertEqual(pnd.branch_hint, "фитинги компрессионные для ПНД труб пластиковые")
+
     def test_parse_query_spec_detects_self_tapping_screw_queries(self):
         screw = parse_query_spec("Саморез универсальный 4.2x32", taxonomy_rules=self.rules)
 

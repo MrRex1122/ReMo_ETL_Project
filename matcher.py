@@ -4825,6 +4825,11 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("метчик", "сверл", "держател", "вороток", "tap", "thread tap", "die holder"))
         ):
             return "thread_die"
+        if "резьбомеры" in branch_path or (
+            any(token in search_text for token in ("резьбомер", "резьбомеры", "thread gauge", "screw pitch gauge", "шаблон резьбы"))
+            and not any(token in search_text for token in ("метчик", "плашк", "калибр", "штангенцирк", "индикатор", "клещи"))
+        ):
+            return "thread_gauge"
         if "торцевые головки и наборы головок" in branch_path or (
             any(token in search_text for token in ("торцевая головка", "торцевые головки", "торцевых головок", "набор торцевых головок", "набор головок", "socket set", "socket wrench"))
             and not any(token in search_text for token in ("головка блока", "головка цилиндра", "торцевая фреза", "битодержатель", "бита"))
@@ -4845,6 +4850,19 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("латун", "brass", "резьбовой латунный", "обжим", "пресс", "press"))
         ):
             return "polypropylene_fitting"
+        if "фитинги аксиальные для pex pert" in branch_path or (
+            any(token in search_text for token in ("фитинги аксиальные для pex", "фитинги аксиальные для pert", "фитинг аксиальный", "аксиальный фитинг", "pex fitting", "pert fitting"))
+            and not any(token in search_text for token in ("компрессион", "пнд", "латун", "полипропилен", "ppr", "press fitting", "пресс фитинг", "пресс-фитинг"))
+        ):
+            return "axial_pex_fitting"
+        if "фитинги компрессионные для пнд труб пластиковые" in branch_path or (
+            (
+                any(token in search_text for token in ("фитинги компрессионные для пнд труб пластиковые", "фитинг компрессионный пнд", "компрессионный фитинг пнд", "фитинг пнд компрессионный", "pnd compression fitting", "pe compression fitting"))
+                or ("фитинг" in search_text and "компрессион" in search_text and "пнд" in search_text)
+            )
+            and not any(token in search_text for token in ("аксиаль", "pex", "pert", "латун", "полипропилен", "ppr", "press fitting", "пресс фитинг", "пресс-фитинг"))
+        ):
+            return "pnd_compression_fitting"
         if "резцы по металлу" in branch_path or (
             any(token in search_text for token in ("резец по металлу", "резцы по металлу", "токарный резец", "lathe tool", "turning tool"))
             and not any(token in search_text for token in ("сверл", "коронк", "диск", "плашк", "метчик", "зенкер"))
@@ -4865,6 +4883,16 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("имбус", "шестигранник", "разводной", "трубный ключ", "ключ доступа"))
         ):
             return "combination_wrench"
+        if "рожковые ключи" in branch_path or (
+            any(token in search_text for token in ("рожковый ключ", "рожковые ключи", "ключ рожковый", "open end wrench", "open-end wrench", "open end spanner"))
+            and not any(token in search_text for token in ("комбинирован", "накидн", "имбус", "шестигран", "разводной", "трубный ключ", "ключ доступа"))
+        ):
+            return "open_end_wrench"
+        if "ключи имбусовые шестигранные hex" in branch_path or (
+            any(token in search_text for token in ("имбусовый ключ", "имбусовые ключи", "ключ имбусовый", "ключ шестигранный", "шестигранные ключи", "hex key", "allen key"))
+            and not any(token in search_text for token in ("бит", "битодержатель", "torx", "рожков", "накидн", "ключ доступа"))
+        ):
+            return "hex_key"
         if "штангенциркули" in branch_path or (
             any(token in search_text for token in ("штангенциркуль", "штангенциркули", "vernier caliper", "digital caliper"))
             and not any(token in search_text for token in ("суппорт", "скоба", "индикатор часового типа"))
@@ -4890,6 +4918,21 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("шлицевая отвертка", "torx", "имбус", "битодержатель", "бита"))
         ):
             return "phillips_screwdriver"
+        if "шлицевые отвертки" in branch_path or (
+            any(token in search_text for token in ("шлицевая отвертка", "отвертка шлицевая", "шлицевые отвертки", "slotted screwdriver", "flat screwdriver"))
+            and not any(token in search_text for token in ("крестов", "phillips", "pozidriv", "torx", "имбус", "битодержатель", "бита"))
+        ):
+            return "slotted_screwdriver"
+        if "биты torx" in branch_path or (
+            any(token in search_text for token in ("бита torx", "биты torx", "torx bit", "бит torx"))
+            and not any(token in search_text for token in ("отвертка", "битодержатель", "шлицев", "крестов", "phillips", "pozidriv"))
+        ):
+            return "torx_bit"
+        if "биты крест ph phillips" in branch_path or (
+            any(token in search_text for token in ("биты крест ph", "бита крест ph", "бита крест", "бита ph", "биты phillips", "phillips bit", "pozidriv bit", "бита pz"))
+            and not any(token in search_text for token in ("отвертка", "битодержатель", "torx", "шлицев", "имбус"))
+        ):
+            return "phillips_bit"
         if "саморезы универсальные" in branch_path or (
             any(token in search_text for token in ("саморез универсальный", "саморезы универсальные", "универсальный саморез", "универсальные саморезы", "self-tapping screw", "self tapping screw"))
             and not any(token in search_text for token in ("шуруповерт", "бита", "битодержатель", "анкер", "дюбель"))
@@ -5220,19 +5263,27 @@ class ReMoMatcher:
             "neutral_busbar",
             "thread_tap",
             "thread_die",
+            "thread_gauge",
             "socket_head_set",
             "drive_belt",
             "brass_threaded_fitting",
             "polypropylene_fitting",
+            "axial_pex_fitting",
+            "pnd_compression_fitting",
             "metal_turning_tool",
             "workwear",
             "protective_gloves",
             "combination_wrench",
+            "open_end_wrench",
+            "hex_key",
             "caliper",
             "wood_saw_blade",
             "diamond_blade",
             "printer_cartridge",
             "phillips_screwdriver",
+            "slotted_screwdriver",
+            "torx_bit",
+            "phillips_bit",
             "self_tapping_screw",
             "drill_bit_metal",
             "masonry_drill_bit",

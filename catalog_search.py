@@ -991,6 +991,11 @@ def classify_item_type(
     ):
         return "thread_die"
     if (
+        any(token in normalized for token in ("резьбомер", "резьбомеры", "thread gauge", "screw pitch gauge", "шаблон резьбы"))
+        and not any(token in normalized for token in ("метчик", "плашк", "калибр", "штангенцирк", "индикатор", "клещи"))
+    ):
+        return "thread_gauge"
+    if (
         any(token in normalized for token in ("торцевая головка", "торцевые головки", "торцевых головок", "набор торцевых головок", "набор головок", "socket set", "socket wrench"))
         and not any(token in normalized for token in ("головка блока", "головка цилиндра", "торцевая фреза", "битодержатель", "бита"))
     ):
@@ -1011,6 +1016,19 @@ def classify_item_type(
     ):
         return "polypropylene_fitting"
     if (
+        any(token in normalized for token in ("фитинги аксиальные для pex", "фитинги аксиальные для pert", "фитинг аксиальный", "аксиальный фитинг", "pex fitting", "pert fitting"))
+        and not any(token in normalized for token in ("компрессион", "пнд", "латун", "полипропилен", "ppr", "press fitting", "пресс фитинг", "пресс-фитинг"))
+    ):
+        return "axial_pex_fitting"
+    if (
+        (
+            any(token in normalized for token in ("фитинги компрессионные для пнд труб пластиковые", "фитинг компрессионный пнд", "компрессионный фитинг пнд", "фитинг пнд компрессионный", "pnd compression fitting", "pe compression fitting"))
+            or ("фитинг" in normalized and "компрессион" in normalized and "пнд" in normalized)
+        )
+        and not any(token in normalized for token in ("аксиаль", "pex", "pert", "латун", "полипропилен", "ppr", "press fitting", "пресс фитинг", "пресс-фитинг"))
+    ):
+        return "pnd_compression_fitting"
+    if (
         any(token in normalized for token in ("резец по металлу", "резцы по металлу", "токарный резец", "lathe tool", "turning tool"))
         and not any(token in normalized for token in ("сверл", "коронк", "диск", "плашк", "метчик", "зенкер"))
     ):
@@ -1030,6 +1048,16 @@ def classify_item_type(
         and not any(token in normalized for token in ("имбус", "шестигранник", "разводной", "трубный ключ", "ключ доступа"))
     ):
         return "combination_wrench"
+    if (
+        any(token in normalized for token in ("рожковый ключ", "рожковые ключи", "ключ рожковый", "open end wrench", "open-end wrench", "open end spanner"))
+        and not any(token in normalized for token in ("комбинирован", "накидн", "имбус", "шестигран", "разводной", "трубный ключ", "ключ доступа"))
+    ):
+        return "open_end_wrench"
+    if (
+        any(token in normalized for token in ("имбусовый ключ", "имбусовые ключи", "ключ имбусовый", "ключ шестигранный", "шестигранные ключи", "hex key", "allen key"))
+        and not any(token in normalized for token in ("бит", "битодержатель", "torx", "рожков", "накидн", "ключ доступа"))
+    ):
+        return "hex_key"
     if (
         any(token in normalized for token in ("штангенциркуль", "штангенциркули", "vernier caliper", "digital caliper"))
         and not any(token in normalized for token in ("суппорт", "скоба", "индикатор часового типа"))
@@ -1055,6 +1083,21 @@ def classify_item_type(
         and not any(token in normalized for token in ("шлицевая отвертка", "torx", "имбус", "битодержатель", "бита"))
     ):
         return "phillips_screwdriver"
+    if (
+        any(token in normalized for token in ("шлицевая отвертка", "отвертка шлицевая", "шлицевые отвертки", "slotted screwdriver", "flat screwdriver"))
+        and not any(token in normalized for token in ("крестов", "phillips", "pozidriv", "torx", "имбус", "битодержатель", "бита"))
+    ):
+        return "slotted_screwdriver"
+    if (
+        any(token in normalized for token in ("бита torx", "биты torx", "torx bit", "бит torx"))
+        and not any(token in normalized for token in ("отвертка", "битодержатель", "шлицев", "крестов", "phillips", "pozidriv"))
+    ):
+        return "torx_bit"
+    if (
+        any(token in normalized for token in ("биты крест ph", "бита крест ph", "бита крест", "бита ph", "биты phillips", "phillips bit", "pozidriv bit", "бита pz"))
+        and not any(token in normalized for token in ("отвертка", "битодержатель", "torx", "шлицев", "имбус"))
+    ):
+        return "phillips_bit"
     if (
         any(token in normalized for token in ("саморез универсальный", "саморезы универсальные", "универсальный саморез", "универсальные саморезы", "self-tapping screw", "self tapping screw"))
         and not any(token in normalized for token in ("шуруповерт", "бита", "битодержатель", "анкер", "дюбель"))
@@ -1645,6 +1688,8 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "thread_tap"
     if "плашки" in normalized_branch:
         return "thread_die"
+    if "резьбомеры" in normalized_branch:
+        return "thread_gauge"
     if "торцевые головки и наборы головок" in normalized_branch:
         return "socket_head_set"
     if any(marker in normalized_branch for marker in ("ремни клиновые приводные", "ремни узкоклиновые")):
@@ -1653,6 +1698,10 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "brass_threaded_fitting"
     if "фитинги для полипропиленовых труб" in normalized_branch:
         return "polypropylene_fitting"
+    if "фитинги аксиальные для pex pert" in normalized_branch:
+        return "axial_pex_fitting"
+    if "фитинги компрессионные для пнд труб пластиковые" in normalized_branch:
+        return "pnd_compression_fitting"
     if "резцы по металлу" in normalized_branch:
         return "metal_turning_tool"
     if any(marker in normalized_branch for marker in ("костюмы летние", "костюмы утепленные")):
@@ -1661,6 +1710,10 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "protective_gloves"
     if "комбинированные ключи" in normalized_branch:
         return "combination_wrench"
+    if "рожковые ключи" in normalized_branch:
+        return "open_end_wrench"
+    if "ключи имбусовые шестигранные hex" in normalized_branch:
+        return "hex_key"
     if "штангенциркули" in normalized_branch:
         return "caliper"
     if "пильные диски по дереву" in normalized_branch:
@@ -1671,6 +1724,12 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "printer_cartridge"
     if "крестовые отвертки" in normalized_branch:
         return "phillips_screwdriver"
+    if "шлицевые отвертки" in normalized_branch:
+        return "slotted_screwdriver"
+    if "биты torx" in normalized_branch:
+        return "torx_bit"
+    if "биты крест ph phillips" in normalized_branch:
+        return "phillips_bit"
     if "саморезы универсальные" in normalized_branch:
         return "self_tapping_screw"
     if "сверла по металлу" in normalized_branch:
@@ -2008,6 +2067,8 @@ def derive_branch_from_text(
                 return "метчики"
             if effective_family == "thread_die":
                 return "плашки"
+            if effective_family == "thread_gauge":
+                return "резьбомеры"
             if effective_family == "socket_head_set":
                 return "торцевые головки и наборы головок"
             if effective_family == "drive_belt":
@@ -2018,6 +2079,10 @@ def derive_branch_from_text(
                 return "фитинги резьбовые латунные"
             if effective_family == "polypropylene_fitting":
                 return "фитинги для полипропиленовых труб"
+            if effective_family == "axial_pex_fitting":
+                return "фитинги аксиальные для PEX, PERT"
+            if effective_family == "pnd_compression_fitting":
+                return "фитинги компрессионные для ПНД труб пластиковые"
             if effective_family == "metal_turning_tool":
                 return "резцы по металлу"
             if effective_family == "workwear":
@@ -2028,6 +2093,10 @@ def derive_branch_from_text(
                 return "антипорезные и защитные перчатки"
             if effective_family == "combination_wrench":
                 return "комбинированные ключи"
+            if effective_family == "open_end_wrench":
+                return "рожковые ключи"
+            if effective_family == "hex_key":
+                return "ключи имбусовые шестигранные (HEX)"
             if effective_family == "caliper":
                 return "штангенциркули"
             if effective_family == "wood_saw_blade":
@@ -2038,6 +2107,12 @@ def derive_branch_from_text(
                 return "картриджи для печатной техники"
             if effective_family == "phillips_screwdriver":
                 return "крестовые отвертки"
+            if effective_family == "slotted_screwdriver":
+                return "шлицевые отвертки"
+            if effective_family == "torx_bit":
+                return "биты TORX"
+            if effective_family == "phillips_bit":
+                return "биты крест PH (Phillips)"
             if effective_family == "self_tapping_screw":
                 return "саморезы универсальные"
             if effective_family == "drill_bit_metal":
@@ -2202,6 +2277,8 @@ def derive_branch_from_text(
             return "метчики"
         if registry_family == "thread_die":
             return "плашки"
+        if registry_family == "thread_gauge":
+            return "резьбомеры"
         if registry_family == "socket_head_set":
             return "торцевые головки и наборы головок"
         if registry_family == "drive_belt":
@@ -2212,6 +2289,10 @@ def derive_branch_from_text(
             return "фитинги резьбовые латунные"
         if registry_family == "polypropylene_fitting":
             return "фитинги для полипропиленовых труб"
+        if registry_family == "axial_pex_fitting":
+            return "фитинги аксиальные для PEX, PERT"
+        if registry_family == "pnd_compression_fitting":
+            return "фитинги компрессионные для ПНД труб пластиковые"
         if registry_family == "metal_turning_tool":
             return "резцы по металлу"
         if registry_family == "workwear":
@@ -2222,6 +2303,10 @@ def derive_branch_from_text(
             return "антипорезные и защитные перчатки"
         if registry_family == "combination_wrench":
             return "комбинированные ключи"
+        if registry_family == "open_end_wrench":
+            return "рожковые ключи"
+        if registry_family == "hex_key":
+            return "ключи имбусовые шестигранные (HEX)"
         if registry_family == "caliper":
             return "штангенциркули"
         if registry_family == "wood_saw_blade":
@@ -2232,6 +2317,12 @@ def derive_branch_from_text(
             return "картриджи для печатной техники"
         if registry_family == "phillips_screwdriver":
             return "крестовые отвертки"
+        if registry_family == "slotted_screwdriver":
+            return "шлицевые отвертки"
+        if registry_family == "torx_bit":
+            return "биты TORX"
+        if registry_family == "phillips_bit":
+            return "биты крест PH (Phillips)"
         if registry_family == "self_tapping_screw":
             return "саморезы универсальные"
         if registry_family == "drill_bit_metal":
@@ -2369,19 +2460,27 @@ def derive_branch_from_text(
             "neutral_busbar",
             "thread_tap",
             "thread_die",
+            "thread_gauge",
             "socket_head_set",
             "drive_belt",
             "brass_threaded_fitting",
             "polypropylene_fitting",
+            "axial_pex_fitting",
+            "pnd_compression_fitting",
             "metal_turning_tool",
             "workwear",
             "protective_gloves",
             "combination_wrench",
+            "open_end_wrench",
+            "hex_key",
             "caliper",
             "wood_saw_blade",
             "diamond_blade",
             "printer_cartridge",
             "phillips_screwdriver",
+            "slotted_screwdriver",
+            "torx_bit",
+            "phillips_bit",
             "self_tapping_screw",
             "drill_bit_metal",
             "masonry_drill_bit",
@@ -2488,6 +2587,8 @@ def derive_branch_from_text(
         return "метчики"
     if effective_entity_type == "thread_die":
         return "плашки"
+    if effective_entity_type == "thread_gauge":
+        return "резьбомеры"
     if effective_entity_type == "socket_head_set":
         return "торцевые головки и наборы головок"
     if effective_entity_type == "drive_belt":
@@ -2498,6 +2599,10 @@ def derive_branch_from_text(
         return "фитинги резьбовые латунные"
     if effective_entity_type == "polypropylene_fitting":
         return "фитинги для полипропиленовых труб"
+    if effective_entity_type == "axial_pex_fitting":
+        return "фитинги аксиальные для PEX, PERT"
+    if effective_entity_type == "pnd_compression_fitting":
+        return "фитинги компрессионные для ПНД труб пластиковые"
     if effective_entity_type == "metal_turning_tool":
         return "резцы по металлу"
     if effective_entity_type == "workwear":
@@ -2508,6 +2613,10 @@ def derive_branch_from_text(
         return "антипорезные и защитные перчатки"
     if effective_entity_type == "combination_wrench":
         return "комбинированные ключи"
+    if effective_entity_type == "open_end_wrench":
+        return "рожковые ключи"
+    if effective_entity_type == "hex_key":
+        return "ключи имбусовые шестигранные (HEX)"
     if effective_entity_type == "caliper":
         return "штангенциркули"
     if effective_entity_type == "wood_saw_blade":
@@ -2518,6 +2627,12 @@ def derive_branch_from_text(
         return "картриджи для печатной техники"
     if effective_entity_type == "phillips_screwdriver":
         return "крестовые отвертки"
+    if effective_entity_type == "slotted_screwdriver":
+        return "шлицевые отвертки"
+    if effective_entity_type == "torx_bit":
+        return "биты TORX"
+    if effective_entity_type == "phillips_bit":
+        return "биты крест PH (Phillips)"
     if effective_entity_type == "self_tapping_screw":
         return "саморезы универсальные"
     if effective_entity_type == "drill_bit_metal":
