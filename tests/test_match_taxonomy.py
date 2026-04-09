@@ -2207,6 +2207,48 @@ class MatchTaxonomyTests(unittest.TestCase):
             "thread_die",
         )
 
+    def test_effective_candidate_family_maps_other_socket_head_drive_belt_and_brass_fitting_branches(self):
+        socket_features = self.matcher._extract_query_features("Набор торцевых головок 1/2 10-24 мм")
+        socket_features["entity_type"] = "socket_head_set"
+        socket_candidate = {
+            "name": "Набор торцевых головок 1/2 10-24 мм",
+            "normalized_name": "набор торцевых головок 1 2 10 24 мм",
+            "branch_path": "торцевые головки и наборы головок",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        belt_features = self.matcher._extract_query_features("Ремень узкоклиновой SPC 2240")
+        belt_features["entity_type"] = "drive_belt"
+        belt_candidate = {
+            "name": "Ремень узкоклиновой SPC 2240",
+            "normalized_name": "ремень узкоклиновой spc 2240",
+            "branch_path": "ремни узкоклиновые",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        fitting_features = self.matcher._extract_query_features("Фитинг резьбовой латунный угольник 1/2")
+        fitting_features["entity_type"] = "brass_threaded_fitting"
+        fitting_candidate = {
+            "name": "Фитинг резьбовой латунный угольник 1/2",
+            "normalized_name": "фитинг резьбовой латунный угольник 1 2",
+            "branch_path": "фитинги резьбовые латунные",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(socket_features, socket_candidate),
+            "socket_head_set",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(belt_features, belt_candidate),
+            "drive_belt",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(fitting_features, fitting_candidate),
+            "brass_threaded_fitting",
+        )
+
     def test_effective_candidate_family_maps_other_drill_bit_metal_branch(self):
         features = self.matcher._extract_query_features("Сверло по металлу HSS 8 мм")
         features["entity_type"] = "drill_bit_metal"

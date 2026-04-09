@@ -259,6 +259,18 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(die.entity_type, "thread_die")
         self.assertEqual(die.branch_hint, "плашки")
 
+    def test_parse_query_spec_detects_socket_head_drive_belt_and_brass_fitting_queries(self):
+        socket_head = parse_query_spec("Набор торцевых головок 1/2 10-24 мм", taxonomy_rules=self.rules)
+        belt = parse_query_spec("Ремень узкоклиновой SPC 2240", taxonomy_rules=self.rules)
+        fitting = parse_query_spec("Фитинг резьбовой латунный угольник 1/2", taxonomy_rules=self.rules)
+
+        self.assertEqual(socket_head.entity_type, "socket_head_set")
+        self.assertEqual(socket_head.branch_hint, "торцевые головки и наборы головок")
+        self.assertEqual(belt.entity_type, "drive_belt")
+        self.assertEqual(belt.branch_hint, "ремни узкоклиновые")
+        self.assertEqual(fitting.entity_type, "brass_threaded_fitting")
+        self.assertEqual(fitting.branch_hint, "фитинги резьбовые латунные")
+
     def test_parse_query_spec_detects_drill_bit_metal_queries(self):
         drill = parse_query_spec("Сверло по металлу HSS 8 мм", taxonomy_rules=self.rules)
 

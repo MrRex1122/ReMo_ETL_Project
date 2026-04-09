@@ -985,6 +985,21 @@ def classify_item_type(
     ):
         return "thread_die"
     if (
+        any(token in normalized for token in ("торцевая головка", "торцевые головки", "торцевых головок", "набор торцевых головок", "набор головок", "socket set", "socket wrench"))
+        and not any(token in normalized for token in ("головка блока", "головка цилиндра", "торцевая фреза", "битодержатель", "бита"))
+    ):
+        return "socket_head_set"
+    if (
+        any(token in normalized for token in ("ремень клиновой", "ремни клиновые", "ремень узкоклиновой", "ремни узкоклиновые", "v-belt", "drive belt"))
+        and not any(token in normalized for token in ("ремень безопасности", "брючный ремень", "поясной ремень", "сумка", "одежда"))
+    ):
+        return "drive_belt"
+    if (
+        any(token in normalized for token in ("фитинг резьбовой латунный", "фитинги резьбовые латунные", "латунный фитинг", "brass fitting", "threaded fitting"))
+        and not any(token in normalized for token in ("полипропилен", "ппр", "ppr", "пнд", "press", "пресс", "обжим", "сварной"))
+    ):
+        return "brass_threaded_fitting"
+    if (
         any(token in normalized for token in ("сверло по металлу", "сверла по металлу", "drill bit", "metal drill", "hss drill"))
         and not any(token in normalized for token in ("метчик", "плашк", "коронк", "зенкер", "держател", "tap", "thread tap"))
     ):
@@ -1335,6 +1350,12 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "thread_tap"
     if "плашки" in normalized_branch:
         return "thread_die"
+    if "торцевые головки и наборы головок" in normalized_branch:
+        return "socket_head_set"
+    if any(marker in normalized_branch for marker in ("ремни клиновые приводные", "ремни узкоклиновые")):
+        return "drive_belt"
+    if "фитинги резьбовые латунные" in normalized_branch:
+        return "brass_threaded_fitting"
     if "сверла по металлу" in normalized_branch:
         return "drill_bit_metal"
     if any(marker in normalized_branch for marker in ("буры sds-plus", "буры sds-max", "сверла по бетону")):
@@ -1617,6 +1638,14 @@ def derive_branch_from_text(
                 return "метчики"
             if effective_family == "thread_die":
                 return "плашки"
+            if effective_family == "socket_head_set":
+                return "торцевые головки и наборы головок"
+            if effective_family == "drive_belt":
+                if "узкоклинов" in merged:
+                    return "ремни узкоклиновые"
+                return "ремни клиновые приводные"
+            if effective_family == "brass_threaded_fitting":
+                return "фитинги резьбовые латунные"
             if effective_family == "drill_bit_metal":
                 return "сверла по металлу"
             if effective_family == "masonry_drill_bit":
@@ -1779,6 +1808,14 @@ def derive_branch_from_text(
             return "метчики"
         if registry_family == "thread_die":
             return "плашки"
+        if registry_family == "socket_head_set":
+            return "торцевые головки и наборы головок"
+        if registry_family == "drive_belt":
+            if "узкоклинов" in merged:
+                return "ремни узкоклиновые"
+            return "ремни клиновые приводные"
+        if registry_family == "brass_threaded_fitting":
+            return "фитинги резьбовые латунные"
         if registry_family == "drill_bit_metal":
             return "сверла по металлу"
         if registry_family == "masonry_drill_bit":
@@ -1908,6 +1945,9 @@ def derive_branch_from_text(
             "neutral_busbar",
             "thread_tap",
             "thread_die",
+            "socket_head_set",
+            "drive_belt",
+            "brass_threaded_fitting",
             "drill_bit_metal",
             "masonry_drill_bit",
             "concrete_hole_saw",
@@ -2013,6 +2053,14 @@ def derive_branch_from_text(
         return "метчики"
     if effective_entity_type == "thread_die":
         return "плашки"
+    if effective_entity_type == "socket_head_set":
+        return "торцевые головки и наборы головок"
+    if effective_entity_type == "drive_belt":
+        if "узкоклинов" in merged:
+            return "ремни узкоклиновые"
+        return "ремни клиновые приводные"
+    if effective_entity_type == "brass_threaded_fitting":
+        return "фитинги резьбовые латунные"
     if effective_entity_type == "drill_bit_metal":
         return "сверла по металлу"
     if effective_entity_type == "masonry_drill_bit":

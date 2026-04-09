@@ -1008,6 +1008,20 @@ class CatalogSearchTests(unittest.TestCase):
             classify_item_type("Плашка круглая М8"),
             "thread_die",
         )
+
+    def test_classify_item_type_detects_socket_head_drive_belt_and_brass_fitting_queries(self):
+        self.assertEqual(
+            classify_item_type("Набор торцевых головок 1/2 10-24 мм"),
+            "socket_head_set",
+        )
+        self.assertEqual(
+            classify_item_type("Ремень узкоклиновой SPC 2240"),
+            "drive_belt",
+        )
+        self.assertEqual(
+            classify_item_type("Фитинг резьбовой латунный угольник 1/2"),
+            "brass_threaded_fitting",
+        )
         self.assertEqual(
             derive_branch_from_text("Плашка круглая М8"),
             "плашки",
@@ -1689,6 +1703,42 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(die["search_entity_type"], "thread_die")
             self.assertEqual(die["search_effective_entity_type"], "thread_die")
             self.assertEqual(die["search_effective_family"], "thread_die")
+
+    def test_build_search_catalog_maps_socket_heads_drive_belts_and_brass_fittings_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Набор торцевых головок 1/2 10-24 мм;SOCKET-1;10;Торцевые Головки И Наборы Головок;CLS-1;Набор торцевых головок;;ReMo\n"
+                    "Ремень узкоклиновой SPC 2240;BELT-1;10;Ремни Узкоклиновые;CLS-2;Ремень приводной;;ReMo\n"
+                    "Фитинг резьбовой латунный угольник 1/2;FIT-1;10;Фитинги Резьбовые Латунные;CLS-3;Фитинг латунный;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+            socket_head = built.loc[built["Артикул"] == "SOCKET-1"].iloc[0]
+            belt = built.loc[built["Артикул"] == "BELT-1"].iloc[0]
+            fitting = built.loc[built["Артикул"] == "FIT-1"].iloc[0]
+
+            self.assertEqual(socket_head["search_branch_path"], "торцевые головки и наборы головок")
+            self.assertEqual(socket_head["search_entity_type"], "socket_head_set")
+            self.assertEqual(socket_head["search_effective_entity_type"], "socket_head_set")
+            self.assertEqual(socket_head["search_effective_family"], "socket_head_set")
+
+            self.assertEqual(belt["search_branch_path"], "ремни узкоклиновые")
+            self.assertEqual(belt["search_entity_type"], "drive_belt")
+            self.assertEqual(belt["search_effective_entity_type"], "drive_belt")
+            self.assertEqual(belt["search_effective_family"], "drive_belt")
+
+            self.assertEqual(fitting["search_branch_path"], "фитинги резьбовые латунные")
+            self.assertEqual(fitting["search_entity_type"], "brass_threaded_fitting")
+            self.assertEqual(fitting["search_effective_entity_type"], "brass_threaded_fitting")
+            self.assertEqual(fitting["search_effective_family"], "brass_threaded_fitting")
 
     def test_build_search_catalog_maps_drill_bits_out_of_other(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

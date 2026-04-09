@@ -4821,6 +4821,21 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("метчик", "сверл", "держател", "вороток", "tap", "thread tap", "die holder"))
         ):
             return "thread_die"
+        if "торцевые головки и наборы головок" in branch_path or (
+            any(token in search_text for token in ("торцевая головка", "торцевые головки", "торцевых головок", "набор торцевых головок", "набор головок", "socket set", "socket wrench"))
+            and not any(token in search_text for token in ("головка блока", "головка цилиндра", "торцевая фреза", "битодержатель", "бита"))
+        ):
+            return "socket_head_set"
+        if any(token in branch_path for token in ("ремни клиновые приводные", "ремни узкоклиновые")) or (
+            any(token in search_text for token in ("ремень клиновой", "ремни клиновые", "ремень узкоклиновой", "ремни узкоклиновые", "v-belt", "drive belt"))
+            and not any(token in search_text for token in ("ремень безопасности", "брючный ремень", "поясной ремень", "сумка", "одежда"))
+        ):
+            return "drive_belt"
+        if "фитинги резьбовые латунные" in branch_path or (
+            any(token in search_text for token in ("фитинг резьбовой латунный", "фитинги резьбовые латунные", "латунный фитинг", "brass fitting", "threaded fitting"))
+            and not any(token in search_text for token in ("полипропилен", "ппр", "ppr", "пнд", "press", "пресс", "обжим", "сварной"))
+        ):
+            return "brass_threaded_fitting"
         if "сверла по металлу" in branch_path or (
             any(
                 token in search_text
@@ -5146,6 +5161,9 @@ class ReMoMatcher:
             "neutral_busbar",
             "thread_tap",
             "thread_die",
+            "socket_head_set",
+            "drive_belt",
+            "brass_threaded_fitting",
             "drill_bit_metal",
             "masonry_drill_bit",
             "concrete_hole_saw",
