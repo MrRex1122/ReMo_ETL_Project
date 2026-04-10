@@ -2721,6 +2721,39 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(convector["search_effective_entity_type"], "floor_convector")
             self.assertEqual(convector["search_effective_family"], "floor_convector")
 
+    def test_build_search_catalog_maps_remaining_other_branch_batch_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Колесо для тележки поворотное 160 мм;CART-1;10;Запчасти Для Складских Тележек;CLS-1;Колесо;;ReMo\n"
+                    "Катушка тормоза крана РДК-250;CRANE-1;10;Вспомогательные Элементы И Аксессуары Двигателей И Кранового Оборудования;CLS-2;Катушка тормоза;;ReMo\n"
+                    "Бор-фреза твердосплавная цилиндрическая 10x20;BURR-1;10;Борфрезы И Шарошки;CLS-3;Бор-фреза;;ReMo\n"
+                    "Автомат защиты двигателя MMS-32H 40A;BRK-1;10;Механизмы И Принадлежности К Промышленным Устройствам Защиты;CLS-4;Автомат защиты двигателя;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+
+            expectations = {
+                "CART-1": ("запчасти для складских тележек", "warehouse_cart_part"),
+                "CRANE-1": ("вспомогательные элементы и аксессуары двигателей и кранового оборудования", "crane_equipment_accessory"),
+                "BURR-1": ("борфрезы и шарошки", "rotary_burr"),
+                "BRK-1": ("механизмы и принадлежности к промышленным устройствам защиты", "breaker"),
+            }
+
+            for article, (branch_path, family) in expectations.items():
+                row = built.loc[built["Артикул"] == article].iloc[0]
+                self.assertEqual(row["search_branch_path"], branch_path)
+                self.assertEqual(row["search_entity_type"], family)
+                self.assertEqual(row["search_effective_entity_type"], family)
+                self.assertEqual(row["search_effective_family"], family)
+
     def test_build_search_catalog_maps_heat_shrink_out_of_other(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

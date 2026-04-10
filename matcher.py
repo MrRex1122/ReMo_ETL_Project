@@ -4894,7 +4894,7 @@ class ReMoMatcher:
             return "metal_turning_tool"
         if "фрезы для станков" in branch_path or (
             any(token in search_text for token in ("фреза", "фрезы для станков", "концевая фреза", "кольцевая фреза", "milling cutter"))
-            and not any(token in search_text for token in ("фрезер", "router", "коронк", "сверл", "диск"))
+            and not any(token in search_text for token in ("фрезер", "router", "коронк", "сверл", "диск", "бор-фреза", "бор фреза", "борфрез", "шарош"))
         ):
             return "milling_cutter"
         if "фрезы и наборы фрез для ручных фрезеров" in branch_path or (
@@ -5190,6 +5190,14 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("сверло", "коронка", "развертка", "метчик"))
         ):
             return "countersink_tool"
+        if "борфрезы и шарошки" in branch_path or (
+            any(
+                token in search_text
+                for token in ("бор-фреза", "бор фреза", "борфреза", "борфрезы и шарошки", "шарошка", "rotary burr", "carbide burr", "die grinder burr")
+            )
+            and not any(token in search_text for token in ("фрезы для станков", "концевая фреза", "коронка", "сверло", "диск"))
+        ):
+            return "rotary_burr"
         if any(token in branch_path for token in ("зубила sds-plus", "зубила sds-max")) or (
             any(
                 token in search_text
@@ -5403,10 +5411,59 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("предохранител", "автомат", "рубильник"))
         ):
             return "surge_protector"
-        if any(token in branch_path for token in ("рубильники", "выключатели нагрузки", "выключатели разъединители")) or any(
-            token in search_text for token in ("рубильник", "выключатель нагрузки", "выключатель разъединитель")
+        if any(token in branch_path for token in ("рубильники", "выключатели нагрузки", "выключатели разъединители", "механизмы и принадлежности к промышленным устройствам защиты")) or any(
+            token in search_text
+            for token in (
+                "рубильник",
+                "выключатель нагрузки",
+                "выключатель разъединитель",
+                "автомат защиты двигателя",
+                "защиты двигателя",
+                "защиты электродвигателя",
+                "mms-",
+                "mms ",
+                "metasol",
+                "optistart",
+                "литом корпусе",
+                "воздушного автоматического выключателя",
+            )
         ):
             return "breaker"
+        if "запчасти для складских тележек" in branch_path or (
+            any(
+                token in search_text
+                for token in (
+                    "запчасти для складских тележек",
+                    "колесо для тележки",
+                    "колеса для тележки",
+                    "ролик для тележки",
+                    "ролики для тележки",
+                    "опора колесная для тележки",
+                    "trolley wheel",
+                    "cart wheel",
+                    "caster wheel",
+                    "warehouse cart wheel",
+                )
+            )
+            and not any(token in search_text for token in ("офисное кресло", "чемодан", "садовая тачка", "кабельная тележка"))
+        ):
+            return "warehouse_cart_part"
+        if "вспомогательные элементы и аксессуары двигателей и кранового оборудования" in branch_path or (
+            any(
+                token in search_text
+                for token in (
+                    "вспомогательные элементы и аксессуары двигателей и кранового оборудования",
+                    "катушка тормоза",
+                    "катушка электромагнита тормоза",
+                    "колодка тормоза",
+                    "тормозная колодка крана",
+                    "crane brake coil",
+                    "crane brake shoe",
+                )
+            )
+            and not any(token in search_text for token in ("электродвигатель общепромышленный", "насос", "преобразователь частоты", "редуктор"))
+        ):
+            return "crane_equipment_accessory"
         if "плавкие предохранители" in branch_path or any(token in search_text for token in ("предохранител", "плавк", "fuse")):
             return "fuse"
         if any(token in branch_path for token in ("кнопки", "кнопочные посты")) or any(
@@ -5661,6 +5718,7 @@ class ReMoMatcher:
             "concrete_hole_saw",
             "hole_saw",
             "countersink_tool",
+            "rotary_burr",
             "sds_chisel",
             "bearing",
             "radiator",
@@ -5681,6 +5739,8 @@ class ReMoMatcher:
             "frequency_drive",
             "electric_motor",
             "breaker",
+            "warehouse_cart_part",
+            "crane_equipment_accessory",
             "surge_protector",
             "fuse",
             "push_button",

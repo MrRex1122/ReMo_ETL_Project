@@ -534,6 +534,20 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(insulation.entity_type, "pipe_insulation")
         self.assertEqual(insulation.branch_hint, "изоляция из вспененного каучука трубная")
 
+    def test_parse_query_spec_detects_remaining_other_branch_batch(self):
+        cart_wheel = parse_query_spec("Колесо для тележки поворотное 160 мм", taxonomy_rules=self.rules)
+        crane_coil = parse_query_spec("Катушка тормоза крана РДК-250", taxonomy_rules=self.rules)
+        burr = parse_query_spec("Бор-фреза твердосплавная цилиндрическая 10x20", taxonomy_rules=self.rules)
+        breaker = parse_query_spec("Автомат защиты двигателя MMS-32H 40A", taxonomy_rules=self.rules)
+
+        self.assertEqual(cart_wheel.entity_type, "warehouse_cart_part")
+        self.assertEqual(cart_wheel.branch_hint, "запчасти для складских тележек")
+        self.assertEqual(crane_coil.entity_type, "crane_equipment_accessory")
+        self.assertEqual(crane_coil.branch_hint, "вспомогательные элементы и аксессуары двигателей и кранового оборудования")
+        self.assertEqual(burr.entity_type, "rotary_burr")
+        self.assertEqual(burr.branch_hint, "борфрезы и шарошки")
+        self.assertEqual(breaker.entity_type, "breaker")
+
     def test_parse_query_spec_detects_measurement_hand_tool_and_footwear_queries(self):
         winter_boots = parse_query_spec("Ботинки утепленные рабочие размер 43", taxonomy_rules=self.rules)
         rubber_boots = parse_query_spec("Сапоги резиновые защитные высокие", taxonomy_rules=self.rules)

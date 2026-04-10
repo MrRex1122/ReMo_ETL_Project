@@ -2612,6 +2612,53 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.assertEqual(self.matcher._effective_candidate_family_for_query(milling_features, milling_candidate), "milling_cutter")
         self.assertEqual(self.matcher._effective_candidate_family_for_query(insulation_features, insulation_candidate), "pipe_insulation")
 
+    def test_effective_candidate_family_maps_remaining_other_branch_batch(self):
+        cases = [
+            (
+                "Колесо для тележки поворотное 160 мм",
+                "warehouse_cart_part",
+                "запчасти для складских тележек",
+                "Колесо для тележки поворотное 160 мм",
+                "warehouse_cart_part",
+            ),
+            (
+                "Катушка тормоза крана РДК-250",
+                "crane_equipment_accessory",
+                "вспомогательные элементы и аксессуары двигателей и кранового оборудования",
+                "Катушка тормоза крана РДК-250",
+                "crane_equipment_accessory",
+            ),
+            (
+                "Бор-фреза твердосплавная цилиндрическая 10x20",
+                "rotary_burr",
+                "борфрезы и шарошки",
+                "Бор-фреза твердосплавная цилиндрическая 10x20",
+                "rotary_burr",
+            ),
+            (
+                "Автомат защиты двигателя MMS-32H 40A",
+                "breaker",
+                "механизмы и принадлежности к промышленным устройствам защиты",
+                "Автомат защиты двигателя MMS-32H 40A",
+                "breaker",
+            ),
+        ]
+
+        for query, entity_type, branch_path, candidate_name, expected_family in cases:
+            features = self.matcher._extract_query_features(query)
+            features["entity_type"] = entity_type
+            candidate = {
+                "name": candidate_name,
+                "normalized_name": self.matcher._normalize_text(candidate_name),
+                "branch_path": branch_path,
+                "entity_type": "other",
+                "item_markers": {},
+            }
+            self.assertEqual(
+                self.matcher._effective_candidate_family_for_query(features, candidate),
+                expected_family,
+            )
+
     def test_effective_candidate_family_maps_other_measurement_hand_tool_and_footwear_branches(self):
         cases = [
             (

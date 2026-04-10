@@ -1075,7 +1075,7 @@ def classify_item_type(
         return "metal_turning_tool"
     if (
         any(token in normalized for token in ("фреза", "фрезы для станков", "концевая фреза", "кольцевая фреза", "milling cutter"))
-        and not any(token in normalized for token in ("фрезер", "router", "коронк", "сверл", "диск"))
+        and not any(token in normalized for token in ("фрезер", "router", "коронк", "сверл", "диск", "бор-фреза", "бор фреза", "борфрез", "шарош"))
     ):
         return "milling_cutter"
     if (
@@ -1385,6 +1385,23 @@ def classify_item_type(
     if (
         any(
             token in normalized
+            for token in (
+                "бор-фреза",
+                "бор фреза",
+                "борфреза",
+                "борфрезы и шарошки",
+                "шарошка",
+                "rotary burr",
+                "carbide burr",
+                "die grinder burr",
+            )
+        )
+        and not any(token in normalized for token in ("фрезы для станков", "концевая фреза", "коронка", "сверло", "диск"))
+    ):
+        return "rotary_burr"
+    if (
+        any(
+            token in normalized
             for token in ("зубило sds-plus", "зубило sds plus", "зубило sds-max", "зубило sds max", "пика sds-plus", "пика sds plus", "пика sds-max", "пика sds max", "sds chisel", "sds point")
         )
         and not any(token in normalized for token in ("бур", "сверл", "коронк", "drill", "hole saw", "core bit", "металл", "metal", "дерев", "wood"))
@@ -1648,8 +1665,61 @@ def classify_item_type(
         return "cable"
     if "провод" in normalized:
         return "wire"
-    if any(token in normalized for token in ("автомат", "рубильник", "выключатель нагрузки", "выключатель разъединитель")):
+    if (
+        any(token in normalized for token in ("автомат", "рубильник", "выключатель нагрузки", "выключатель разъединитель"))
+        or (
+            any(
+                token in normalized
+                for token in (
+                    "автомат защиты двигателя",
+                    "защиты двигателя",
+                    "защиты электродвигателя",
+                    "mms-",
+                    "mms ",
+                    "metasol",
+                    "воздушного автоматического выключателя",
+                    "литом корпусе",
+                )
+            )
+            and not _has_wall_wiring_signal(normalized)
+        )
+    ):
         return "breaker"
+    if (
+        any(
+            token in normalized
+            for token in (
+                "запчасти для складских тележек",
+                "колесо для тележки",
+                "колеса для тележки",
+                "ролик для тележки",
+                "ролики для тележки",
+                "опора колесная для тележки",
+                "trolley wheel",
+                "cart wheel",
+                "caster wheel",
+                "warehouse cart wheel",
+            )
+        )
+        and not any(token in normalized for token in ("офисное кресло", "чемодан", "садовая тачка", "кабельная тележка"))
+    ):
+        return "warehouse_cart_part"
+    if (
+        any(
+            token in normalized
+            for token in (
+                "вспомогательные элементы и аксессуары двигателей и кранового оборудования",
+                "катушка тормоза",
+                "катушка электромагнита тормоза",
+                "колодка тормоза",
+                "тормозная колодка крана",
+                "crane brake coil",
+                "crane brake shoe",
+            )
+        )
+        and not any(token in normalized for token in ("электродвигатель общепромышленный", "насос", "преобразователь частоты", "редуктор"))
+    ):
+        return "crane_equipment_accessory"
     if "розетк" in normalized:
         return "socket"
     if "датчик" in normalized:
@@ -2058,6 +2128,12 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "industrial_valve"
     if "промышленные вертикальные центробежные насосы" in normalized_branch:
         return "industrial_pump"
+    if "запчасти для складских тележек" in normalized_branch:
+        return "warehouse_cart_part"
+    if "вспомогательные элементы и аксессуары двигателей и кранового оборудования" in normalized_branch:
+        return "crane_equipment_accessory"
+    if "механизмы и принадлежности к промышленным устройствам защиты" in normalized_branch:
+        return "breaker"
     if "метчики" in normalized_branch:
         return "thread_tap"
     if "плашки" in normalized_branch:
@@ -2190,6 +2266,8 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "hole_saw"
     if "зенкеры и зенковки" in normalized_branch:
         return "countersink_tool"
+    if "борфрезы и шарошки" in normalized_branch:
+        return "rotary_burr"
     if any(marker in normalized_branch for marker in ("зубила sds-plus", "зубила sds-max")):
         return "sds_chisel"
     if "нулевые шины на din-рейку" in normalized_branch:
@@ -3235,6 +3313,21 @@ def derive_branch_from_text(
         if registry_family == "breaker":
             if any(token in merged for token in ("рубильник", "выключатель нагрузки", "выключатель разъединитель")):
                 return "рубильники"
+            if any(
+                token in merged
+                for token in (
+                    "автомат защиты двигателя",
+                    "защиты двигателя",
+                    "защиты электродвигателя",
+                    "mms-",
+                    "mms ",
+                    "metasol",
+                    "optistart",
+                    "литом корпусе",
+                    "воздушного автоматического выключателя",
+                )
+            ):
+                return "механизмы и принадлежности к промышленным устройствам защиты"
             return "электрика > автоматы"
         if registry_family == "surge_protector":
             return "ограничители импульсного перенапряжения силовые модульные"
@@ -3268,6 +3361,12 @@ def derive_branch_from_text(
             if "лезви" in merged:
                 return "лезвия для ножей"
             return "ножи строительные"
+        if registry_family == "warehouse_cart_part":
+            return "запчасти для складских тележек"
+        if registry_family == "crane_equipment_accessory":
+            return "вспомогательные элементы и аксессуары двигателей и кранового оборудования"
+        if registry_family == "rotary_burr":
+            return "борфрезы и шарошки"
         if registry_family == "trimmer_line":
             return "леска для триммеров"
         if registry_family == "light_signage":
@@ -3477,6 +3576,21 @@ def derive_branch_from_text(
     if effective_entity_type == "breaker":
         if any(token in merged for token in ("рубильник", "выключатель нагрузки", "выключатель разъединитель")):
             return "рубильники"
+        if any(
+            token in merged
+            for token in (
+                "автомат защиты двигателя",
+                "защиты двигателя",
+                "защиты электродвигателя",
+                "mms-",
+                "mms ",
+                "metasol",
+                "optistart",
+                "литом корпусе",
+                "воздушного автоматического выключателя",
+            )
+        ):
+            return "механизмы и принадлежности к промышленным устройствам защиты"
         return "электрика > автоматы"
     if effective_entity_type == "surge_protector":
         return "ограничители импульсного перенапряжения силовые модульные"
@@ -3622,6 +3736,10 @@ def derive_branch_from_text(
         return "съемники ручные"
     if effective_entity_type == "jack":
         return "домкраты"
+    if effective_entity_type == "warehouse_cart_part":
+        return "запчасти для складских тележек"
+    if effective_entity_type == "crane_equipment_accessory":
+        return "вспомогательные элементы и аксессуары двигателей и кранового оборудования"
     if effective_entity_type == "lighting_fixture":
         if "люстр" in merged:
             return "люстры под лампу"
@@ -3700,6 +3818,8 @@ def derive_branch_from_text(
         return "коронки"
     if effective_entity_type == "countersink_tool":
         return "зенкеры и зенковки"
+    if effective_entity_type == "rotary_burr":
+        return "борфрезы и шарошки"
     if effective_entity_type == "sds_chisel":
         if "sds-max" in merged or "sds max" in merged:
             return "зубила sds-max"
@@ -3893,6 +4013,10 @@ def normalize_catalog_branch_from_row(
         "ленты светодиодные 12в",
         "ленты светодиодные 24в",
         "ленты светодиодные 220в",
+        "запчасти для складских тележек",
+        "вспомогательные элементы и аксессуары двигателей и кранового оборудования",
+        "борфрезы и шарошки",
+        "механизмы и принадлежности к промышленным устройствам защиты",
         "профиль для светодиодной ленты",
         "блок питания и драйвер для светодиодной ленты",
         "лампы светодиодные е27 е14 е40",
