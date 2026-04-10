@@ -530,7 +530,7 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(optical_hdmi["search_branch_path"], "электрика > кабели")
 
             self.assertEqual(led_strip["search_effective_family"], "lighting_fixture")
-            self.assertEqual(led_strip["search_branch_path"], "свет > светильники")
+            self.assertEqual(led_strip["search_branch_path"], "ленты светодиодные 220в")
 
             self.assertEqual(
                 tray["search_branch_path"],
@@ -592,6 +592,58 @@ class CatalogSearchTests(unittest.TestCase):
                 "аксессуары вспомогательные для кабеленесущих систем",
             )
             self.assertEqual(helper_accessory["search_effective_family"], "rack_accessory_strict")
+
+    def test_build_search_catalog_aligns_large_electrical_branch_batch(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;Тип исполнения кабельного изделия;Производитель\n"
+                    "Контактор магнитный 18А 230В;EL-1;10;Контакторы Магнитные;CLS-1;Контактор;;ReMo\n"
+                    "Реле промежуточное 24В;EL-2;10;Промежуточные Реле;CLS-2;Реле;;ReMo\n"
+                    "Клавиша двухклавишная белая;EL-3;10;Клавиши;CLS-3;Клавиша;;ReMo\n"
+                    "Накладка для розетки 1-постовая белая;EL-4;10;Накладки;CLS-4;Накладка;;ReMo\n"
+                    "Лента светодиодная 24В 14.4Вт/м;EL-5;10;Ленты Светодиодные 24В;CLS-5;Лента светодиодная;;ReMo\n"
+                    "Профиль для светодиодной ленты угловой 2м;EL-6;10;Профиль Для Светодиодной Ленты;CLS-6;Профиль;;ReMo\n"
+                    "Блок питания для светодиодной ленты 24В 100Вт;EL-7;10;Блок Питания И Драйвер Для Светодиодной Ленты;CLS-7;Драйвер;;ReMo\n"
+                    "Лампа светодиодная E27 12Вт;EL-8;10;Лампы Светодиодные Е27, Е14, Е40;CLS-8;Лампа светодиодная;;ReMo\n"
+                    "Лампа светодиодная GU10 7Вт;EL-9;10;Лампы Светодиодные G, GX, GU;CLS-9;Лампа светодиодная;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+
+            contactor = built.loc[built["Артикул"] == "EL-1"].iloc[0]
+            relay = built.loc[built["Артикул"] == "EL-2"].iloc[0]
+            key = built.loc[built["Артикул"] == "EL-3"].iloc[0]
+            cover = built.loc[built["Артикул"] == "EL-4"].iloc[0]
+            led_strip = built.loc[built["Артикул"] == "EL-5"].iloc[0]
+            led_profile = built.loc[built["Артикул"] == "EL-6"].iloc[0]
+            led_driver = built.loc[built["Артикул"] == "EL-7"].iloc[0]
+            lamp_e = built.loc[built["Артикул"] == "EL-8"].iloc[0]
+            lamp_gu = built.loc[built["Артикул"] == "EL-9"].iloc[0]
+
+            self.assertEqual(contactor["search_effective_family"], "contactor_starter")
+            self.assertEqual(contactor["search_branch_path"], "контакторы магнитные")
+            self.assertEqual(relay["search_effective_family"], "control_relay")
+            self.assertEqual(relay["search_branch_path"], "промежуточные реле")
+            self.assertEqual(key["search_effective_family"], "switch_wiring")
+            self.assertEqual(key["search_branch_path"], "клавиши")
+            self.assertEqual(cover["search_effective_family"], "switch_wiring")
+            self.assertEqual(cover["search_branch_path"], "накладки")
+            self.assertEqual(led_strip["search_effective_family"], "lighting_fixture")
+            self.assertEqual(led_strip["search_branch_path"], "ленты светодиодные 24в")
+            self.assertEqual(led_profile["search_effective_family"], "lighting_fixture")
+            self.assertEqual(led_profile["search_branch_path"], "профиль для светодиодной ленты")
+            self.assertEqual(led_driver["search_effective_family"], "lighting_fixture")
+            self.assertEqual(led_driver["search_branch_path"], "блок питания и драйвер для светодиодной ленты")
+            self.assertEqual(lamp_e["search_effective_family"], "lighting_fixture")
+            self.assertEqual(lamp_e["search_branch_path"], "лампы светодиодные е27, е14, е40")
+            self.assertEqual(lamp_gu["search_effective_family"], "lighting_fixture")
+            self.assertEqual(lamp_gu["search_branch_path"], "лампы светодиодные g, gx, gu")
 
     def test_classify_item_type_does_not_treat_ascii_ups_ports_as_iec_power_cable(self):
         self.assertNotEqual(

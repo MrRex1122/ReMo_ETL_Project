@@ -654,6 +654,10 @@ def _detect_accessory_kind(normalized: str) -> str:
         "\u0445\u043e\u043c\u0443\u0442" in normalized and "\u0441\u0442\u0430\u043b" in normalized
     ) or "\u0441\u043a\u043e\u0431" in normalized or "\u043e\u0434\u043d\u043e\u043b\u0430\u043f\u043a" in normalized or "\u0434\u0432\u0443\u043b\u0430\u043f\u043a" in normalized:
         return "holder"
+    if "\u043f\u0440\u043e\u0444\u0438\u043b" in normalized and any(
+        token in normalized for token in ("\u0441\u0432\u0435\u0442\u043e\u0434\u0438\u043e\u0434", "led", "\u043b\u0435\u043d\u0442\u0430")
+    ):
+        return "lighting_fixture"
     if "\u043f\u0440\u043e\u0444\u0438\u043b" in normalized:
         return "profile"
     if "\u0437\u0430\u0437\u0435\u043c\u043b" in normalized and "\u043f\u043b\u0430\u0441\u0442\u0438\u043d" in normalized:
@@ -2261,6 +2265,21 @@ def _normalize_effective_entity_type_by_catalog_branch(
     if any(
         marker in normalized_branch
         for marker in (
+            "выключатели скрытого монтажа",
+            "выключатели открытого монтажа",
+            "переключатели скрытого монтажа",
+            "переключатели открытого монтажа",
+            "розетки скрытого монтажа",
+            "розетки открытого монтажа",
+            "клавиши",
+            "накладки",
+            "рамки",
+        )
+    ):
+        return "switch_wiring"
+    if any(
+        marker in normalized_branch
+        for marker in (
             "клеммные блоки зажимов на din рейку",
             "клеммы на din рейку",
             "проходные клеммы на din рейку",
@@ -2283,8 +2302,24 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "utility_knife"
     if "леска для триммеров" in normalized_branch:
         return "trimmer_line"
-    if "люстры под лампу" in normalized_branch:
+    if any(
+        marker in normalized_branch
+        for marker in (
+            "люстры под лампу",
+            "ленты светодиодные 12в",
+            "ленты светодиодные 24в",
+            "ленты светодиодные 220в",
+            "профиль для светодиодной ленты",
+            "блок питания и драйвер для светодиодной ленты",
+            "лампы светодиодные е27 е14 е40",
+            "лампы светодиодные g gx gu",
+        )
+    ):
         return "lighting_fixture"
+    if any(marker in normalized_branch for marker in ("контакторы магнитные", "пускатели магнитные")):
+        return "contactor_starter"
+    if "промежуточные реле" in normalized_branch:
+        return "control_relay"
     if any(marker in normalized_branch for marker in ("световое табло", "свето звуковое табло")):
         return "light_signage"
     if "знаки безопасности" in normalized_branch:
@@ -3042,7 +3077,27 @@ def derive_branch_from_text(
         if registry_family == "lighting_fixture":
             if "люстр" in merged:
                 return "люстры под лампу"
+            if "лента" in merged and "светодиод" in merged:
+                if "24в" in merged or "24 v" in merged:
+                    return "ленты светодиодные 24в"
+                if "220в" in merged or "220 v" in merged:
+                    return "ленты светодиодные 220в"
+                return "ленты светодиодные 12в"
+            if "профил" in merged and any(token in merged for token in ("светодиод", "led", "лента")):
+                return "профиль для светодиодной ленты"
+            if any(token in merged for token in ("драйвер", "блок питания")) and any(token in merged for token in ("светодиод", "led", "лента")):
+                return "блок питания и драйвер для светодиодной ленты"
+            if "ламп" in merged and any(token in merged for token in ("e27", "e14", "e40")):
+                return "лампы светодиодные е27, е14, е40"
+            if "ламп" in merged and any(token in merged for token in ("g4", "g9", "gx53", "gx70", "gu10", "gu5.3", "gu 10", "gu 5.3")):
+                return "лампы светодиодные g, gx, gu"
             return "свет > светильники"
+        if registry_family == "contactor_starter":
+            if "пускател" in merged:
+                return "пускатели магнитные"
+            return "контакторы магнитные"
+        if registry_family == "control_relay":
+            return "промежуточные реле"
         if registry_family == "wood_saw_blade":
             return "пильные диски по дереву"
         if registry_family == "diamond_blade":
@@ -3224,14 +3279,22 @@ def derive_branch_from_text(
         if registry_family == "switch_wiring":
             if "рамк" in merged:
                 return "рамки"
+            if "клавиш" in merged and not any(token in merged for token in ("выключател", "переключател", "розетк")):
+                return "клавиши"
+            if "накладк" in merged and any(token in merged for token in ("выключател", "розетк", "диммер", "механизм")):
+                return "накладки"
             if "розетк" in merged and "скрыт" in merged:
                 return "розетки скрытого монтажа"
             if "розетк" in merged and "открыт" in merged:
                 return "розетки открытого монтажа"
             if "розетк" in merged:
                 return "розетки скрытого монтажа"
+            if "выключател" in merged and "открыт" in merged:
+                return "выключатели открытого монтажа"
             if "переключател" in merged and "открыт" in merged:
                 return "переключатели открытого монтажа"
+            if "переключател" in merged and "скрыт" in merged:
+                return "переключатели скрытого монтажа"
             if "выключател" in merged and "скрыт" in merged:
                 return "выключатели скрытого монтажа"
         if registry_family == "fire_detector":
@@ -3562,7 +3625,27 @@ def derive_branch_from_text(
     if effective_entity_type == "lighting_fixture":
         if "люстр" in merged:
             return "люстры под лампу"
+        if "лента" in merged and "светодиод" in merged:
+            if "24в" in merged or "24 v" in merged:
+                return "ленты светодиодные 24в"
+            if "220в" in merged or "220 v" in merged:
+                return "ленты светодиодные 220в"
+            return "ленты светодиодные 12в"
+        if "профил" in merged and any(token in merged for token in ("светодиод", "led", "лента")):
+            return "профиль для светодиодной ленты"
+        if any(token in merged for token in ("драйвер", "блок питания")) and any(token in merged for token in ("светодиод", "led", "лента")):
+            return "блок питания и драйвер для светодиодной ленты"
+        if "ламп" in merged and any(token in merged for token in ("e27", "e14", "e40")):
+            return "лампы светодиодные е27, е14, е40"
+        if "ламп" in merged and any(token in merged for token in ("g4", "g9", "gx53", "gx70", "gu10", "gu5.3", "gu 10", "gu 5.3")):
+            return "лампы светодиодные g, gx, gu"
         return "свет > светильники"
+    if effective_entity_type == "contactor_starter":
+        if "пускател" in merged:
+            return "пускатели магнитные"
+        return "контакторы магнитные"
+    if effective_entity_type == "control_relay":
+        return "промежуточные реле"
     if effective_entity_type == "wood_saw_blade":
         return "пильные диски по дереву"
     if effective_entity_type == "diamond_blade":
@@ -3671,6 +3754,27 @@ def derive_branch_from_text(
         if "пост" in merged:
             return "кнопочные посты"
         return "кнопки"
+    if effective_entity_type == "switch_wiring":
+        if "рамк" in merged:
+            return "рамки"
+        if "клавиш" in merged and not any(token in merged for token in ("выключател", "переключател", "розетк")):
+            return "клавиши"
+        if "накладк" in merged and any(token in merged for token in ("выключател", "розетк", "диммер", "механизм")):
+            return "накладки"
+        if "розетк" in merged and "скрыт" in merged:
+            return "розетки скрытого монтажа"
+        if "розетк" in merged and "открыт" in merged:
+            return "розетки открытого монтажа"
+        if "розетк" in merged:
+            return "розетки скрытого монтажа"
+        if "выключател" in merged and "открыт" in merged:
+            return "выключатели открытого монтажа"
+        if "переключател" in merged and "открыт" in merged:
+            return "переключатели открытого монтажа"
+        if "переключател" in merged and "скрыт" in merged:
+            return "переключатели скрытого монтажа"
+        if "выключател" in merged and "скрыт" in merged:
+            return "выключатели скрытого монтажа"
     if effective_entity_type == "terminal_block":
         if ("печатн" in merged or "pcb" in merged) and ("плат" in merged or "terminal" in merged):
             return "клеммные зажимы для печатных плат"
@@ -3784,7 +3888,28 @@ def normalize_catalog_branch_from_row(
             return normalize_branch_path([class_name]) or "прочее"
     if _looks_like_cable_infrastructure_class_name(normalized_class_name):
         return normalize_branch_path([class_name]) or "прочее"
-    if normalized_class_name == "люстры под лампу":
+    if normalized_class_name in {
+        "люстры под лампу",
+        "ленты светодиодные 12в",
+        "ленты светодиодные 24в",
+        "ленты светодиодные 220в",
+        "профиль для светодиодной ленты",
+        "блок питания и драйвер для светодиодной ленты",
+        "лампы светодиодные е27 е14 е40",
+        "лампы светодиодные g gx gu",
+        "контакторы магнитные",
+        "пускатели магнитные",
+        "промежуточные реле",
+        "выключатели скрытого монтажа",
+        "выключатели открытого монтажа",
+        "переключатели скрытого монтажа",
+        "переключатели открытого монтажа",
+        "розетки скрытого монтажа",
+        "розетки открытого монтажа",
+        "клавиши",
+        "накладки",
+        "рамки",
+    }:
         return normalize_branch_path([class_name]) or "прочее"
 
     derived = derive_branch_from_text(

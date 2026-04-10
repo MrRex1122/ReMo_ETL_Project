@@ -1789,6 +1789,74 @@ class MatchTaxonomyTests(unittest.TestCase):
             "switch_wiring",
         )
 
+    def test_effective_candidate_family_maps_other_large_electrical_branch_batch(self):
+        contactor_features = self.matcher._extract_query_features("Контактор магнитный 18А 230В")
+        contactor_features["entity_type"] = "contactor_starter"
+        contactor_candidate = {
+            "name": "Контактор магнитный 18А 230В",
+            "normalized_name": "контактор магнитный 18а 230в",
+            "branch_path": "контакторы магнитные",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        relay_features = self.matcher._extract_query_features("Реле промежуточное 24В")
+        relay_features["entity_type"] = "control_relay"
+        relay_candidate = {
+            "name": "Реле промежуточное 24В",
+            "normalized_name": "реле промежуточное 24в",
+            "branch_path": "промежуточные реле",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        key_features = self.matcher._extract_query_features("Клавиша двухклавишная для выключателя")
+        key_features["entity_type"] = "switch_wiring"
+        key_candidate = {
+            "name": "Клавиша двухклавишная для выключателя",
+            "normalized_name": "клавиша двухклавишная для выключателя",
+            "branch_path": "клавиши",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        cover_features = self.matcher._extract_query_features("Накладка для розетки 1-постовая белая")
+        cover_features["entity_type"] = "switch_wiring"
+        cover_candidate = {
+            "name": "Накладка для розетки 1-постовая белая",
+            "normalized_name": "накладка для розетки 1 постовая белая",
+            "branch_path": "накладки",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        led_features = self.matcher._extract_query_features("Лента светодиодная 24В 14.4Вт/м")
+        led_features["entity_type"] = "lighting_fixture"
+        led_candidate = {
+            "name": "Лента светодиодная 24В 14.4Вт/м",
+            "normalized_name": "лента светодиодная 24в 14 4вт м",
+            "branch_path": "ленты светодиодные 24в",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(contactor_features, contactor_candidate),
+            "contactor_starter",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(relay_features, relay_candidate),
+            "control_relay",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(key_features, key_candidate),
+            "switch_wiring",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(cover_features, cover_candidate),
+            "switch_wiring",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(led_features, led_candidate),
+            "lighting_fixture",
+        )
+
     def test_effective_candidate_family_maps_other_cable_channel_branch(self):
         features = self.matcher._extract_query_features("Короб с крышкой 80x40 (3 м.)")
         features["entity_type"] = "cable_channel"
