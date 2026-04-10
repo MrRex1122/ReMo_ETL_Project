@@ -2511,6 +2511,91 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.assertEqual(self.matcher._effective_candidate_family_for_query(milling_features, milling_candidate), "milling_cutter")
         self.assertEqual(self.matcher._effective_candidate_family_for_query(insulation_features, insulation_candidate), "pipe_insulation")
 
+    def test_effective_candidate_family_maps_other_measurement_hand_tool_and_footwear_branches(self):
+        cases = [
+            (
+                "Ботинки утепленные рабочие размер 43",
+                "safety_footwear",
+                "ботинки утепленные",
+                "Ботинки утепленные рабочие размер 43",
+            ),
+            (
+                "Сапоги резиновые защитные высокие",
+                "safety_footwear",
+                "сапоги резиновые",
+                "Сапоги резиновые защитные высокие",
+            ),
+            (
+                "Пресс-клещи для наконечников НШВИ 0.5-6 мм2",
+                "crimping_tool",
+                "ручные пресс-клещи и кримперы",
+                "Пресс-клещи для наконечников НШВИ 0.5-6 мм2",
+            ),
+            (
+                "Микрометр цифровой 0-25 мм",
+                "micrometer",
+                "микрометры",
+                "Микрометр цифровой 0-25 мм",
+            ),
+            (
+                "Рулетка измерительная 5м x 19мм",
+                "tape_measure",
+                "измерительные рулетки",
+                "Рулетка измерительная 5м x 19мм",
+            ),
+            (
+                "Уровень пузырьковый 600 мм",
+                "spirit_level",
+                "уровни пузырьковые",
+                "Уровень пузырьковый 600 мм",
+            ),
+            (
+                "Кисть флейцевая 50 мм натуральная щетина",
+                "paint_brush",
+                "кисти плоские флейцевые",
+                "Кисть флейцевая 50 мм натуральная щетина",
+            ),
+            (
+                "Круг абразивный отрезной 125x1.0x22.23",
+                "abrasive_cutting_disc",
+                "абразивные отрезные диски",
+                "Круг абразивный отрезной 125x1.0x22.23",
+            ),
+            (
+                "Длинногубцы изогнутые 160 мм",
+                "long_nose_pliers",
+                "длинногубцы, утконосы и круглогубцы",
+                "Длинногубцы изогнутые 160 мм",
+            ),
+            (
+                "Струбцина F-образная 300 мм",
+                "clamp_tool",
+                "струбцины",
+                "Струбцина F-образная 300 мм",
+            ),
+            (
+                "Напильник плоский 200 мм",
+                "file_tool",
+                "напильники",
+                "Напильник плоский 200 мм",
+            ),
+        ]
+
+        for query_text, family, branch_path, candidate_name in cases:
+            features = self.matcher._extract_query_features(query_text)
+            features["entity_type"] = family
+            candidate = {
+                "name": candidate_name,
+                "normalized_name": candidate_name.lower(),
+                "branch_path": branch_path,
+                "entity_type": "other",
+                "item_markers": {},
+            }
+            self.assertEqual(
+                self.matcher._effective_candidate_family_for_query(features, candidate),
+                family,
+            )
+
     def test_effective_candidate_family_maps_other_wrench_caliper_and_blade_branches(self):
         wrench_features = self.matcher._extract_query_features("Ключ комбинированный 17 мм")
         wrench_features["entity_type"] = "combination_wrench"

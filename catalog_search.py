@@ -1011,6 +1011,11 @@ def classify_item_type(
     ):
         return "thread_gauge"
     if (
+        any(token in normalized for token in ("напильник", "напильники", "надфиль", "надфили", "hand file", "metal file"))
+        and not any(token in normalized for token in ("маникюр", "пилка для ногтей", "рашпиль по дереву"))
+    ):
+        return "file_tool"
+    if (
         any(token in normalized for token in ("торцевая головка", "торцевые головки", "торцевых головок", "набор торцевых головок", "набор головок", "socket set", "socket wrench"))
         and not any(token in normalized for token in ("головка блока", "головка цилиндра", "торцевая фреза", "битодержатель", "бита"))
     ):
@@ -1070,10 +1075,20 @@ def classify_item_type(
     ):
         return "workwear"
     if (
+        any(token in normalized for token in ("ботинки рабочие", "полуботинки рабочие", "ботинки утепленные", "сапоги резиновые", "защитная обувь", "рабочие сапоги", "защитные сапоги", "work boots", "safety shoes"))
+        and not any(token in normalized for token in ("кроссовк", "тапк", "сандал", "домашн"))
+    ):
+        return "safety_footwear"
+    if (
         any(token in normalized for token in ("антипорезные перчатки", "защитные перчатки", "перчатки защитные", "перчатки защитные антипорезные", "рабочие перчатки", "protective gloves", "cut resistant gloves"))
         and not any(token in normalized for token in ("боксерские", "варежки", "митенки"))
     ):
         return "protective_gloves"
+    if (
+        any(token in normalized for token in ("ручные пресс-клещи и кримперы", "пресс-клещи", "пресс клещи", "кримпер", "клещи для обжима", "обжимные клещи", "crimping tool", "crimping pliers"))
+        and not any(token in normalized for token in ("токоизмер", "clamp meter", "переставн", "болторез", "длинногубцы"))
+    ):
+        return "crimping_tool"
     if (
         any(token in normalized for token in ("комбинированный ключ", "ключ комбинированный", "комбинированные ключи", "рожково накидной ключ", "ключ рожково накидной", "combination wrench", "combination spanner"))
         and not any(token in normalized for token in ("имбус", "шестигранник", "разводной", "трубный ключ", "ключ доступа"))
@@ -1100,10 +1115,30 @@ def classify_item_type(
     ):
         return "caliper"
     if (
+        any(token in normalized for token in ("микрометр", "микрометры", "outside micrometer", "digital micrometer"))
+        and not any(token in normalized for token in ("микрометрический винт", "головка микрометрическая"))
+    ):
+        return "micrometer"
+    if (
+        any(token in normalized for token in ("измерительная рулетка", "измерительные рулетки", "рулетка", "tape measure", "measuring tape"))
+        and not any(token in normalized for token in ("рулетка казино", "рулетка игровая"))
+    ):
+        return "tape_measure"
+    if (
+        any(token in normalized for token in ("уровень пузырьковый", "уровни пузырьковые", "строительный уровень", "spirit level", "bubble level"))
+        and not any(token in normalized for token in ("лазерный", "нивелир", "уровнемер"))
+    ):
+        return "spirit_level"
+    if (
         any(token in normalized for token in ("малярный валик", "валик малярный", "валики", "paint roller", "roller cover"))
         and not any(token in normalized for token in ("подшипник", "валик подшипника", "прижимной ролик", "ролик натяжной"))
     ):
         return "paint_roller"
+    if (
+        any(token in normalized for token in ("кисть плоская флейцевая", "кисти плоские флейцевые", "кисть флейцевая", "флейцевая кисть", "paint brush", "flat brush"))
+        and not any(token in normalized for token in ("зубная щетка", "крацовка", "корщетка"))
+    ):
+        return "paint_brush"
     if (
         any(token in normalized for token in ("пильный диск по дереву", "пильные диски по дереву", "диск по дереву", "saw blade wood", "wood saw blade"))
         and not any(token in normalized for token in ("алмазн", "отрезн", "затвор дисковый", "тормозной диск"))
@@ -1114,6 +1149,11 @@ def classify_item_type(
         and not any(token in normalized for token in ("алмазная коронка", "затвор дисковый", "тормозной диск", "пильный диск по дереву"))
     ):
         return "diamond_blade"
+    if (
+        any(token in normalized for token in ("абразивный отрезной диск", "абразивные отрезные диски", "абразивный отрезной круг", "круг абразивный отрезной", "отрезной диск", "отрезной круг", "cutting disc", "cut-off wheel"))
+        and not any(token in normalized for token in ("алмазн", "пильный", "тормозной диск", "затвор дисковый"))
+    ):
+        return "abrasive_cutting_disc"
     if (
         any(token in normalized for token in ("картридж для печатной техники", "картриджи для печатной техники", "картридж для принтера", "тонер картридж", "print cartridge", "printer cartridge", "toner cartridge"))
         and not any(token in normalized for token in ("смеситель", "фильтр картридж", "картридж для фильтра", "чернильница", "печатная плата"))
@@ -1134,6 +1174,16 @@ def classify_item_type(
         and not any(token in normalized for token in ("болторез", "клещи переставные", "клещи обжимные", "плоскогубцы"))
     ):
         return "cutting_pliers"
+    if (
+        any(token in normalized for token in ("длинногубцы", "утконосы", "круглогубцы", "needle nose pliers", "long nose pliers", "round nose pliers"))
+        and not any(token in normalized for token in ("бокорез", "кусачки", "болторез", "клещи обжимные", "клещи токоизмерительные"))
+    ):
+        return "long_nose_pliers"
+    if (
+        any(token in normalized for token in ("струбцина", "струбцины", "bar clamp", "f-clamp", "g-clamp", "clamping tool"))
+        and not any(token in normalized for token in ("clamp meter", "токоизмер", "хомут", "клемм"))
+    ):
+        return "clamp_tool"
     if (
         any(token in normalized for token in ("бита torx", "биты torx", "torx bit", "бит torx"))
         and not any(token in normalized for token in ("отвертка", "битодержатель", "шлицев", "крестов", "phillips", "pozidriv"))
@@ -1313,7 +1363,7 @@ def classify_item_type(
             "ferrule",
             "bootlace ferrule",
         )
-    ) and not any(token in normalized for token in ("клеммный блок", "клеммник", "din рейк", "din-рейк", "terminal block")):
+    ) and not any(token in normalized for token in ("клеммный блок", "клеммник", "din рейк", "din-рейк", "terminal block", "клещ", "клещи", "пресс", "обжим", "кримпер")):
         return "wire_ferrule"
     if any(
         token in normalized
@@ -1780,6 +1830,8 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "thread_die"
     if "резьбомеры" in normalized_branch:
         return "thread_gauge"
+    if "напильники" in normalized_branch:
+        return "file_tool"
     if "торцевые головки и наборы головок" in normalized_branch:
         return "socket_head_set"
     if any(marker in normalized_branch for marker in ("ремни клиновые приводные", "ремни узкоклиновые")):
@@ -1798,10 +1850,12 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "milling_cutter"
     if any(marker in normalized_branch for marker in ("костюмы летние", "костюмы утепленные", "брюки полукомбинезоны", "куртки утепленные")):
         return "workwear"
-    if any(marker in normalized_branch for marker in ("ботинки рабочие", "полуботинки рабочие")):
+    if any(marker in normalized_branch for marker in ("ботинки рабочие", "полуботинки рабочие", "ботинки утепленные", "сапоги резиновые")):
         return "safety_footwear"
     if "антипорезные и защитные перчатки" in normalized_branch:
         return "protective_gloves"
+    if "ручные пресс-клещи и кримперы" in normalized_branch:
+        return "crimping_tool"
     if "комбинированные ключи" in normalized_branch:
         return "combination_wrench"
     if "рожковые ключи" in normalized_branch:
@@ -1812,12 +1866,22 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "hex_key"
     if "штангенциркули" in normalized_branch:
         return "caliper"
+    if "микрометры" in normalized_branch:
+        return "micrometer"
+    if "измерительные рулетки" in normalized_branch:
+        return "tape_measure"
+    if "уровни пузырьковые" in normalized_branch:
+        return "spirit_level"
     if "валики" in normalized_branch:
         return "paint_roller"
+    if "кисти плоские флейцевые" in normalized_branch:
+        return "paint_brush"
     if "пильные диски по дереву" in normalized_branch:
         return "wood_saw_blade"
     if "алмазные диски" in normalized_branch:
         return "diamond_blade"
+    if "абразивные отрезные диски" in normalized_branch:
+        return "abrasive_cutting_disc"
     if "картриджи для печатной техники" in normalized_branch:
         return "printer_cartridge"
     if "крестовые отвертки" in normalized_branch:
@@ -1826,6 +1890,10 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "slotted_screwdriver"
     if "бокорезы и кусачки" in normalized_branch:
         return "cutting_pliers"
+    if "длинногубцы утконосы и круглогубцы" in normalized_branch:
+        return "long_nose_pliers"
+    if "струбцины" in normalized_branch:
+        return "clamp_tool"
     if "биты torx" in normalized_branch:
         return "torx_bit"
     if "биты крест ph phillips" in normalized_branch:
@@ -2206,6 +2274,8 @@ def derive_branch_from_text(
                 return "плашки"
             if effective_family == "thread_gauge":
                 return "резьбомеры"
+            if effective_family == "file_tool":
+                return "напильники"
             if effective_family == "socket_head_set":
                 return "торцевые головки и наборы головок"
             if effective_family == "drive_belt":
@@ -2230,8 +2300,18 @@ def derive_branch_from_text(
                 if "утеплен" in merged:
                     return "костюмы утепленные"
                 return "костюмы летние"
+            if effective_family == "safety_footwear":
+                if "сапог" in merged:
+                    return "сапоги резиновые"
+                if "утеплен" in merged:
+                    return "ботинки утепленные"
+                if "полуботин" in merged:
+                    return "полуботинки рабочие"
+                return "ботинки рабочие"
             if effective_family == "protective_gloves":
                 return "антипорезные и защитные перчатки"
+            if effective_family == "crimping_tool":
+                return "ручные пресс-клещи и кримперы"
             if effective_family == "combination_wrench":
                 return "комбинированные ключи"
             if effective_family == "open_end_wrench":
@@ -2242,12 +2322,22 @@ def derive_branch_from_text(
                 return "ключи имбусовые шестигранные (HEX)"
             if effective_family == "caliper":
                 return "штангенциркули"
+            if effective_family == "micrometer":
+                return "микрометры"
+            if effective_family == "tape_measure":
+                return "измерительные рулетки"
+            if effective_family == "spirit_level":
+                return "уровни пузырьковые"
             if effective_family == "paint_roller":
                 return "валики"
+            if effective_family == "paint_brush":
+                return "кисти плоские флейцевые"
             if effective_family == "wood_saw_blade":
                 return "пильные диски по дереву"
             if effective_family == "diamond_blade":
                 return "алмазные диски"
+            if effective_family == "abrasive_cutting_disc":
+                return "абразивные отрезные диски"
             if effective_family == "printer_cartridge":
                 return "картриджи для печатной техники"
             if effective_family == "phillips_screwdriver":
@@ -2256,6 +2346,10 @@ def derive_branch_from_text(
                 return "шлицевые отвертки"
             if effective_family == "cutting_pliers":
                 return "бокорезы и кусачки"
+            if effective_family == "long_nose_pliers":
+                return "длинногубцы, утконосы и круглогубцы"
+            if effective_family == "clamp_tool":
+                return "струбцины"
             if effective_family == "torx_bit":
                 return "биты TORX"
             if effective_family == "phillips_bit":
@@ -2454,6 +2548,8 @@ def derive_branch_from_text(
             return "плашки"
         if registry_family == "thread_gauge":
             return "резьбомеры"
+        if registry_family == "file_tool":
+            return "напильники"
         if registry_family == "socket_head_set":
             return "торцевые головки и наборы головок"
         if registry_family == "drive_belt":
@@ -2481,11 +2577,17 @@ def derive_branch_from_text(
                 return "костюмы утепленные"
             return "костюмы летние"
         if registry_family == "safety_footwear":
+            if "сапог" in merged:
+                return "сапоги резиновые"
+            if "утеплен" in merged:
+                return "ботинки утепленные"
             if "полуботин" in merged:
                 return "полуботинки рабочие"
             return "ботинки рабочие"
         if registry_family == "protective_gloves":
             return "антипорезные и защитные перчатки"
+        if registry_family == "crimping_tool":
+            return "ручные пресс-клещи и кримперы"
         if registry_family == "combination_wrench":
             return "комбинированные ключи"
         if registry_family == "open_end_wrench":
@@ -2496,8 +2598,16 @@ def derive_branch_from_text(
             return "ключи имбусовые шестигранные (HEX)"
         if registry_family == "caliper":
             return "штангенциркули"
+        if registry_family == "micrometer":
+            return "микрометры"
+        if registry_family == "tape_measure":
+            return "измерительные рулетки"
+        if registry_family == "spirit_level":
+            return "уровни пузырьковые"
         if registry_family == "paint_roller":
             return "валики"
+        if registry_family == "paint_brush":
+            return "кисти плоские флейцевые"
         if registry_family == "lighting_fixture":
             if "люстр" in merged:
                 return "люстры под лампу"
@@ -2506,6 +2616,8 @@ def derive_branch_from_text(
             return "пильные диски по дереву"
         if registry_family == "diamond_blade":
             return "алмазные диски"
+        if registry_family == "abrasive_cutting_disc":
+            return "абразивные отрезные диски"
         if registry_family == "printer_cartridge":
             return "картриджи для печатной техники"
         if registry_family == "phillips_screwdriver":
@@ -2514,6 +2626,10 @@ def derive_branch_from_text(
             return "шлицевые отвертки"
         if registry_family == "cutting_pliers":
             return "бокорезы и кусачки"
+        if registry_family == "long_nose_pliers":
+            return "длинногубцы, утконосы и круглогубцы"
+        if registry_family == "clamp_tool":
+            return "струбцины"
         if registry_family == "torx_bit":
             return "биты TORX"
         if registry_family == "phillips_bit":
@@ -2835,6 +2951,8 @@ def derive_branch_from_text(
         return "плашки"
     if effective_entity_type == "thread_gauge":
         return "резьбомеры"
+    if effective_entity_type == "file_tool":
+        return "напильники"
     if effective_entity_type == "socket_head_set":
         return "торцевые головки и наборы головок"
     if effective_entity_type == "drive_belt":
@@ -2862,11 +2980,17 @@ def derive_branch_from_text(
             return "костюмы утепленные"
         return "костюмы летние"
     if effective_entity_type == "safety_footwear":
+        if "сапог" in merged:
+            return "сапоги резиновые"
+        if "утеплен" in merged:
+            return "ботинки утепленные"
         if "полуботин" in merged:
             return "полуботинки рабочие"
         return "ботинки рабочие"
     if effective_entity_type == "protective_gloves":
         return "антипорезные и защитные перчатки"
+    if effective_entity_type == "crimping_tool":
+        return "ручные пресс-клещи и кримперы"
     if effective_entity_type == "combination_wrench":
         return "комбинированные ключи"
     if effective_entity_type == "open_end_wrench":
@@ -2877,8 +3001,16 @@ def derive_branch_from_text(
         return "ключи имбусовые шестигранные (HEX)"
     if effective_entity_type == "caliper":
         return "штангенциркули"
+    if effective_entity_type == "micrometer":
+        return "микрометры"
+    if effective_entity_type == "tape_measure":
+        return "измерительные рулетки"
+    if effective_entity_type == "spirit_level":
+        return "уровни пузырьковые"
     if effective_entity_type == "paint_roller":
         return "валики"
+    if effective_entity_type == "paint_brush":
+        return "кисти плоские флейцевые"
     if effective_entity_type == "lighting_fixture":
         if "люстр" in merged:
             return "люстры под лампу"
@@ -2887,6 +3019,8 @@ def derive_branch_from_text(
         return "пильные диски по дереву"
     if effective_entity_type == "diamond_blade":
         return "алмазные диски"
+    if effective_entity_type == "abrasive_cutting_disc":
+        return "абразивные отрезные диски"
     if effective_entity_type == "printer_cartridge":
         return "картриджи для печатной техники"
     if effective_entity_type == "phillips_screwdriver":
@@ -2895,6 +3029,10 @@ def derive_branch_from_text(
         return "шлицевые отвертки"
     if effective_entity_type == "cutting_pliers":
         return "бокорезы и кусачки"
+    if effective_entity_type == "long_nose_pliers":
+        return "длинногубцы, утконосы и круглогубцы"
+    if effective_entity_type == "clamp_tool":
+        return "струбцины"
     if effective_entity_type == "torx_bit":
         return "биты TORX"
     if effective_entity_type == "phillips_bit":

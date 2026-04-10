@@ -2186,6 +2186,53 @@ class CatalogSearchTests(unittest.TestCase):
                 self.assertEqual(row["search_effective_entity_type"], family)
                 self.assertEqual(row["search_effective_family"], family)
 
+    def test_build_search_catalog_maps_measurement_hand_tool_and_footwear_branches_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Ботинки утепленные рабочие размер 43;BOOT-2;10;Ботинки Утепленные;CLS-1;Ботинки;;ReMo\n"
+                    "Сапоги резиновые защитные высокие;BOOT-3;10;Сапоги Резиновые;CLS-2;Сапоги;;ReMo\n"
+                    "Пресс-клещи для наконечников НШВИ 0.5-6 мм2;CRIMP-1;10;Ручные Пресс-Клещи И Кримперы;CLS-3;Пресс-клещи;;ReMo\n"
+                    "Микрометр цифровой 0-25 мм;MIC-1;10;Микрометры;CLS-4;Микрометр;;ReMo\n"
+                    "Рулетка измерительная 5м x 19мм;TM-1;10;Измерительные Рулетки;CLS-5;Рулетка;;ReMo\n"
+                    "Уровень пузырьковый 600 мм;LVL-1;10;Уровни Пузырьковые;CLS-6;Уровень;;ReMo\n"
+                    "Кисть флейцевая 50 мм натуральная щетина;BR-1;10;Кисти Плоские Флейцевые;CLS-7;Кисть;;ReMo\n"
+                    "Круг абразивный отрезной 125x1.0x22.23;DISC-1;10;Абразивные Отрезные Диски;CLS-8;Отрезной круг;;ReMo\n"
+                    "Длинногубцы изогнутые 160 мм;PLI-1;10;Длинногубцы, Утконосы И Круглогубцы;CLS-9;Длинногубцы;;ReMo\n"
+                    "Струбцина F-образная 300 мм;CLAMP-1;10;Струбцины;CLS-10;Струбцина;;ReMo\n"
+                    "Напильник плоский 200 мм;FILE-1;10;Напильники;CLS-11;Напильник;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+
+            expectations = {
+                "BOOT-2": ("ботинки утепленные", "safety_footwear"),
+                "BOOT-3": ("сапоги резиновые", "safety_footwear"),
+                "CRIMP-1": ("ручные пресс-клещи и кримперы", "crimping_tool"),
+                "MIC-1": ("микрометры", "micrometer"),
+                "TM-1": ("измерительные рулетки", "tape_measure"),
+                "LVL-1": ("уровни пузырьковые", "spirit_level"),
+                "BR-1": ("кисти плоские флейцевые", "paint_brush"),
+                "DISC-1": ("абразивные отрезные диски", "abrasive_cutting_disc"),
+                "PLI-1": ("длинногубцы, утконосы и круглогубцы", "long_nose_pliers"),
+                "CLAMP-1": ("струбцины", "clamp_tool"),
+                "FILE-1": ("напильники", "file_tool"),
+            }
+
+            for article, (branch_path, family) in expectations.items():
+                row = built.loc[built["Артикул"] == article].iloc[0]
+                self.assertEqual(row["search_branch_path"], branch_path)
+                self.assertEqual(row["search_entity_type"], family)
+                self.assertEqual(row["search_effective_entity_type"], family)
+                self.assertEqual(row["search_effective_family"], family)
+
     def test_build_search_catalog_maps_drill_bits_out_of_other(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
