@@ -414,6 +414,27 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(shutoff_valve.entity_type, "industrial_valve")
         self.assertEqual(shutoff_valve.branch_hint, "клапаны запорные (вентили) стальные")
 
+    def test_parse_query_spec_detects_lighting_footwear_hole_saw_and_insulation_queries(self):
+        chandelier = parse_query_spec("Люстра 8xE14 макс. 40Вт", taxonomy_rules=self.rules)
+        boots = parse_query_spec("Ботинки рабочие S1P SRC, р.42", taxonomy_rules=self.rules)
+        low_shoes = parse_query_spec("Полуботинки рабочие кожаные S1, р.43", taxonomy_rules=self.rules)
+        hole_saw = parse_query_spec("Кольцевая коронка 53 мм", taxonomy_rules=self.rules)
+        milling_cutter = parse_query_spec("Фреза концевая 10 мм z=4", taxonomy_rules=self.rules)
+        insulation = parse_query_spec("Изоляция из вспененного каучука трубная 22x9", taxonomy_rules=self.rules)
+
+        self.assertEqual(chandelier.entity_type, "lighting_fixture")
+        self.assertEqual(chandelier.branch_hint, "люстры под лампу")
+        self.assertEqual(boots.entity_type, "safety_footwear")
+        self.assertEqual(boots.branch_hint, "ботинки рабочие")
+        self.assertEqual(low_shoes.entity_type, "safety_footwear")
+        self.assertEqual(low_shoes.branch_hint, "полуботинки рабочие")
+        self.assertEqual(hole_saw.entity_type, "hole_saw")
+        self.assertEqual(hole_saw.branch_hint, "коронки")
+        self.assertEqual(milling_cutter.entity_type, "milling_cutter")
+        self.assertEqual(milling_cutter.branch_hint, "фрезы для станков")
+        self.assertEqual(insulation.entity_type, "pipe_insulation")
+        self.assertEqual(insulation.branch_hint, "изоляция из вспененного каучука трубная")
+
     def test_parse_query_spec_detects_self_tapping_screw_queries(self):
         screw = parse_query_spec("Саморез универсальный 4.2x32", taxonomy_rules=self.rules)
 

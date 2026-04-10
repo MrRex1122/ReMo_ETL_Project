@@ -4730,8 +4730,8 @@ class ReMoMatcher:
             "соединители",
             "аксессуары",
         )
-        if branch_path.startswith("свет > светильники") or any(
-            token in search_text for token in ("светильник", "прожектор", "светодиодн", "дсо", "дсп", "дпо", "дку")
+        if branch_path.startswith("свет > светильники") or "люстры под лампу" in branch_path or any(
+            token in search_text for token in ("светильник", "люстра", "прожектор", "светодиодн", "дсо", "дсп", "дпо", "дку")
         ):
             if "табло" not in search_text:
                 return "lighting_fixture"
@@ -4869,11 +4869,21 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("сверл", "коронк", "диск", "плашк", "метчик", "зенкер"))
         ):
             return "metal_turning_tool"
+        if "фрезы для станков" in branch_path or (
+            any(token in search_text for token in ("фреза", "фрезы для станков", "концевая фреза", "кольцевая фреза", "milling cutter"))
+            and not any(token in search_text for token in ("фрезер", "router", "коронк", "сверл", "диск"))
+        ):
+            return "milling_cutter"
         if any(token in branch_path for token in ("костюмы летние", "костюмы утепленные", "брюки полукомбинезоны", "куртки утепленные")) or (
             any(token in search_text for token in ("костюм летний", "костюмы летние", "костюм утепленный", "костюмы утепленные", "полукомбинезон рабочий", "полукомбинезоны рабочие", "брюки рабочие", "куртка утепленная", "куртки утепленные", "workwear suit", "workwear jacket", "workwear overall"))
             and not any(token in search_text for token in ("купальник", "маскарад", "карнавальн"))
         ):
             return "workwear"
+        if any(token in branch_path for token in ("ботинки рабочие", "полуботинки рабочие")) or (
+            any(token in search_text for token in ("ботинки рабочие", "полуботинки рабочие", "защитная обувь", "work boots", "safety shoes"))
+            and not any(token in search_text for token in ("кроссовк", "тапк", "сандал", "домашн"))
+        ):
+            return "safety_footwear"
         if "антипорезные и защитные перчатки" in branch_path or (
             any(token in search_text for token in ("антипорезные перчатки", "защитные перчатки", "перчатки защитные", "перчатки защитные антипорезные", "рабочие перчатки", "protective gloves", "cut resistant gloves"))
             and not any(token in search_text for token in ("боксерские", "варежки", "митенки"))
@@ -4983,6 +4993,11 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("металл", "metal", "дерев", "wood", "bi-metal", "бур", "sds", "drill bit", "сверло"))
         ):
             return "concrete_hole_saw"
+        if "коронки" in branch_path or (
+            any(token in search_text for token in ("коронка", "коронки", "кольцевая коронка", "удлинитель для коронок", "hole saw", "bi-metal hole saw"))
+            and not any(token in search_text for token in ("по бетону", "алмазная коронка по бетону", "бур", "sds", "сверло"))
+        ):
+            return "hole_saw"
         if any(token in branch_path for token in ("зубила sds-plus", "зубила sds-max")) or (
             any(
                 token in search_text
@@ -5007,6 +5022,11 @@ class ReMoMatcher:
             return "storage_water_heater"
         if "термоусаживаемые изделия" in branch_path or "термоусаж" in search_text or "термоусад" in search_text or "heat shrink" in search_text or "shrink tube" in search_text:
             return "heat_shrink"
+        if "изоляция из вспененного каучука трубная" in branch_path or (
+            any(token in search_text for token in ("изоляция из вспененного каучука трубная", "трубная изоляция", "вспененного каучука", "pipe insulation", "rubber pipe insulation"))
+            and not any(token in search_text for token in ("кабель", "электро", "лента"))
+        ):
+            return "pipe_insulation"
         if (
             any(token in branch_path for token in ("трансформаторы напряжения понижающие низковольтные", "трансформаторы тока низковольтные"))
             or "трансформатор" in search_text
@@ -5312,7 +5332,9 @@ class ReMoMatcher:
             "axial_pex_fitting",
             "pnd_compression_fitting",
             "metal_turning_tool",
+            "milling_cutter",
             "workwear",
+            "safety_footwear",
             "protective_gloves",
             "combination_wrench",
             "open_end_wrench",
@@ -5333,12 +5355,14 @@ class ReMoMatcher:
             "wood_drill_bit",
             "masonry_drill_bit",
             "concrete_hole_saw",
+            "hole_saw",
             "sds_chisel",
             "bearing",
             "radiator",
             "floor_convector",
             "storage_water_heater",
             "heat_shrink",
+            "pipe_insulation",
             "transformer",
             "ups",
             "clamp_meter",

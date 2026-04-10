@@ -2448,6 +2448,69 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.assertEqual(self.matcher._effective_candidate_family_for_query(control_valve_features, control_valve_candidate), "industrial_valve")
         self.assertEqual(self.matcher._effective_candidate_family_for_query(shutoff_valve_features, shutoff_valve_candidate), "industrial_valve")
 
+    def test_effective_candidate_family_maps_other_lighting_footwear_hole_saw_and_insulation_branches(self):
+        chandelier_features = self.matcher._extract_query_features("Люстра 8xE14 макс. 40Вт")
+        chandelier_features["entity_type"] = "lighting_fixture"
+        chandelier_candidate = {
+            "name": "Люстра 8xE14 макс. 40Вт",
+            "normalized_name": "люстра 8xe14 макс 40вт",
+            "branch_path": "люстры под лампу",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        boots_features = self.matcher._extract_query_features("Ботинки рабочие S1P SRC, р.42")
+        boots_features["entity_type"] = "safety_footwear"
+        boots_candidate = {
+            "name": "Ботинки рабочие S1P SRC, р.42",
+            "normalized_name": "ботинки рабочие s1p src р 42",
+            "branch_path": "ботинки рабочие",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        low_shoes_features = self.matcher._extract_query_features("Полуботинки рабочие кожаные S1, р.43")
+        low_shoes_features["entity_type"] = "safety_footwear"
+        low_shoes_candidate = {
+            "name": "Полуботинки рабочие кожаные S1, р.43",
+            "normalized_name": "полуботинки рабочие кожаные s1 р 43",
+            "branch_path": "полуботинки рабочие",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        hole_saw_features = self.matcher._extract_query_features("Кольцевая коронка 53 мм")
+        hole_saw_features["entity_type"] = "hole_saw"
+        hole_saw_candidate = {
+            "name": "Кольцевая коронка 53 мм",
+            "normalized_name": "кольцевая коронка 53 мм",
+            "branch_path": "коронки",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        milling_features = self.matcher._extract_query_features("Фреза концевая 10 мм z=4")
+        milling_features["entity_type"] = "milling_cutter"
+        milling_candidate = {
+            "name": "Фреза концевая 10 мм z=4",
+            "normalized_name": "фреза концевая 10 мм z 4",
+            "branch_path": "фрезы для станков",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        insulation_features = self.matcher._extract_query_features("Изоляция из вспененного каучука трубная 22x9")
+        insulation_features["entity_type"] = "pipe_insulation"
+        insulation_candidate = {
+            "name": "Изоляция из вспененного каучука трубная 22x9",
+            "normalized_name": "изоляция из вспененного каучука трубная 22x9",
+            "branch_path": "изоляция из вспененного каучука трубная",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(self.matcher._effective_candidate_family_for_query(chandelier_features, chandelier_candidate), "lighting_fixture")
+        self.assertEqual(self.matcher._effective_candidate_family_for_query(boots_features, boots_candidate), "safety_footwear")
+        self.assertEqual(self.matcher._effective_candidate_family_for_query(low_shoes_features, low_shoes_candidate), "safety_footwear")
+        self.assertEqual(self.matcher._effective_candidate_family_for_query(hole_saw_features, hole_saw_candidate), "hole_saw")
+        self.assertEqual(self.matcher._effective_candidate_family_for_query(milling_features, milling_candidate), "milling_cutter")
+        self.assertEqual(self.matcher._effective_candidate_family_for_query(insulation_features, insulation_candidate), "pipe_insulation")
+
     def test_effective_candidate_family_maps_other_wrench_caliper_and_blade_branches(self):
         wrench_features = self.matcher._extract_query_features("Ключ комбинированный 17 мм")
         wrench_features["entity_type"] = "combination_wrench"

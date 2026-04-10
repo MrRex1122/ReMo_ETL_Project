@@ -1794,8 +1794,12 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "pnd_compression_fitting"
     if "резцы по металлу" in normalized_branch:
         return "metal_turning_tool"
+    if "фрезы для станков" in normalized_branch:
+        return "milling_cutter"
     if any(marker in normalized_branch for marker in ("костюмы летние", "костюмы утепленные", "брюки полукомбинезоны", "куртки утепленные")):
         return "workwear"
+    if any(marker in normalized_branch for marker in ("ботинки рабочие", "полуботинки рабочие")):
+        return "safety_footwear"
     if "антипорезные и защитные перчатки" in normalized_branch:
         return "protective_gloves"
     if "комбинированные ключи" in normalized_branch:
@@ -1836,6 +1840,8 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "masonry_drill_bit"
     if "коронки по бетону" in normalized_branch:
         return "concrete_hole_saw"
+    if "коронки" in normalized_branch:
+        return "hole_saw"
     if any(marker in normalized_branch for marker in ("зубила sds-plus", "зубила sds-max")):
         return "sds_chisel"
     if "нулевые шины на din-рейку" in normalized_branch:
@@ -1850,6 +1856,8 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "storage_water_heater"
     if "термоусаживаемые изделия" in normalized_branch:
         return "heat_shrink"
+    if "изоляция из вспененного каучука трубная" in normalized_branch:
+        return "pipe_insulation"
     if any(
         marker in normalized_branch
         for marker in ("трансформаторы напряжения понижающие низковольтные", "трансформаторы тока низковольтные")
@@ -1910,6 +1918,8 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "signal_indicator"
     if "изолента" in normalized_branch:
         return "electrical_tape"
+    if "люстры под лампу" in normalized_branch:
+        return "lighting_fixture"
     if any(marker in normalized_branch for marker in ("световое табло", "свето звуковое табло")):
         return "light_signage"
     if "знаки безопасности" in normalized_branch:
@@ -2460,6 +2470,8 @@ def derive_branch_from_text(
             return "фитинги компрессионные для ПНД труб пластиковые"
         if registry_family == "metal_turning_tool":
             return "резцы по металлу"
+        if registry_family == "milling_cutter":
+            return "фрезы для станков"
         if registry_family == "workwear":
             if "куртк" in merged and "утеплен" in merged:
                 return "куртки утепленные"
@@ -2468,6 +2480,10 @@ def derive_branch_from_text(
             if "утеплен" in merged:
                 return "костюмы утепленные"
             return "костюмы летние"
+        if registry_family == "safety_footwear":
+            if "полуботин" in merged:
+                return "полуботинки рабочие"
+            return "ботинки рабочие"
         if registry_family == "protective_gloves":
             return "антипорезные и защитные перчатки"
         if registry_family == "combination_wrench":
@@ -2482,6 +2498,10 @@ def derive_branch_from_text(
             return "штангенциркули"
         if registry_family == "paint_roller":
             return "валики"
+        if registry_family == "lighting_fixture":
+            if "люстр" in merged:
+                return "люстры под лампу"
+            return "свет > светильники"
         if registry_family == "wood_saw_blade":
             return "пильные диски по дереву"
         if registry_family == "diamond_blade":
@@ -2514,6 +2534,8 @@ def derive_branch_from_text(
             return "сверла по бетону"
         if registry_family == "concrete_hole_saw":
             return "коронки по бетону"
+        if registry_family == "hole_saw":
+            return "коронки"
         if registry_family == "sds_chisel":
             if "sds-max" in merged or "sds max" in merged:
                 return "зубила sds-max"
@@ -2544,6 +2566,8 @@ def derive_branch_from_text(
             return "водонагреватели электрические накопительные"
         if registry_family == "heat_shrink":
             return "термоусаживаемые изделия"
+        if registry_family == "pipe_insulation":
+            return "изоляция из вспененного каучука трубная"
         if registry_family == "transformer":
             if "ток" in merged:
                 return "трансформаторы тока низковольтные"
@@ -2659,7 +2683,9 @@ def derive_branch_from_text(
             "axial_pex_fitting",
             "pnd_compression_fitting",
             "metal_turning_tool",
+            "milling_cutter",
             "workwear",
+            "safety_footwear",
             "protective_gloves",
             "combination_wrench",
             "open_end_wrench",
@@ -2667,6 +2693,7 @@ def derive_branch_from_text(
             "hex_key",
             "caliper",
             "paint_roller",
+            "lighting_fixture",
             "wood_saw_blade",
             "diamond_blade",
             "printer_cartridge",
@@ -2680,12 +2707,14 @@ def derive_branch_from_text(
             "wood_drill_bit",
             "masonry_drill_bit",
             "concrete_hole_saw",
+            "hole_saw",
             "sds_chisel",
             "bearing",
             "radiator",
             "floor_convector",
             "storage_water_heater",
             "heat_shrink",
+            "pipe_insulation",
             "transformer",
             "voltage_stabilizer",
             "frequency_drive",
@@ -2822,6 +2851,8 @@ def derive_branch_from_text(
         return "фитинги компрессионные для ПНД труб пластиковые"
     if effective_entity_type == "metal_turning_tool":
         return "резцы по металлу"
+    if effective_entity_type == "milling_cutter":
+        return "фрезы для станков"
     if effective_entity_type == "workwear":
         if "куртк" in merged and "утеплен" in merged:
             return "куртки утепленные"
@@ -2830,6 +2861,10 @@ def derive_branch_from_text(
         if "утеплен" in merged:
             return "костюмы утепленные"
         return "костюмы летние"
+    if effective_entity_type == "safety_footwear":
+        if "полуботин" in merged:
+            return "полуботинки рабочие"
+        return "ботинки рабочие"
     if effective_entity_type == "protective_gloves":
         return "антипорезные и защитные перчатки"
     if effective_entity_type == "combination_wrench":
@@ -2844,6 +2879,10 @@ def derive_branch_from_text(
         return "штангенциркули"
     if effective_entity_type == "paint_roller":
         return "валики"
+    if effective_entity_type == "lighting_fixture":
+        if "люстр" in merged:
+            return "люстры под лампу"
+        return "свет > светильники"
     if effective_entity_type == "wood_saw_blade":
         return "пильные диски по дереву"
     if effective_entity_type == "diamond_blade":
@@ -2876,6 +2915,8 @@ def derive_branch_from_text(
         return "сверла по бетону"
     if effective_entity_type == "concrete_hole_saw":
         return "коронки по бетону"
+    if effective_entity_type == "hole_saw":
+        return "коронки"
     if effective_entity_type == "sds_chisel":
         if "sds-max" in merged or "sds max" in merged:
             return "зубила sds-max"
@@ -2886,6 +2927,8 @@ def derive_branch_from_text(
         return "конвекторы внутрипольные"
     if effective_entity_type == "storage_water_heater":
         return "водонагреватели электрические накопительные"
+    if effective_entity_type == "pipe_insulation":
+        return "изоляция из вспененного каучука трубная"
     if effective_entity_type == "fuse":
         return "плавкие предохранители"
     if effective_entity_type == "power_accessory":
@@ -2948,6 +2991,8 @@ def derive_branch_from_text(
         return "электрика > кабели"
     if effective_entity_type == "wire":
         return "электрика > провода"
+    if "люстр" in merged:
+        return "люстры под лампу"
     if "светильник" in merged:
         return "свет > светильники"
     return "прочее"
@@ -2998,6 +3043,8 @@ def normalize_catalog_branch_from_row(
         ):
             return normalize_branch_path([class_name]) or "прочее"
     if _looks_like_cable_infrastructure_class_name(normalized_class_name):
+        return normalize_branch_path([class_name]) or "прочее"
+    if normalized_class_name == "люстры под лампу":
         return normalize_branch_path([class_name]) or "прочее"
 
     derived = derive_branch_from_text(

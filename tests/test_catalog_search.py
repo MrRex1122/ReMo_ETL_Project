@@ -2149,6 +2149,43 @@ class CatalogSearchTests(unittest.TestCase):
                 self.assertEqual(row["search_effective_entity_type"], family)
                 self.assertEqual(row["search_effective_family"], family)
 
+    def test_build_search_catalog_maps_lighting_footwear_hole_saw_and_insulation_branches_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Люстра 8xE14 макс. 40Вт;LIGHT-1;10;Люстры Под Лампу;CLS-1;Люстра;;ReMo\n"
+                    "Ботинки рабочие S1P SRC, р.42;BOOT-1;10;Ботинки Рабочие;CLS-2;Ботинки;;ReMo\n"
+                    "Полуботинки рабочие кожаные S1, р.43;SHOE-1;10;Полуботинки Рабочие;CLS-3;Полуботинки;;ReMo\n"
+                    "Кольцевая коронка 53 мм;HOLE-2;10;Коронки;CLS-4;Коронка;;ReMo\n"
+                    "Фреза концевая 10 мм z=4;MILL-1;10;Фрезы Для Станков;CLS-5;Фреза;;ReMo\n"
+                    "Изоляция из вспененного каучука трубная 22x9;PIPE-1;10;Изоляция Из Вспененного Каучука Трубная;CLS-6;Трубная изоляция;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+
+            expectations = {
+                "LIGHT-1": ("люстры под лампу", "lighting_fixture"),
+                "BOOT-1": ("ботинки рабочие", "safety_footwear"),
+                "SHOE-1": ("полуботинки рабочие", "safety_footwear"),
+                "HOLE-2": ("коронки", "hole_saw"),
+                "MILL-1": ("фрезы для станков", "milling_cutter"),
+                "PIPE-1": ("изоляция из вспененного каучука трубная", "pipe_insulation"),
+            }
+
+            for article, (branch_path, family) in expectations.items():
+                row = built.loc[built["Артикул"] == article].iloc[0]
+                self.assertEqual(row["search_branch_path"], branch_path)
+                self.assertEqual(row["search_entity_type"], family)
+                self.assertEqual(row["search_effective_entity_type"], family)
+                self.assertEqual(row["search_effective_family"], family)
+
     def test_build_search_catalog_maps_drill_bits_out_of_other(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
