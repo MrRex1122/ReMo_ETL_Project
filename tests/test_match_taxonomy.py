@@ -2305,6 +2305,149 @@ class MatchTaxonomyTests(unittest.TestCase):
             "metal_turning_tool",
         )
 
+    def test_effective_candidate_family_maps_other_additional_tool_drive_and_appliance_branches(self):
+        jacket_features = self.matcher._extract_query_features("Куртка утепленная рабочая размер 52")
+        jacket_features["entity_type"] = "workwear"
+        jacket_candidate = {
+            "name": "Куртка утепленная рабочая размер 52",
+            "normalized_name": "куртка утепленная рабочая размер 52",
+            "branch_path": "куртки утепленные",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        overalls_features = self.matcher._extract_query_features("Полукомбинезон рабочий утепленный размер 52")
+        overalls_features["entity_type"] = "workwear"
+        overalls_candidate = {
+            "name": "Полукомбинезон рабочий утепленный размер 52",
+            "normalized_name": "полукомбинезон рабочий утепленный размер 52",
+            "branch_path": "брюки, полукомбинезоны",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        ring_wrench_features = self.matcher._extract_query_features("Ключ накидной 17 мм")
+        ring_wrench_features["entity_type"] = "ring_wrench"
+        ring_wrench_candidate = {
+            "name": "Ключ накидной 17 мм",
+            "normalized_name": "ключ накидной 17 мм",
+            "branch_path": "накидные ключи",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        roller_features = self.matcher._extract_query_features("Валик малярный велюровый 180 мм")
+        roller_features["entity_type"] = "paint_roller"
+        roller_candidate = {
+            "name": "Валик малярный велюровый 180 мм",
+            "normalized_name": "валик малярный велюровый 180 мм",
+            "branch_path": "валики",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        pliers_features = self.matcher._extract_query_features("Бокорезы диэлектрические 160 мм")
+        pliers_features["entity_type"] = "cutting_pliers"
+        pliers_candidate = {
+            "name": "Бокорезы диэлектрические 160 мм",
+            "normalized_name": "бокорезы диэлектрические 160 мм",
+            "branch_path": "бокорезы и кусачки",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        screw_features = self.matcher._extract_query_features("Саморез гипсокартон-дерево 3.5x35")
+        screw_features["entity_type"] = "self_tapping_screw"
+        screw_candidate = {
+            "name": "Саморез гипсокартон-дерево 3.5x35",
+            "normalized_name": "саморез гипсокартон дерево 3.5x35",
+            "branch_path": "саморезы гипсокартон-дерево",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        wood_drill_features = self.matcher._extract_query_features("Сверло по дереву спиральное 10 мм")
+        wood_drill_features["entity_type"] = "wood_drill_bit"
+        wood_drill_candidate = {
+            "name": "Сверло по дереву спиральное 10 мм",
+            "normalized_name": "сверло по дереву спиральное 10 мм",
+            "branch_path": "сверла по дереву",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        floor_convector_features = self.matcher._extract_query_features("Конвектор напольный электрический 1 кВт")
+        floor_convector_features["entity_type"] = "floor_convector"
+        floor_convector_candidate = {
+            "name": "Конвектор напольный электрический 1 кВт",
+            "normalized_name": "конвектор напольный электрический 1 квт",
+            "branch_path": "конвекторы напольные",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        heater_features = self.matcher._extract_query_features("Водонагреватель электрический накопительный 80 л")
+        heater_features["entity_type"] = "storage_water_heater"
+        heater_candidate = {
+            "name": "Водонагреватель электрический накопительный 80 л",
+            "normalized_name": "водонагреватель электрический накопительный 80 л",
+            "branch_path": "водонагреватели электрические накопительные",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        drive_features = self.matcher._extract_query_features("Аксессуар для преобразователя частоты с интерфейсной платой")
+        drive_features["entity_type"] = "frequency_drive"
+        drive_candidate = {
+            "name": "Аксессуар для преобразователя частоты с интерфейсной платой",
+            "normalized_name": "аксессуар для преобразователя частоты с интерфейсной платой",
+            "branch_path": "аксессуары для преобразователей частоты",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        terminal_features = self.matcher._extract_query_features("Клеммный зажим для печатной платы 5,08 мм 2 pin")
+        terminal_features["entity_type"] = "terminal_block"
+        terminal_candidate = {
+            "name": "Клеммный зажим для печатной платы 5,08 мм 2 pin",
+            "normalized_name": "клеммный зажим для печатной платы 5 08 мм 2 pin",
+            "branch_path": "клеммные зажимы для печатных плат",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        tape_features = self.matcher._extract_query_features("Лента изоляционная ПВХ синяя 19 мм")
+        tape_features["entity_type"] = "electrical_tape"
+        tape_candidate = {
+            "name": "Лента изоляционная ПВХ синяя 19 мм",
+            "normalized_name": "лента изоляционная пвх синяя 19 мм",
+            "branch_path": "изолента",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        control_valve_features = self.matcher._extract_query_features("Клапан регулирующий чугунный DN50")
+        control_valve_features["entity_type"] = "industrial_valve"
+        control_valve_candidate = {
+            "name": "Клапан регулирующий чугунный DN50",
+            "normalized_name": "клапан регулирующий чугунный dn50",
+            "branch_path": "клапаны регулирующие чугунные",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        shutoff_valve_features = self.matcher._extract_query_features("Вентиль запорный стальной DN20")
+        shutoff_valve_features["entity_type"] = "industrial_valve"
+        shutoff_valve_candidate = {
+            "name": "Вентиль запорный стальной DN20",
+            "normalized_name": "вентиль запорный стальной dn20",
+            "branch_path": "клапаны запорные (вентили) стальные",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+
+        self.assertEqual(self.matcher._effective_candidate_family_for_query(jacket_features, jacket_candidate), "workwear")
+        self.assertEqual(self.matcher._effective_candidate_family_for_query(overalls_features, overalls_candidate), "workwear")
+        self.assertEqual(self.matcher._effective_candidate_family_for_query(ring_wrench_features, ring_wrench_candidate), "ring_wrench")
+        self.assertEqual(self.matcher._effective_candidate_family_for_query(roller_features, roller_candidate), "paint_roller")
+        self.assertEqual(self.matcher._effective_candidate_family_for_query(pliers_features, pliers_candidate), "cutting_pliers")
+        self.assertEqual(self.matcher._effective_candidate_family_for_query(screw_features, screw_candidate), "self_tapping_screw")
+        self.assertEqual(self.matcher._effective_candidate_family_for_query(wood_drill_features, wood_drill_candidate), "wood_drill_bit")
+        self.assertEqual(self.matcher._effective_candidate_family_for_query(floor_convector_features, floor_convector_candidate), "floor_convector")
+        self.assertEqual(self.matcher._effective_candidate_family_for_query(heater_features, heater_candidate), "storage_water_heater")
+        self.assertEqual(self.matcher._effective_candidate_family_for_query(drive_features, drive_candidate), "frequency_drive")
+        self.assertEqual(self.matcher._effective_candidate_family_for_query(terminal_features, terminal_candidate), "terminal_block")
+        self.assertEqual(self.matcher._effective_candidate_family_for_query(tape_features, tape_candidate), "electrical_tape")
+        self.assertEqual(self.matcher._effective_candidate_family_for_query(control_valve_features, control_valve_candidate), "industrial_valve")
+        self.assertEqual(self.matcher._effective_candidate_family_for_query(shutoff_valve_features, shutoff_valve_candidate), "industrial_valve")
+
     def test_effective_candidate_family_maps_other_wrench_caliper_and_blade_branches(self):
         wrench_features = self.matcher._extract_query_features("Ключ комбинированный 17 мм")
         wrench_features["entity_type"] = "combination_wrench"

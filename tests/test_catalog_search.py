@@ -2096,6 +2096,59 @@ class CatalogSearchTests(unittest.TestCase):
                 self.assertEqual(row["search_effective_entity_type"], family)
                 self.assertEqual(row["search_effective_family"], family)
 
+    def test_build_search_catalog_maps_additional_tool_drive_and_appliance_branches_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Куртка утепленная рабочая размер 52;WWJ-1;10;Куртки Утепленные;CLS-1;Куртка рабочая;;ReMo\n"
+                    "Полукомбинезон рабочий утепленный размер 52;WWO-1;10;Брюки, Полукомбинезоны;CLS-2;Полукомбинезон рабочий;;ReMo\n"
+                    "Ключ накидной 17 мм;RW-1;10;Накидные Ключи;CLS-3;Ключ;;ReMo\n"
+                    "Валик малярный велюровый 180 мм;ROLL-1;10;Валики;CLS-4;Валик малярный;;ReMo\n"
+                    "Бокорезы диэлектрические 160 мм;CUT-1;10;Бокорезы И Кусачки;CLS-5;Бокорезы;;ReMo\n"
+                    "Саморез гипсокартон-дерево 3.5x35;STS-2;10;Саморезы Гипсокартон-Дерево;CLS-6;Саморез;;ReMo\n"
+                    "Сверло по дереву спиральное 10 мм;WOOD-1;10;Сверла По Дереву;CLS-7;Сверло;;ReMo\n"
+                    "Конвектор напольный электрический 1 кВт;FC-1;10;Конвекторы Напольные;CLS-8;Конвектор;;ReMo\n"
+                    "Водонагреватель электрический накопительный 80 л;WH-1;10;Водонагреватели Электрические Накопительные;CLS-9;Водонагреватель;;ReMo\n"
+                    "Аксессуар для преобразователя частоты с интерфейсной платой;FD-1;10;Аксессуары Для Преобразователей Частоты;CLS-10;Аксессуар;;ReMo\n"
+                    "Клеммный зажим для печатной платы 5,08 мм 2 pin;PCB-1;10;Клеммные Зажимы Для Печатных Плат;CLS-11;Клеммный зажим;;ReMo\n"
+                    "Лента изоляционная ПВХ синяя 19 мм;TAPE-1;10;Изолента;CLS-12;Лента изоляционная;;ReMo\n"
+                    "Клапан регулирующий чугунный DN50;VALVE-1;10;Клапаны Регулирующие Чугунные;CLS-13;Клапан;;ReMo\n"
+                    "Вентиль запорный стальной DN20;VALVE-2;10;Клапаны Запорные (Вентили) Стальные;CLS-14;Вентиль;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+
+            expectations = {
+                "WWJ-1": ("куртки утепленные", "workwear"),
+                "WWO-1": ("брюки, полукомбинезоны", "workwear"),
+                "RW-1": ("накидные ключи", "ring_wrench"),
+                "ROLL-1": ("валики", "paint_roller"),
+                "CUT-1": ("бокорезы и кусачки", "cutting_pliers"),
+                "STS-2": ("саморезы гипсокартон-дерево", "self_tapping_screw"),
+                "WOOD-1": ("сверла по дереву", "wood_drill_bit"),
+                "FC-1": ("конвекторы напольные", "floor_convector"),
+                "WH-1": ("водонагреватели электрические накопительные", "storage_water_heater"),
+                "FD-1": ("аксессуары для преобразователей частоты", "frequency_drive"),
+                "PCB-1": ("клеммные зажимы для печатных плат", "terminal_block"),
+                "TAPE-1": ("изолента", "electrical_tape"),
+                "VALVE-1": ("клапаны регулирующие чугунные", "industrial_valve"),
+                "VALVE-2": ("клапаны запорные (вентили) стальные", "industrial_valve"),
+            }
+
+            for article, (branch_path, family) in expectations.items():
+                row = built.loc[built["Артикул"] == article].iloc[0]
+                self.assertEqual(row["search_branch_path"], branch_path)
+                self.assertEqual(row["search_entity_type"], family)
+                self.assertEqual(row["search_effective_entity_type"], family)
+                self.assertEqual(row["search_effective_family"], family)
+
     def test_build_search_catalog_maps_drill_bits_out_of_other(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
