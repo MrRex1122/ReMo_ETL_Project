@@ -1012,6 +1012,11 @@ def classify_item_type(
     ):
         return "thread_gauge"
     if (
+        any(token in normalized for token in ("набор резьбонарезного инструмента", "наборы резьбонарезного инструмента", "tap and die set", "threading tool set"))
+        and not any(token in normalized for token in ("резьбомер", "калибр", "сверл", "коронк", "фрез"))
+    ):
+        return "threading_tool_set"
+    if (
         any(token in normalized for token in ("напильник", "напильники", "надфиль", "надфили", "hand file", "metal file"))
         and not any(token in normalized for token in ("маникюр", "пилка для ногтей", "рашпиль по дереву"))
     ):
@@ -1021,6 +1026,11 @@ def classify_item_type(
         and not any(token in normalized for token in ("кухонный", "охотничий", "скальпель"))
     ):
         return "utility_knife"
+    if (
+        any(token in normalized for token in ("леска для триммеров", "леска для триммера", "триммерная леска", "trimmer line", "nylon line"))
+        and not any(token in normalized for token in ("кабель", "провод", "wire", "fishing", "рыболов"))
+    ):
+        return "trimmer_line"
     if (
         any(token in normalized for token in ("торцевая головка", "торцевые головки", "торцевых головок", "набор торцевых головок", "набор головок", "socket set", "socket wrench"))
         and not any(token in normalized for token in ("головка блока", "головка цилиндра", "торцевая фреза", "битодержатель", "бита"))
@@ -1059,6 +1069,19 @@ def classify_item_type(
         and not any(token in normalized for token in ("сверл", "коронк", "диск", "плашк", "метчик", "зенкер"))
     ):
         return "metal_turning_tool"
+    if (
+        any(token in normalized for token in ("фреза", "фрезы для станков", "концевая фреза", "кольцевая фреза", "milling cutter"))
+        and not any(token in normalized for token in ("фрезер", "router", "коронк", "сверл", "диск"))
+    ):
+        return "milling_cutter"
+    if (
+        (
+            any(token in normalized for token in ("фрезы и наборы фрез для ручных фрезеров", "фреза для ручного фрезера", "набор фрез для ручного фрезера", "router bit", "router cutter"))
+            or ("фрез" in normalized and "фрезер" in normalized and any(token in normalized for token in ("ручн", "router")))
+        )
+        and not any(token in normalized for token in ("фрезы для станков", "milling cutter", "коронка", "сверло", "диск"))
+    ):
+        return "router_bit"
     if (
         any(
             token in normalized
@@ -1124,6 +1147,11 @@ def classify_item_type(
     ):
         return "ring_wrench"
     if (
+        any(token in normalized for token in ("разводной ключ", "разводные ключи", "ключ разводной", "adjustable wrench", "crescent wrench"))
+        and not any(token in normalized for token in ("комбинирован", "рожков", "накидн", "имбус", "шестигран", "трубный ключ", "ключ доступа"))
+    ):
+        return "adjustable_wrench"
+    if (
         any(token in normalized for token in ("имбусовый ключ", "имбусовые ключи", "ключ имбусовый", "ключ шестигранный", "шестигранные ключи", "hex key", "allen key"))
         and not any(token in normalized for token in ("бит", "битодержатель", "torx", "рожков", "накидн", "ключ доступа"))
     ):
@@ -1163,6 +1191,16 @@ def classify_item_type(
         and not any(token in normalized for token in ("зубная щетка", "крацовка", "корщетка"))
     ):
         return "paint_brush"
+    if (
+        any(token in normalized for token in ("корщетка", "корщетки", "крацовка", "щетка крацовка", "wire brush wheel", "cup brush"))
+        and not any(token in normalized for token in ("кисть", "paint brush", "зубная щетка", "щетка стеклоочистителя"))
+    ):
+        return "wire_brush_tool"
+    if (
+        any(token in normalized for token in ("круг шлифовальный на липучке", "круги шлифовальные на липучке", "диск шлифовальный на липучке", "hook loop sanding disc", "sanding disc hook and loop"))
+        and not any(token in normalized for token in ("отрезн", "алмазн", "пильный", "полировальн", "лепестков"))
+    ):
+        return "hook_loop_sanding_disc"
     if (
         any(token in normalized for token in ("гирлянда", "гирлянды", "belt-light", "belt light", "бахрома", "дюралайт", "string light", "fairy light"))
         and not any(token in normalized for token in ("кабель питания", "шнур питания", "удлинитель для гирлянды", "аксессуары для дюралайта", "аксессуары для белт-лайт"))
@@ -2022,6 +2060,8 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "thread_die"
     if "резьбомеры" in normalized_branch:
         return "thread_gauge"
+    if "наборы резьбонарезного инструмента" in normalized_branch:
+        return "threading_tool_set"
     if "напильники" in normalized_branch:
         return "file_tool"
     if "торцевые головки и наборы головок" in normalized_branch:
@@ -2040,6 +2080,8 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "metal_turning_tool"
     if "фрезы для станков" in normalized_branch:
         return "milling_cutter"
+    if "фрезы и наборы фрез для ручных фрезеров" in normalized_branch:
+        return "router_bit"
     if any(marker in normalized_branch for marker in ("костюмы летние", "костюмы утепленные", "костюмы сварщика", "брюки полукомбинезоны", "куртки утепленные")):
         return "workwear"
     if any(marker in normalized_branch for marker in ("ботинки рабочие", "полуботинки рабочие", "ботинки утепленные", "сапоги резиновые")):
@@ -2058,6 +2100,8 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "open_end_wrench"
     if "накидные ключи" in normalized_branch:
         return "ring_wrench"
+    if "разводные ключи" in normalized_branch:
+        return "adjustable_wrench"
     if "ключи имбусовые шестигранные hex" in normalized_branch:
         return "hex_key"
     if "биты шестигранные hex" in normalized_branch:
@@ -2076,6 +2120,10 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "paint_roller"
     if "кисти плоские флейцевые" in normalized_branch:
         return "paint_brush"
+    if "корщетки" in normalized_branch:
+        return "wire_brush_tool"
+    if "круги шлифовальные на липучке" in normalized_branch:
+        return "hook_loop_sanding_disc"
     if "пильные диски по дереву" in normalized_branch:
         return "wood_saw_blade"
     if "алмазные диски" in normalized_branch:
@@ -2233,6 +2281,8 @@ def _normalize_effective_entity_type_by_catalog_branch(
         return "electrical_tape"
     if any(marker in normalized_branch for marker in ("ножи строительные", "лезвия для ножей")):
         return "utility_knife"
+    if "леска для триммеров" in normalized_branch:
+        return "trimmer_line"
     if "люстры под лампу" in normalized_branch:
         return "lighting_fixture"
     if any(marker in normalized_branch for marker in ("световое табло", "свето звуковое табло")):
@@ -2525,6 +2575,8 @@ def derive_branch_from_text(
                 return "плашки"
             if effective_family == "thread_gauge":
                 return "резьбомеры"
+            if effective_family == "threading_tool_set":
+                return "наборы резьбонарезного инструмента"
             if effective_family == "file_tool":
                 return "напильники"
             if effective_family == "socket_head_set":
@@ -2543,6 +2595,8 @@ def derive_branch_from_text(
                 return "фитинги компрессионные для ПНД труб пластиковые"
             if effective_family == "metal_turning_tool":
                 return "резцы по металлу"
+            if effective_family == "router_bit":
+                return "фрезы и наборы фрез для ручных фрезеров"
             if effective_family == "workwear":
                 if "сварщ" in merged:
                     return "костюмы сварщика"
@@ -2573,6 +2627,8 @@ def derive_branch_from_text(
                 return "рожковые ключи"
             if effective_family == "ring_wrench":
                 return "накидные ключи"
+            if effective_family == "adjustable_wrench":
+                return "разводные ключи"
             if effective_family == "screwdriver_set":
                 return "наборы отверток"
             if effective_family == "hex_bit":
@@ -2593,6 +2649,10 @@ def derive_branch_from_text(
                 return "валики"
             if effective_family == "paint_brush":
                 return "кисти плоские флейцевые"
+            if effective_family == "wire_brush_tool":
+                return "корщетки"
+            if effective_family == "hook_loop_sanding_disc":
+                return "круги шлифовальные на липучке"
             if effective_family == "wood_saw_blade":
                 return "пильные диски по дереву"
             if effective_family == "diamond_blade":
@@ -2629,6 +2689,8 @@ def derive_branch_from_text(
                 return "сифоны"
             if effective_family == "self_tapping_screw":
                 if "гипсокартон" in merged:
+                    if "металл" in merged:
+                        return "саморезы гипсокартон-металл"
                     return "саморезы гипсокартон-дерево"
                 return "саморезы универсальные"
             if effective_family == "drill_bit_metal":
@@ -2775,6 +2837,8 @@ def derive_branch_from_text(
                 if "лезви" in merged:
                     return "лезвия для ножей"
                 return "ножи строительные"
+            if effective_family == "trimmer_line":
+                return "леска для триммеров"
             if effective_family == "light_signage":
                 if "табло" in merged and any(token in merged for token in ("звуков", "сирен", "свето звуков", "светозвуков")):
                     return "свето-звуковое табло"
@@ -2891,6 +2955,8 @@ def derive_branch_from_text(
             return "плашки"
         if registry_family == "thread_gauge":
             return "резьбомеры"
+        if registry_family == "threading_tool_set":
+            return "наборы резьбонарезного инструмента"
         if registry_family == "file_tool":
             return "напильники"
         if registry_family == "socket_head_set":
@@ -2911,6 +2977,8 @@ def derive_branch_from_text(
             return "резцы по металлу"
         if registry_family == "milling_cutter":
             return "фрезы для станков"
+        if registry_family == "router_bit":
+            return "фрезы и наборы фрез для ручных фрезеров"
         if registry_family == "workwear":
             if "сварщ" in merged:
                 return "костюмы сварщика"
@@ -2941,6 +3009,8 @@ def derive_branch_from_text(
             return "рожковые ключи"
         if registry_family == "ring_wrench":
             return "накидные ключи"
+        if registry_family == "adjustable_wrench":
+            return "разводные ключи"
         if registry_family == "screwdriver_set":
             return "наборы отверток"
         if registry_family == "hex_bit":
@@ -2961,6 +3031,10 @@ def derive_branch_from_text(
             return "валики"
         if registry_family == "paint_brush":
             return "кисти плоские флейцевые"
+        if registry_family == "wire_brush_tool":
+            return "корщетки"
+        if registry_family == "hook_loop_sanding_disc":
+            return "круги шлифовальные на липучке"
         if registry_family == "manual_puller":
             return "съемники ручные"
         if registry_family == "jack":
@@ -3139,6 +3213,8 @@ def derive_branch_from_text(
             if "лезви" in merged:
                 return "лезвия для ножей"
             return "ножи строительные"
+        if registry_family == "trimmer_line":
+            return "леска для триммеров"
         if registry_family == "light_signage":
             if "табло" in merged and any(token in merged for token in ("звуков", "сирен", "свето звуков", "светозвуков")):
                 return "свето-звуковое табло"
@@ -3193,6 +3269,7 @@ def derive_branch_from_text(
             "thread_tap",
             "thread_die",
             "thread_gauge",
+            "threading_tool_set",
             "socket_head_set",
             "drive_belt",
             "brass_threaded_fitting",
@@ -3209,12 +3286,15 @@ def derive_branch_from_text(
             "combination_wrench",
             "open_end_wrench",
             "ring_wrench",
+            "adjustable_wrench",
             "screwdriver_set",
             "hex_bit",
             "hex_key",
             "caliper",
             "bore_gauge",
             "paint_roller",
+            "wire_brush_tool",
+            "hook_loop_sanding_disc",
             "lighting_fixture",
             "wood_saw_blade",
             "diamond_blade",
@@ -3225,6 +3305,7 @@ def derive_branch_from_text(
             "manual_puller",
             "torx_bit",
             "phillips_bit",
+            "router_bit",
             "self_tapping_screw",
             "drill_bit_metal",
             "wood_drill_bit",
@@ -3239,6 +3320,7 @@ def derive_branch_from_text(
             "electric_convector",
             "heating_mat",
             "floor_heating_manifold",
+            "trimmer_line",
             "storage_water_heater",
             "heat_shrink",
             "pipe_insulation",
@@ -3389,6 +3471,8 @@ def derive_branch_from_text(
         return "плашки"
     if effective_entity_type == "thread_gauge":
         return "резьбомеры"
+    if effective_entity_type == "threading_tool_set":
+        return "наборы резьбонарезного инструмента"
     if effective_entity_type == "file_tool":
         return "напильники"
     if effective_entity_type == "socket_head_set":
@@ -3409,6 +3493,8 @@ def derive_branch_from_text(
         return "резцы по металлу"
     if effective_entity_type == "milling_cutter":
         return "фрезы для станков"
+    if effective_entity_type == "router_bit":
+        return "фрезы и наборы фрез для ручных фрезеров"
     if effective_entity_type == "workwear":
         if "костюмы сварщика" in normalized_branch:
             return "костюмы сварщика"
@@ -3443,6 +3529,8 @@ def derive_branch_from_text(
         return "рожковые ключи"
     if effective_entity_type == "ring_wrench":
         return "накидные ключи"
+    if effective_entity_type == "adjustable_wrench":
+        return "разводные ключи"
     if effective_entity_type == "screwdriver_set":
         return "наборы отверток"
     if effective_entity_type == "hex_bit":
@@ -3463,6 +3551,10 @@ def derive_branch_from_text(
         return "валики"
     if effective_entity_type == "paint_brush":
         return "кисти плоские флейцевые"
+    if effective_entity_type == "wire_brush_tool":
+        return "корщетки"
+    if effective_entity_type == "hook_loop_sanding_disc":
+        return "круги шлифовальные на липучке"
     if effective_entity_type == "manual_puller":
         return "съемники ручные"
     if effective_entity_type == "jack":
@@ -3607,6 +3699,8 @@ def derive_branch_from_text(
         if "лезви" in merged:
             return "лезвия для ножей"
         return "ножи строительные"
+    if effective_entity_type == "trimmer_line":
+        return "леска для триммеров"
     if effective_entity_type == "socket":
         return "электрика > розетки"
     if effective_entity_type == "light_signage":

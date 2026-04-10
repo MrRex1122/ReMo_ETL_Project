@@ -2835,6 +2835,61 @@ class MatchTaxonomyTests(unittest.TestCase):
                 family,
             )
 
+    def test_effective_candidate_family_maps_other_additional_hand_tool_abrasive_and_garden_branches(self):
+        cases = [
+            (
+                "Набор резьбонарезного инструмента М3-М12",
+                "threading_tool_set",
+                "наборы резьбонарезного инструмента",
+                "Набор резьбонарезного инструмента М3-М12",
+            ),
+            (
+                "Ключ разводной 250 мм",
+                "adjustable_wrench",
+                "разводные ключи",
+                "Ключ разводной 250 мм",
+            ),
+            (
+                "Фреза пазовая для ручного фрезера 12 мм",
+                "router_bit",
+                "фрезы и наборы фрез для ручных фрезеров",
+                "Фреза пазовая для ручного фрезера 12 мм",
+            ),
+            (
+                "Круг шлифовальный на липучке P120 125 мм",
+                "hook_loop_sanding_disc",
+                "круги шлифовальные на липучке",
+                "Круг шлифовальный на липучке P120 125 мм",
+            ),
+            (
+                "Корщетка чашечная М14 75 мм",
+                "wire_brush_tool",
+                "корщетки",
+                "Корщетка чашечная М14 75 мм",
+            ),
+            (
+                "Леска для триммера 2.4 мм звезда 15 м",
+                "trimmer_line",
+                "леска для триммеров",
+                "Леска для триммера 2.4 мм звезда 15 м",
+            ),
+        ]
+
+        for query, family, branch_path, candidate_name in cases:
+            features = self.matcher._extract_query_features(query)
+            features["entity_type"] = family
+            candidate = {
+                "name": candidate_name,
+                "normalized_name": normalize_text(candidate_name),
+                "branch_path": branch_path,
+                "entity_type": "other",
+                "item_markers": {},
+            }
+            self.assertEqual(
+                self.matcher._effective_candidate_family_for_query(features, candidate),
+                family,
+            )
+
     def test_effective_candidate_family_maps_other_self_tapping_screw_branch(self):
         screw_features = self.matcher._extract_query_features("Саморез универсальный 4.2x32")
         screw_features["entity_type"] = "self_tapping_screw"

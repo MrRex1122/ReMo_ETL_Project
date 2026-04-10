@@ -4832,6 +4832,11 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("метчик", "плашк", "калибр", "штангенцирк", "индикатор", "клещи"))
         ):
             return "thread_gauge"
+        if "наборы резьбонарезного инструмента" in branch_path or (
+            any(token in search_text for token in ("набор резьбонарезного инструмента", "наборы резьбонарезного инструмента", "tap and die set", "threading tool set"))
+            and not any(token in search_text for token in ("резьбомер", "калибр", "сверл", "коронк", "фрез"))
+        ):
+            return "threading_tool_set"
         if "напильники" in branch_path or (
             any(token in search_text for token in ("напильник", "напильники", "надфиль", "надфили", "hand file", "metal file"))
             and not any(token in search_text for token in ("маникюр", "пилка для ногтей", "рашпиль по дереву"))
@@ -4880,6 +4885,14 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("фрезер", "router", "коронк", "сверл", "диск"))
         ):
             return "milling_cutter"
+        if "фрезы и наборы фрез для ручных фрезеров" in branch_path or (
+            (
+                any(token in search_text for token in ("фрезы и наборы фрез для ручных фрезеров", "фреза для ручного фрезера", "набор фрез для ручного фрезера", "router bit", "router cutter"))
+                or ("фрез" in search_text and "фрезер" in search_text and any(token in search_text for token in ("ручн", "router")))
+            )
+            and not any(token in search_text for token in ("фрезы для станков", "milling cutter", "коронка", "сверло", "диск"))
+        ):
+            return "router_bit"
         if any(token in branch_path for token in ("костюмы летние", "костюмы утепленные", "костюмы сварщика", "брюки полукомбинезоны", "куртки утепленные")) or (
             any(token in search_text for token in ("костюм летний", "костюмы летние", "костюм утепленный", "костюмы утепленные", "костюм сварщика", "костюмы сварщика", "полукомбинезон рабочий", "полукомбинезоны рабочие", "брюки рабочие", "куртка утепленная", "куртки утепленные", "workwear suit", "workwear jacket", "workwear overall"))
             and not any(token in search_text for token in ("купальник", "маскарад", "карнавальн"))
@@ -4925,6 +4938,11 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("комбинирован", "рожков", "имбус", "шестигран", "разводной", "трубный ключ", "ключ доступа"))
         ):
             return "ring_wrench"
+        if "разводные ключи" in branch_path or (
+            any(token in search_text for token in ("разводной ключ", "разводные ключи", "ключ разводной", "adjustable wrench", "crescent wrench"))
+            and not any(token in search_text for token in ("комбинирован", "рожков", "накидн", "имбус", "шестигран", "трубный ключ", "ключ доступа"))
+        ):
+            return "adjustable_wrench"
         if "наборы отверток" in branch_path or (
             any(token in search_text for token in ("набор отверток", "наборы отверток", "screwdriver set", "set of screwdrivers"))
             and not any(token in search_text for token in ("битодержатель", "набор бит", "torx bit", "phillips bit"))
@@ -4975,6 +4993,16 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("зубная щетка", "крацовка", "корщетка"))
         ):
             return "paint_brush"
+        if "корщетки" in branch_path or (
+            any(token in search_text for token in ("корщетка", "корщетки", "крацовка", "щетка крацовка", "wire brush wheel", "cup brush"))
+            and not any(token in search_text for token in ("кисть", "paint brush", "зубная щетка", "щетка стеклоочистителя"))
+        ):
+            return "wire_brush_tool"
+        if "круги шлифовальные на липучке" in branch_path or (
+            any(token in search_text for token in ("круг шлифовальный на липучке", "круги шлифовальные на липучке", "диск шлифовальный на липучке", "hook loop sanding disc", "sanding disc hook and loop"))
+            and not any(token in search_text for token in ("отрезн", "алмазн", "пильный", "полировальн", "лепестков"))
+        ):
+            return "hook_loop_sanding_disc"
         if "гирлянды" in branch_path or (
             any(token in search_text for token in ("гирлянда", "гирлянды", "belt-light", "belt light", "бахрома", "дюралайт", "string light", "fairy light"))
             and not any(token in search_text for token in ("кабель питания", "шнур питания", "удлинитель для гирлянды", "аксессуары для дюралайта", "аксессуары для белт-лайт"))
@@ -5091,6 +5119,11 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("кухонный", "канцелярский ножницы", "резак для труб", "резец"))
         ):
             return "utility_knife"
+        if "леска для триммеров" in branch_path or (
+            any(token in search_text for token in ("леска для триммеров", "леска для триммера", "триммерная леска", "trimmer line", "nylon line"))
+            and not any(token in search_text for token in ("кабель", "провод", "wire", "fishing", "рыболов"))
+        ):
+            return "trimmer_line"
         if "биты torx" in branch_path or (
             any(token in search_text for token in ("бита torx", "биты torx", "torx bit", "бит torx"))
             and not any(token in search_text for token in ("отвертка", "битодержатель", "шлицев", "крестов", "phillips", "pozidriv"))
@@ -5545,6 +5578,7 @@ class ReMoMatcher:
             "thread_tap",
             "thread_die",
             "thread_gauge",
+            "threading_tool_set",
             "socket_head_set",
             "drive_belt",
             "brass_threaded_fitting",
@@ -5560,6 +5594,8 @@ class ReMoMatcher:
             "protective_helmet",
             "crimping_tool",
             "paint_brush",
+            "wire_brush_tool",
+            "hook_loop_sanding_disc",
             "micrometer",
             "bore_gauge",
             "long_nose_pliers",
@@ -5581,11 +5617,13 @@ class ReMoMatcher:
             "combination_wrench",
             "open_end_wrench",
             "ring_wrench",
+            "adjustable_wrench",
             "screwdriver_set",
             "hex_bit",
             "hex_key",
             "caliper",
             "paint_roller",
+            "router_bit",
             "wood_saw_blade",
             "diamond_blade",
             "printer_cartridge",
@@ -5633,6 +5671,7 @@ class ReMoMatcher:
             "ip_camera",
             "jack",
             "utility_knife",
+            "trimmer_line",
             "switch_wiring",
         }
 

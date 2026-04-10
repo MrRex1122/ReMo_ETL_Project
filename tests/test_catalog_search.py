@@ -2112,6 +2112,43 @@ class CatalogSearchTests(unittest.TestCase):
                 self.assertEqual(row["search_effective_entity_type"], family)
                 self.assertEqual(row["search_effective_family"], family)
 
+    def test_build_search_catalog_maps_additional_hand_tool_abrasive_and_garden_branches_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Набор резьбонарезного инструмента М3-М12;SET-1;10;Наборы Резьбонарезного Инструмента;CLS-1;Набор инструмента;;ReMo\n"
+                    "Ключ разводной 250 мм;ADJ-1;10;Разводные Ключи;CLS-2;Ключ;;ReMo\n"
+                    "Фреза пазовая для ручного фрезера 12 мм;ROUT-1;10;Фрезы И Наборы Фрез Для Ручных Фрезеров;CLS-3;Фреза;;ReMo\n"
+                    "Круг шлифовальный на липучке P120 125 мм;SAND-1;10;Круги Шлифовальные На Липучке;CLS-4;Круг шлифовальный;;ReMo\n"
+                    "Корщетка чашечная М14 75 мм;BRUSH-1;10;Корщетки;CLS-5;Корщетка;;ReMo\n"
+                    "Леска для триммера 2.4 мм звезда 15 м;TRIM-1;10;Леска Для Триммеров;CLS-6;Леска;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+
+            expectations = {
+                "SET-1": ("наборы резьбонарезного инструмента", "threading_tool_set"),
+                "ADJ-1": ("разводные ключи", "adjustable_wrench"),
+                "ROUT-1": ("фрезы и наборы фрез для ручных фрезеров", "router_bit"),
+                "SAND-1": ("круги шлифовальные на липучке", "hook_loop_sanding_disc"),
+                "BRUSH-1": ("корщетки", "wire_brush_tool"),
+                "TRIM-1": ("леска для триммеров", "trimmer_line"),
+            }
+
+            for article, (branch_path, family) in expectations.items():
+                row = built.loc[built["Артикул"] == article].iloc[0]
+                self.assertEqual(row["search_branch_path"], branch_path)
+                self.assertEqual(row["search_entity_type"], family)
+                self.assertEqual(row["search_effective_entity_type"], family)
+                self.assertEqual(row["search_effective_family"], family)
+
     def test_build_search_catalog_maps_additional_tool_drive_and_appliance_branches_out_of_other(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

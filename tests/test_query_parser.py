@@ -369,6 +369,27 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(pnd.entity_type, "pnd_compression_fitting")
         self.assertEqual(pnd.branch_hint, "фитинги компрессионные для ПНД труб пластиковые")
 
+    def test_parse_query_spec_detects_additional_hand_tool_abrasive_and_garden_queries(self):
+        threading_set = parse_query_spec("Набор резьбонарезного инструмента М3-М12", taxonomy_rules=self.rules)
+        adjustable = parse_query_spec("Ключ разводной 250 мм", taxonomy_rules=self.rules)
+        router = parse_query_spec("Фреза пазовая для ручного фрезера 12 мм", taxonomy_rules=self.rules)
+        sanding_disc = parse_query_spec("Круг шлифовальный на липучке P120 125 мм", taxonomy_rules=self.rules)
+        wire_brush = parse_query_spec("Корщетка чашечная М14 75 мм", taxonomy_rules=self.rules)
+        trimmer = parse_query_spec("Леска для триммера 2.4 мм звезда 15 м", taxonomy_rules=self.rules)
+
+        self.assertEqual(threading_set.entity_type, "threading_tool_set")
+        self.assertEqual(threading_set.branch_hint, "наборы резьбонарезного инструмента")
+        self.assertEqual(adjustable.entity_type, "adjustable_wrench")
+        self.assertEqual(adjustable.branch_hint, "разводные ключи")
+        self.assertEqual(router.entity_type, "router_bit")
+        self.assertEqual(router.branch_hint, "фрезы и наборы фрез для ручных фрезеров")
+        self.assertEqual(sanding_disc.entity_type, "hook_loop_sanding_disc")
+        self.assertEqual(sanding_disc.branch_hint, "круги шлифовальные на липучке")
+        self.assertEqual(wire_brush.entity_type, "wire_brush_tool")
+        self.assertEqual(wire_brush.branch_hint, "корщетки")
+        self.assertEqual(trimmer.entity_type, "trimmer_line")
+        self.assertEqual(trimmer.branch_hint, "леска для триммеров")
+
     def test_parse_query_spec_detects_additional_tool_drive_and_appliance_queries(self):
         jacket = parse_query_spec("Куртка утепленная рабочая размер 52", taxonomy_rules=self.rules)
         overalls = parse_query_spec("Полукомбинезон рабочий утепленный размер 52", taxonomy_rules=self.rules)
