@@ -2448,6 +2448,39 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.assertEqual(self.matcher._effective_candidate_family_for_query(control_valve_features, control_valve_candidate), "industrial_valve")
         self.assertEqual(self.matcher._effective_candidate_family_for_query(shutoff_valve_features, shutoff_valve_candidate), "industrial_valve")
 
+    def test_effective_candidate_family_maps_other_additional_batch_families(self):
+        cases = [
+            ("Каска защитная белая с храповиком", "protective_helmet", "каски", "protective_helmet"),
+            ("Домкрат гидравлический бутылочный 10т", "jack", "домкраты", "jack"),
+            ("Конвектор электрический настенный 2 кВт", "electric_convector", "конвекторы электрические", "electric_convector"),
+            ("Коллекторная группа для теплого пола на 6 выходов", "floor_heating_manifold", "коллекторные группы для теплого пола", "floor_heating_manifold"),
+            ("Смеситель для мойки однорычажный хром", "faucet", "смесители для мойки", "faucet"),
+            ("УКРМ 0.4кВ 50 квар", "reactive_power_compensator", "устройства компенсации реактивной мощности 0.4кв", "reactive_power_compensator"),
+            ("Наконечник ТМЛ 16-8-6", "power_terminal_lug", "силовые медные луженые наконечники (тмл)", "power_terminal_lug"),
+            ("Перемычка для клемм на DIN-рейку FBS 10", "terminal_block_accessory", "перемычки для клемм на din-рейку", "terminal_block_accessory"),
+            ("IP-видеокамера 4 Мп уличная", "ip_camera", "ip-видеокамеры", "ip_camera"),
+            ("Нож строительный сегментный 18 мм", "utility_knife", "ножи строительные", "utility_knife"),
+            ("Костюм сварщика брезентовый размер 52", "workwear", "костюмы сварщика", "workwear"),
+            ("Фитинг шумопоглощающий для канализации 110 мм", "sewer_fitting", "фитинги шумопоглощающие для канализации", "sewer_fitting"),
+            ("Саморез гипсокартон-металл 3.5x25", "self_tapping_screw", "саморезы гипсокартон-металл", "self_tapping_screw"),
+            ("Корпус щита монтажный металлический ЩМП-2", "distribution_enclosure", "корпуса щитов монтажных металлических", "distribution_enclosure"),
+        ]
+
+        for query, entity_type, branch_path, expected_family in cases:
+            features = self.matcher._extract_query_features(query)
+            features["entity_type"] = entity_type
+            candidate = {
+                "name": query,
+                "normalized_name": self.matcher._normalize_text(query),
+                "branch_path": branch_path,
+                "entity_type": "other",
+                "item_markers": {},
+            }
+            self.assertEqual(
+                self.matcher._effective_candidate_family_for_query(features, candidate),
+                expected_family,
+            )
+
     def test_effective_candidate_family_maps_other_lighting_footwear_hole_saw_and_insulation_branches(self):
         chandelier_features = self.matcher._extract_query_features("Люстра 8xE14 макс. 40Вт")
         chandelier_features["entity_type"] = "lighting_fixture"

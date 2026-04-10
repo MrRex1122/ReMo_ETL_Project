@@ -4880,8 +4880,8 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("фрезер", "router", "коронк", "сверл", "диск"))
         ):
             return "milling_cutter"
-        if any(token in branch_path for token in ("костюмы летние", "костюмы утепленные", "брюки полукомбинезоны", "куртки утепленные")) or (
-            any(token in search_text for token in ("костюм летний", "костюмы летние", "костюм утепленный", "костюмы утепленные", "полукомбинезон рабочий", "полукомбинезоны рабочие", "брюки рабочие", "куртка утепленная", "куртки утепленные", "workwear suit", "workwear jacket", "workwear overall"))
+        if any(token in branch_path for token in ("костюмы летние", "костюмы утепленные", "костюмы сварщика", "брюки полукомбинезоны", "куртки утепленные")) or (
+            any(token in search_text for token in ("костюм летний", "костюмы летние", "костюм утепленный", "костюмы утепленные", "костюм сварщика", "костюмы сварщика", "полукомбинезон рабочий", "полукомбинезоны рабочие", "брюки рабочие", "куртка утепленная", "куртки утепленные", "workwear suit", "workwear jacket", "workwear overall"))
             and not any(token in search_text for token in ("купальник", "маскарад", "карнавальн"))
         ):
             return "workwear"
@@ -4900,6 +4900,11 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("очки виртуальной реальности", "солнцезащитные", "маска сварщика", "щиток лицевой"))
         ):
             return "safety_glasses"
+        if "каски" in branch_path or (
+            any(token in search_text for token in ("каска", "каски", "защитная каска", "строительная каска", "safety helmet", "hard hat"))
+            and not any(token in search_text for token in ("маска", "щиток", "очк", "cap", "бейсболка"))
+        ):
+            return "protective_helmet"
         if "ручные пресс-клещи и кримперы" in branch_path or (
             any(token in search_text for token in ("ручные пресс-клещи и кримперы", "пресс-клещи", "пресс клещи", "кримпер", "клещи для обжима", "обжимные клещи", "crimping tool", "crimping pliers"))
             and not any(token in search_text for token in ("токоизмер", "clamp meter", "переставн", "болторез", "длинногубцы"))
@@ -4990,9 +4995,9 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("кабельная стяжка", "хомут червячный", "хомут силовой", "strut clamp"))
         ):
             return "pipe_clamp"
-        if any(token in branch_path for token in ("фитинги для наружной канализации", "фитинги для внутренней канализации")) or (
+        if any(token in branch_path for token in ("фитинги для наружной канализации", "фитинги для внутренней канализации", "фитинги шумопоглощающие для канализации")) or (
             (
-                any(token in search_text for token in ("фитинги для наружной канализации", "фитинги для внутренней канализации", "канализационный фитинг", "sewer fitting", "drain fitting"))
+                any(token in search_text for token in ("фитинги для наружной канализации", "фитинги для внутренней канализации", "фитинги шумопоглощающие для канализации", "канализационный фитинг", "sewer fitting", "drain fitting"))
                 or (
                     any(token in search_text for token in ("отвод", "тройник", "муфта", "ревизи", "крестовин", "переход"))
                     and any(token in search_text for token in ("канализ", "наружн", "внутрен", "sewer", "drain"))
@@ -5006,6 +5011,11 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("фитинг", "канализационная труба", "трап", "дренажный клапан"))
         ):
             return "siphon"
+        if any(token in branch_path for token in ("смесители для ванны и душа", "смесители для мойки")) or (
+            any(token in search_text for token in ("смеситель", "смесители для ванны и душа", "смесители для мойки", "faucet", "mixer tap"))
+            and not any(token in search_text for token in ("картридж", "термостат", "душев", "лейка"))
+        ):
+            return "faucet"
         if "закладные детали фундамента опор и мачт освещения" in branch_path or (
             any(token in search_text for token in ("закладные детали фундамента опор и мачт освещения", "закладная деталь фундамента", "анкерный закладной элемент", "закладная анкерная", "foundation anchor for lighting pole"))
             and not any(token in search_text for token in ("кабель", "светильник", "кронштейн светильника"))
@@ -5017,10 +5027,15 @@ class ReMoMatcher:
         ):
             return "door_window_hardware"
         if "специальный инструмент для авторемонта" in branch_path or (
-            any(token in search_text for token in ("специальный инструмент для авторемонта", "инструмент для авторемонта", "домкрат", "вакуумметр", "ареометр", "маслосборный", "противооткатный башмак", "авторемонтный инструмент"))
+            any(token in search_text for token in ("специальный инструмент для авторемонта", "инструмент для авторемонта", "вакуумметр", "ареометр", "маслосборный", "противооткатный башмак", "авторемонтный инструмент"))
             and not any(token in search_text for token in ("автомобильная лампа", "автомобильный кабель", "автоэлектрика"))
         ):
             return "auto_repair_tool"
+        if "домкраты" in branch_path or (
+            any(token in search_text for token in ("домкрат", "домкраты", "hydraulic jack", "bottle jack", "floor jack"))
+            and not any(token in search_text for token in ("подъемник", "стойка трансмиссионная", "автокран"))
+        ):
+            return "jack"
         if "пильные диски по дереву" in branch_path or (
             any(token in search_text for token in ("пильный диск по дереву", "пильные диски по дереву", "диск по дереву", "saw blade wood", "wood saw blade"))
             and not any(token in search_text for token in ("алмазн", "отрезн", "затвор дисковый", "тормозной диск"))
@@ -5071,6 +5086,11 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("экстрактор", "домкрат", "подъемник", "магнитный съемник"))
         ):
             return "manual_puller"
+        if "ножи строительные" in branch_path or (
+            any(token in search_text for token in ("нож строительный", "ножи строительные", "utility knife", "snap-off knife"))
+            and not any(token in search_text for token in ("кухонный", "канцелярский ножницы", "резак для труб", "резец"))
+        ):
+            return "utility_knife"
         if "биты torx" in branch_path or (
             any(token in search_text for token in ("бита torx", "биты torx", "torx bit", "бит torx"))
             and not any(token in search_text for token in ("отвертка", "битодержатель", "шлицев", "крестов", "phillips", "pozidriv"))
@@ -5081,9 +5101,9 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("отвертка", "битодержатель", "torx", "шлицев", "имбус"))
         ):
             return "phillips_bit"
-        if any(token in branch_path for token in ("саморезы универсальные", "саморезы гипсокартон-дерево", "саморезы гипсокартон дерево")) or (
+        if any(token in branch_path for token in ("саморезы универсальные", "саморезы гипсокартон-дерево", "саморезы гипсокартон дерево", "саморезы гипсокартон-металл", "саморезы гипсокартон металл")) or (
             (
-                any(token in search_text for token in ("саморез универсальный", "саморезы универсальные", "универсальный саморез", "универсальные саморезы", "саморез гипсокартон-дерево", "саморезы гипсокартон-дерево", "саморез гипсокартон дерево", "саморезы гипсокартон дерево", "саморез для гипсокартона", "drywall screw", "self-tapping screw", "self tapping screw"))
+                any(token in search_text for token in ("саморез универсальный", "саморезы универсальные", "универсальный саморез", "универсальные саморезы", "саморез гипсокартон-дерево", "саморезы гипсокартон-дерево", "саморез гипсокартон дерево", "саморезы гипсокартон дерево", "саморез гипсокартон-металл", "саморезы гипсокартон-металл", "саморез гипсокартон металл", "саморезы гипсокартон металл", "саморез для гипсокартона", "drywall screw", "self-tapping screw", "self tapping screw"))
                 or ("саморез" in search_text and "гипсокартон" in search_text)
             )
             and not any(token in search_text for token in ("шуруповерт", "бита", "битодержатель", "анкер", "дюбель"))
@@ -5152,6 +5172,16 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("проточный", "газовый", "теплообменник", "котел"))
         ):
             return "storage_water_heater"
+        if "конвекторы электрические" in branch_path or (
+            any(token in search_text for token in ("конвектор электрический", "конвекторы электрические", "electric convector", "electric heater convector"))
+            and not any(token in search_text for token in ("внутрипольн", "напольн", "радиатор", "тепловентилятор"))
+        ):
+            return "electric_convector"
+        if "коллекторные группы для теплого пола" in branch_path or (
+            any(token in search_text for token in ("коллекторная группа для теплого пола", "коллекторные группы для теплого пола", "floor heating manifold", "underfloor heating manifold"))
+            and not any(token in search_text for token in ("смеситель", "насосн", "терморегулятор", "труба"))
+        ):
+            return "floor_heating_manifold"
         if "термоусаживаемые изделия" in branch_path or "термоусаж" in search_text or "термоусад" in search_text or "heat shrink" in search_text or "shrink tube" in search_text:
             return "heat_shrink"
         if any(token in branch_path for token in ("изоляция из вспененного каучука трубная", "изоляция из вспененного полиэтилена трубная")) or (
@@ -5165,6 +5195,11 @@ class ReMoMatcher:
             or "transformer" in search_text
         ):
             return "transformer"
+        if "устройства компенсации реактивной мощности 0 4кв" in branch_path or (
+            any(token in search_text for token in ("укрм", "компенсация реактивной мощности", "реактивной мощности", "capacitor bank", "power factor correction"))
+            and not any(token in search_text for token in ("стабилизатор", "трансформатор", "ибп", "ups"))
+        ):
+            return "reactive_power_compensator"
         if "манометры" in branch_path or "манометр" in search_text or "pressure gauge" in search_text:
             return "pressure_gauge"
         if "клещи токоизмерительные" in branch_path or (
@@ -5295,6 +5330,7 @@ class ReMoMatcher:
                 "корпуса распределительные встраиваемые",
                 "корпуса распределительные навесные",
                 "корпуса учетно распределительные навесные пластиковые",
+                "корпуса щитов монтажных металлических",
             )
         ) or (
             any(token in search_text for token in ("щит распредел", "силовой щит", "щит с монтажной панелью", "щит этажный", "щиток", "электрощит", "корпус распредел", "корпус учетно", "корпус для модульных устройств", "корпус мультимедиа", "бокс", "щрв", "щрн", "щурв", "щурн", "щмп"))
@@ -5362,11 +5398,21 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("заглушк", "маркир", "аккумулятор", "акб"))
         ):
             return "terminal_block"
+        if "перемычки для клемм на din рейку" in branch_path or (
+            any(token in search_text for token in ("перемычки для клемм на din рейку", "перемычка для клемм на din рейку", "terminal block accessory", "terminal block jumper", "din rail terminal accessory"))
+            and not any(token in search_text for token in ("клеммный блок", "клеммник для печатной платы", "аккумулятор", "акб"))
+        ):
+            return "terminal_block_accessory"
         if "нулевые шины на din-рейку" in branch_path or (
             any(token in search_text for token in ("нулевая шина", "нулевые шины", "шина нулевая", "neutral bus", "n busbar"))
             and not any(token in search_text for token in ("заземл", "pe", "клемм", "клеммник", "terminal block"))
         ):
             return "neutral_busbar"
+        if "силовые медные луженые наконечники тмл" in branch_path or (
+            any(token in search_text for token in ("силовые медные луженые наконечники", "наконечник тмл", "тмл", "power terminal lug", "copper cable lug"))
+            and not any(token in search_text for token in ("ншв", "ншви", "втулочн", "клеммный блок", "клеммник"))
+        ):
+            return "power_terminal_lug"
         if "штыревые втулочные наконечники" in branch_path or (
             any(token in search_text for token in ("штыревые втулочные наконечники", "втулочный наконечник", "втулочные наконечники", "ншв", "ншви", "ferrule", "bootlace ferrule"))
             and not any(token in search_text for token in ("клеммный блок", "клеммник", "din рейк", "din-рейк", "terminal block", "клещ", "клещи", "пресс", "обжим", "кримпер"))
@@ -5382,6 +5428,11 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("малярная лента", "скотч", "denso", "упаковочная лента"))
         ):
             return "electrical_tape"
+        if "ip видеокамеры" in branch_path or (
+            any(token in search_text for token in ("ip-видеокамера", "ip видеокамера", "ip-видеокамеры", "ip camera", "network camera"))
+            and not any(token in search_text for token in ("аналог", "hdcvi", "ahd", "tv line", "видеорегистратор"))
+        ):
+            return "ip_camera"
         if (
             "перфорированные кабель каналы" in branch_path
             or (
@@ -5485,6 +5536,7 @@ class ReMoMatcher:
             "power_accessory",
             "switchboard_accessory",
             "distribution_enclosure",
+            "reactive_power_compensator",
             "cable_conduit",
             "cable_channel",
             "industrial_valve",
@@ -5505,6 +5557,7 @@ class ReMoMatcher:
             "safety_footwear",
             "protective_gloves",
             "safety_glasses",
+            "protective_helmet",
             "crimping_tool",
             "paint_brush",
             "micrometer",
@@ -5552,10 +5605,13 @@ class ReMoMatcher:
             "bearing",
             "radiator",
             "floor_convector",
+            "electric_convector",
             "heating_mat",
+            "floor_heating_manifold",
             "storage_water_heater",
             "heat_shrink",
             "pipe_insulation",
+            "faucet",
             "transformer",
             "ups",
             "clamp_meter",
@@ -5569,9 +5625,14 @@ class ReMoMatcher:
             "fuse",
             "push_button",
             "terminal_block",
+            "terminal_block_accessory",
             "wire_ferrule",
+            "power_terminal_lug",
             "signal_indicator",
             "electrical_tape",
+            "ip_camera",
+            "jack",
+            "utility_knife",
             "switch_wiring",
         }
 

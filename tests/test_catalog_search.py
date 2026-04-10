@@ -2429,7 +2429,7 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(generic_built_in["search_effective_entity_type"], "distribution_enclosure")
             self.assertEqual(generic_built_in["search_effective_family"], "distribution_enclosure")
 
-            self.assertEqual(panel_enclosure["search_branch_path"], "корпуса учетно-распределительные встраиваемые металлические")
+            self.assertEqual(panel_enclosure["search_branch_path"], "корпуса щитов монтажных металлических")
             self.assertEqual(panel_enclosure["search_effective_entity_type"], "distribution_enclosure")
             self.assertEqual(panel_enclosure["search_effective_family"], "distribution_enclosure")
 
@@ -2548,6 +2548,59 @@ class CatalogSearchTests(unittest.TestCase):
                 "INS-1": ("изоляция из вспененного полиэтилена трубная", "pipe_insulation"),
                 "VALVE-2": ("клапаны обратные чугунные", "industrial_valve"),
                 "VALVE-3": ("задвижки чугунные клиновые", "industrial_valve"),
+            }
+
+            for article, (branch_path, family) in expectations.items():
+                row = built.loc[built["Артикул"] == article].iloc[0]
+                self.assertEqual(row["search_branch_path"], branch_path)
+                self.assertEqual(row["search_entity_type"], family)
+                self.assertEqual(row["search_effective_entity_type"], family)
+                self.assertEqual(row["search_effective_family"], family)
+
+    def test_build_search_catalog_maps_additional_batch_families_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Каска защитная белая с храповиком;HELM-1;10;Каски;CLS-1;Каска;;ReMo\n"
+                    "Домкрат гидравлический бутылочный 10т;JACK-1;10;Домкраты;CLS-2;Домкрат;;ReMo\n"
+                    "Конвектор электрический настенный 2 кВт;CONV-1;10;Конвекторы Электрические;CLS-3;Конвектор;;ReMo\n"
+                    "Коллекторная группа для теплого пола на 6 выходов;MANI-1;10;Коллекторные Группы Для Теплого Пола;CLS-4;Коллектор;;ReMo\n"
+                    "Смеситель для мойки однорычажный хром;FAUC-1;10;Смесители Для Мойки;CLS-5;Смеситель;;ReMo\n"
+                    "УКРМ 0.4кВ 50 квар;RPC-1;10;Устройства Компенсации Реактивной Мощности 0.4кВ;CLS-6;УКРМ;;ReMo\n"
+                    "Наконечник ТМЛ 16-8-6;LUG-1;10;Силовые Медные Луженые Наконечники (ТМЛ);CLS-7;Наконечник;;ReMo\n"
+                    "Перемычка для клемм на DIN-рейку FBS 10;JMP-1;10;Перемычки Для Клемм На DIN-Рейку;CLS-8;Перемычка;;ReMo\n"
+                    "IP-видеокамера 4 Мп уличная;IPC-1;10;IP-Видеокамеры;CLS-9;IP-видеокамера;;ReMo\n"
+                    "Нож строительный сегментный 18 мм;KNF-1;10;Ножи Строительные;CLS-10;Нож строительный;;ReMo\n"
+                    "Костюм сварщика брезентовый размер 52;WW-1;10;Костюмы Сварщика;CLS-11;Костюм сварщика;;ReMo\n"
+                    "Фитинг шумопоглощающий для канализации 110 мм;SEW-1;10;Фитинги Шумопоглощающие Для Канализации;CLS-12;Фитинг;;ReMo\n"
+                    "Саморез гипсокартон-металл 3.5x25;SCR-1;10;Саморезы Гипсокартон-Металл;CLS-13;Саморез;;ReMo\n"
+                    "Корпус щита монтажный металлический ЩМП-2;ENC-1;10;Корпуса Щитов Монтажных Металлических;CLS-14;Корпус щита;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+
+            expectations = {
+                "HELM-1": ("каски", "protective_helmet"),
+                "JACK-1": ("домкраты", "jack"),
+                "CONV-1": ("конвекторы электрические", "electric_convector"),
+                "MANI-1": ("коллекторные группы для теплого пола", "floor_heating_manifold"),
+                "FAUC-1": ("смесители для мойки", "faucet"),
+                "RPC-1": ("устройства компенсации реактивной мощности 0.4кв", "reactive_power_compensator"),
+                "LUG-1": ("силовые медные луженые наконечники (тмл)", "power_terminal_lug"),
+                "JMP-1": ("перемычки для клемм на din-рейку", "terminal_block_accessory"),
+                "IPC-1": ("ip-видеокамеры", "ip_camera"),
+                "KNF-1": ("ножи строительные", "utility_knife"),
+                "WW-1": ("костюмы сварщика", "workwear"),
+                "SEW-1": ("фитинги шумопоглощающие для канализации", "sewer_fitting"),
+                "SCR-1": ("саморезы гипсокартон-металл", "self_tapping_screw"),
+                "ENC-1": ("корпуса щитов монтажных металлических", "distribution_enclosure"),
             }
 
             for article, (branch_path, family) in expectations.items():
