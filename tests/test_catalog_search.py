@@ -2233,6 +2233,43 @@ class CatalogSearchTests(unittest.TestCase):
                 self.assertEqual(row["search_effective_entity_type"], family)
                 self.assertEqual(row["search_effective_family"], family)
 
+    def test_build_search_catalog_maps_holiday_panel_pipe_and_hardware_branches_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Гирлянда LED бахрома 2м*1м теплый свет 24V;GARLAND-1;10;Гирлянды;CLS-1;Гирлянда;;ReMo\n"
+                    "Панель монтажная 2200х800 IEK;PANEL-1;10;Панели И Платы Монтажные;CLS-2;Панель монтажная;;ReMo\n"
+                    "Муфта соединительная G1 из сплава цинка IP54;PIPE-1;10;Соединители Для Труб;CLS-3;Муфта соединительная;;ReMo\n"
+                    "Анкерный закладной элемент фундамента для мачты МГФ-16;FOUND-1;10;Закладные Детали Фундамента Опор И Мачт Освещения;CLS-4;Деталь закладная;;ReMo\n"
+                    "Глазок дверной 16мм хром;HARD-1;10;Фурнитура Для Замков, Дверей И Окон;CLS-5;Глазок дверной;;ReMo\n"
+                    "Вакуумметр от -1 до 4 бар с комплектом адаптеров;AUTO-1;10;Специальный Инструмент Для Авторемонта;CLS-6;Вакуумметр;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+
+            expectations = {
+                "GARLAND-1": ("гирлянды", "holiday_lighting"),
+                "PANEL-1": ("панели и платы монтажные", "enclosure_panel"),
+                "PIPE-1": ("соединители для труб", "pipe_connector"),
+                "FOUND-1": ("закладные детали фундамента опор и мачт освещения", "lighting_support_foundation"),
+                "HARD-1": ("фурнитура для замков, дверей и окон", "door_window_hardware"),
+                "AUTO-1": ("специальный инструмент для авторемонта", "auto_repair_tool"),
+            }
+
+            for article, (branch_path, family) in expectations.items():
+                row = built.loc[built["Артикул"] == article].iloc[0]
+                self.assertEqual(row["search_branch_path"], branch_path)
+                self.assertEqual(row["search_entity_type"], family)
+                self.assertEqual(row["search_effective_entity_type"], family)
+                self.assertEqual(row["search_effective_family"], family)
+
     def test_build_search_catalog_maps_drill_bits_out_of_other(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

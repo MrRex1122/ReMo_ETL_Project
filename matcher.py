@@ -4949,6 +4949,36 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("зубная щетка", "крацовка", "корщетка"))
         ):
             return "paint_brush"
+        if "гирлянды" in branch_path or (
+            any(token in search_text for token in ("гирлянда", "гирлянды", "belt-light", "belt light", "бахрома", "дюралайт", "string light", "fairy light"))
+            and not any(token in search_text for token in ("кабель питания", "шнур питания", "удлинитель для гирлянды", "аксессуары для дюралайта", "аксессуары для белт-лайт"))
+        ):
+            return "holiday_lighting"
+        if "панели и платы монтажные" in branch_path or (
+            any(token in search_text for token in ("панели и платы монтажные", "панель монтажная", "плата монтажная", "панель боковая", "панель задняя", "mounting panel", "mounting plate"))
+            and not any(token in search_text for token in ("печатная плата", "клеммный зажим для печатной платы", "pcb"))
+        ):
+            return "enclosure_panel"
+        if "соединители для труб" in branch_path or (
+            any(token in search_text for token in ("соединители для труб", "соединитель для труб", "муфта соединительная", "муфта вводная", "муфта гибкая труба-труба", "втулка соединительная", "pipe connector", "coupling for pipe"))
+            and not any(token in search_text for token in ("фитинг", "тройник", "угольник", "аксессуары для труб"))
+        ):
+            return "pipe_connector"
+        if "закладные детали фундамента опор и мачт освещения" in branch_path or (
+            any(token in search_text for token in ("закладные детали фундамента опор и мачт освещения", "закладная деталь фундамента", "анкерный закладной элемент", "закладная анкерная", "foundation anchor for lighting pole"))
+            and not any(token in search_text for token in ("кабель", "светильник", "кронштейн светильника"))
+        ):
+            return "lighting_support_foundation"
+        if "фурнитура для замков дверей и окон" in branch_path or (
+            any(token in search_text for token in ("фурнитура для замков, дверей и окон", "дверной глазок", "глазок дверной", "шарнир-петля", "броненакладка", "вертушка", "газовый лифт", "door hardware", "window hardware"))
+            and not any(token in search_text for token in ("дверной доводчик электромагнитный", "замок электромеханический"))
+        ):
+            return "door_window_hardware"
+        if "специальный инструмент для авторемонта" in branch_path or (
+            any(token in search_text for token in ("специальный инструмент для авторемонта", "инструмент для авторемонта", "домкрат", "вакуумметр", "ареометр", "маслосборный", "противооткатный башмак", "авторемонтный инструмент"))
+            and not any(token in search_text for token in ("автомобильная лампа", "автомобильный кабель", "автоэлектрика"))
+        ):
+            return "auto_repair_tool"
         if "пильные диски по дереву" in branch_path or (
             any(token in search_text for token in ("пильный диск по дереву", "пильные диски по дереву", "диск по дереву", "saw blade wood", "wood saw blade"))
             and not any(token in search_text for token in ("алмазн", "отрезн", "затвор дисковый", "тормозной диск"))
@@ -5386,6 +5416,12 @@ class ReMoMatcher:
             "micrometer",
             "long_nose_pliers",
             "clamp_tool",
+            "holiday_lighting",
+            "enclosure_panel",
+            "pipe_connector",
+            "lighting_support_foundation",
+            "door_window_hardware",
+            "auto_repair_tool",
             "spirit_level",
             "tape_measure",
             "file_tool",

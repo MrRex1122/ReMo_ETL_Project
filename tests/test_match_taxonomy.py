@@ -2596,6 +2596,61 @@ class MatchTaxonomyTests(unittest.TestCase):
                 family,
             )
 
+    def test_effective_candidate_family_maps_other_holiday_panel_pipe_and_hardware_branches(self):
+        cases = [
+            (
+                "Гирлянда LED бахрома 2м*1м теплый свет 24V",
+                "holiday_lighting",
+                "гирлянды",
+                "Гирлянда LED бахрома 2м*1м теплый свет 24V",
+            ),
+            (
+                "Панель монтажная 2200х800 IEK",
+                "enclosure_panel",
+                "панели и платы монтажные",
+                "Панель монтажная 2200х800 IEK",
+            ),
+            (
+                "Муфта соединительная G1 из сплава цинка IP54",
+                "pipe_connector",
+                "соединители для труб",
+                "Муфта соединительная G1 из сплава цинка IP54",
+            ),
+            (
+                "Анкерный закладной элемент фундамента для мачты МГФ-16",
+                "lighting_support_foundation",
+                "закладные детали фундамента опор и мачт освещения",
+                "Анкерный закладной элемент фундамента для мачты МГФ-16",
+            ),
+            (
+                "Глазок дверной 16мм хром",
+                "door_window_hardware",
+                "фурнитура для замков, дверей и окон",
+                "Глазок дверной 16мм хром",
+            ),
+            (
+                "Вакуумметр от -1 до 4 бар с комплектом адаптеров",
+                "auto_repair_tool",
+                "специальный инструмент для авторемонта",
+                "Вакуумметр от -1 до 4 бар с комплектом адаптеров",
+            ),
+        ]
+
+        for query_text, family, branch_path, candidate_name in cases:
+            features = self.matcher._extract_query_features(query_text)
+            features["entity_type"] = family
+            candidate = {
+                "name": candidate_name,
+                "normalized_name": candidate_name.lower(),
+                "branch_path": branch_path,
+                "entity_type": "other",
+                "item_markers": {},
+            }
+            self.assertEqual(
+                self.matcher._effective_candidate_family_for_query(features, candidate),
+                family,
+            )
+
     def test_effective_candidate_family_maps_other_wrench_caliper_and_blade_branches(self):
         wrench_features = self.matcher._extract_query_features("Ключ комбинированный 17 мм")
         wrench_features["entity_type"] = "combination_wrench"

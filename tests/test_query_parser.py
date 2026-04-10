@@ -471,6 +471,27 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(file_tool.entity_type, "file_tool")
         self.assertEqual(file_tool.branch_hint, "напильники")
 
+    def test_parse_query_spec_detects_holiday_panel_pipe_and_hardware_queries(self):
+        garland = parse_query_spec("Гирлянда LED бахрома 2м*1м теплый свет 24V", taxonomy_rules=self.rules)
+        panel = parse_query_spec("Панель монтажная 2200х800 IEK", taxonomy_rules=self.rules)
+        connector = parse_query_spec("Муфта соединительная G1 из сплава цинка IP54", taxonomy_rules=self.rules)
+        foundation = parse_query_spec("Анкерный закладной элемент фундамента для мачты МГФ-16", taxonomy_rules=self.rules)
+        hardware = parse_query_spec("Глазок дверной 16мм хром", taxonomy_rules=self.rules)
+        auto_tool = parse_query_spec("Вакуумметр от -1 до 4 бар с комплектом адаптеров", taxonomy_rules=self.rules)
+
+        self.assertEqual(garland.entity_type, "holiday_lighting")
+        self.assertEqual(garland.branch_hint, "гирлянды")
+        self.assertEqual(panel.entity_type, "enclosure_panel")
+        self.assertEqual(panel.branch_hint, "панели и платы монтажные")
+        self.assertEqual(connector.entity_type, "pipe_connector")
+        self.assertEqual(connector.branch_hint, "соединители для труб")
+        self.assertEqual(foundation.entity_type, "lighting_support_foundation")
+        self.assertEqual(foundation.branch_hint, "закладные детали фундамента опор и мачт освещения")
+        self.assertEqual(hardware.entity_type, "door_window_hardware")
+        self.assertEqual(hardware.branch_hint, "фурнитура для замков, дверей и окон")
+        self.assertEqual(auto_tool.entity_type, "auto_repair_tool")
+        self.assertEqual(auto_tool.branch_hint, "специальный инструмент для авторемонта")
+
     def test_parse_query_spec_detects_self_tapping_screw_queries(self):
         screw = parse_query_spec("Саморез универсальный 4.2x32", taxonomy_rules=self.rules)
 
