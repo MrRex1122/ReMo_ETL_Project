@@ -1316,6 +1316,22 @@ class CatalogSearchTests(unittest.TestCase):
             derive_branch_from_text("Корпус распределительный навесной пластиковый ЩРН-П 24"),
             "корпуса распределительные навесные пластиковые",
         )
+        self.assertEqual(
+            classify_item_type("Встраиваемый силовой щит Nova 12 модулей с пластиковой дверью IP41"),
+            "distribution_enclosure",
+        )
+        self.assertEqual(
+            classify_item_type("Щит с монтажной панелью ЩМП-30.25.15 IP66"),
+            "distribution_enclosure",
+        )
+        self.assertEqual(
+            classify_item_type("Козырек защитный ЩМП 300х150мм"),
+            "switchboard_accessory",
+        )
+        self.assertEqual(
+            derive_branch_from_text("Козырек защитный ЩМП 300х150мм"),
+            "вспомогательные щитовые аксессуары",
+        )
 
     def test_classify_item_type_detects_power_accessory_queries(self):
         self.assertEqual(
@@ -2370,6 +2386,10 @@ class CatalogSearchTests(unittest.TestCase):
                     "Корпус распределительный встраиваемый пластиковый на 24 модуля;ENC-2;10;Корпуса Распределительные Встраиваемые Пластиковые;CLS-2;Корпус распределительный;;ReMo\n"
                     "Щит распределительный навесной металлический ЩРН-36;ENC-3;10;Корпуса Учетно-Распределительные Навесные Металлические;CLS-3;Щит распределительный;;ReMo\n"
                     "Корпус распределительный навесной пластиковый ЩРН-П 24;ENC-4;10;Корпуса Распределительные Навесные Пластиковые;CLS-4;Корпус распределительный;;ReMo\n"
+                    "Встраиваемый силовой щит Nova 12 модулей с пластиковой дверью IP41;ENC-5;10;Корпуса Распределительные Встраиваемые;CLS-5;Щит;;ReMo\n"
+                    "Щит с монтажной панелью ЩМП-30.25.15 IP66;ENC-6;10;Корпуса Учетно-Распределительные Встраиваемые Металлические;CLS-6;Щит с монтажной панелью;;ReMo\n"
+                    "Козырек защитный ЩМП 300х150мм;ACC-1;10;Вспомогательные Щитовые Аксессуары;CLS-7;Козырек;;ReMo\n"
+                    "Дверь внутренняя ЩМП 500х500мм;ACC-2;10;Дополнительные Двери;CLS-8;Дверь;;ReMo\n"
                 ),
                 encoding="utf-8",
             )
@@ -2380,6 +2400,10 @@ class CatalogSearchTests(unittest.TestCase):
             plastic = built.loc[built["Артикул"] == "ENC-2"].iloc[0]
             metal_wall = built.loc[built["Артикул"] == "ENC-3"].iloc[0]
             plastic_wall = built.loc[built["Артикул"] == "ENC-4"].iloc[0]
+            generic_built_in = built.loc[built["Артикул"] == "ENC-5"].iloc[0]
+            panel_enclosure = built.loc[built["Артикул"] == "ENC-6"].iloc[0]
+            canopy = built.loc[built["Артикул"] == "ACC-1"].iloc[0]
+            inner_door = built.loc[built["Артикул"] == "ACC-2"].iloc[0]
 
             self.assertEqual(metal["search_branch_path"], "корпуса учетно-распределительные встраиваемые металлические")
             self.assertEqual(metal["search_entity_type"], "distribution_enclosure")
@@ -2400,6 +2424,22 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(plastic_wall["search_entity_type"], "distribution_enclosure")
             self.assertEqual(plastic_wall["search_effective_entity_type"], "distribution_enclosure")
             self.assertEqual(plastic_wall["search_effective_family"], "distribution_enclosure")
+
+            self.assertEqual(generic_built_in["search_branch_path"], "корпуса распределительные встраиваемые пластиковые")
+            self.assertEqual(generic_built_in["search_effective_entity_type"], "distribution_enclosure")
+            self.assertEqual(generic_built_in["search_effective_family"], "distribution_enclosure")
+
+            self.assertEqual(panel_enclosure["search_branch_path"], "корпуса учетно-распределительные встраиваемые металлические")
+            self.assertEqual(panel_enclosure["search_effective_entity_type"], "distribution_enclosure")
+            self.assertEqual(panel_enclosure["search_effective_family"], "distribution_enclosure")
+
+            self.assertEqual(canopy["search_branch_path"], "вспомогательные щитовые аксессуары")
+            self.assertEqual(canopy["search_effective_entity_type"], "switchboard_accessory")
+            self.assertEqual(canopy["search_effective_family"], "switchboard_accessory")
+
+            self.assertEqual(inner_door["search_branch_path"], "дополнительные двери")
+            self.assertEqual(inner_door["search_effective_entity_type"], "switchboard_accessory")
+            self.assertEqual(inner_door["search_effective_family"], "switchboard_accessory")
 
     def test_build_search_catalog_maps_cable_conduits_out_of_other(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

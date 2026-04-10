@@ -527,6 +527,10 @@ class QueryParserTests(unittest.TestCase):
         plastic = parse_query_spec("Корпус распределительный встраиваемый пластиковый на 24 модуля", taxonomy_rules=self.rules)
         metal_wall = parse_query_spec("Щит распределительный навесной металлический ЩРН-36", taxonomy_rules=self.rules)
         plastic_wall = parse_query_spec("Корпус распределительный навесной пластиковый ЩРН-П 24", taxonomy_rules=self.rules)
+        with_door = parse_query_spec("Встраиваемый силовой щит Nova 12 модулей с пластиковой дверью IP41", taxonomy_rules=self.rules)
+        with_panel = parse_query_spec("Щит с монтажной панелью ЩМП-30.25.15 IP66", taxonomy_rules=self.rules)
+        generic_wall = parse_query_spec("Щит распределительный навесной на 12 модулей", taxonomy_rules=self.rules)
+        accessory = parse_query_spec("Козырек защитный ЩМП 300х150мм", taxonomy_rules=self.rules)
 
         self.assertEqual(metal.entity_type, "distribution_enclosure")
         self.assertEqual(metal.branch_hint, "корпуса учетно-распределительные встраиваемые металлические")
@@ -536,6 +540,12 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(metal_wall.branch_hint, "корпуса учетно-распределительные навесные металлические")
         self.assertEqual(plastic_wall.entity_type, "distribution_enclosure")
         self.assertEqual(plastic_wall.branch_hint, "корпуса распределительные навесные пластиковые")
+        self.assertEqual(with_door.entity_type, "distribution_enclosure")
+        self.assertEqual(with_panel.entity_type, "distribution_enclosure")
+        self.assertEqual(generic_wall.entity_type, "distribution_enclosure")
+        self.assertEqual(generic_wall.branch_hint, "корпуса распределительные навесные")
+        self.assertEqual(accessory.entity_type, "switchboard_accessory")
+        self.assertEqual(accessory.branch_hint, "вспомогательные щитовые аксессуары")
 
     def test_parse_query_spec_detects_power_accessory_queries(self):
         strip = parse_query_spec("Удлинитель силовой на 4 розетки 3м", taxonomy_rules=self.rules)

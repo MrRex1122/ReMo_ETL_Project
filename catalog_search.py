@@ -1360,9 +1360,34 @@ def classify_item_type(
     ):
         return "electrical_tape"
     if (
-        any(token in normalized for token in ("щит распредел", "щиток", "электрощит", "корпус распредел", "корпус учетно", "щрв", "щрн", "щурв", "щурн"))
-        and any(token in normalized for token in ("встраив", "навес", "модул", "распредел", "учет", "щит"))
-        and not any(token in normalized for token in ("заглуш", "двер", "панел", "рамк", "аксессуар", "комплектующ"))
+        (
+                any(
+                    token in normalized
+                    for token in (
+                        "вспомогательные щитовые аксессуары",
+                        "материалы для оформления и вспомогательные щитовые аксессуары",
+                    "дополнительные двери",
+                    "дверь внутренняя щмп",
+                    "козырек защитный",
+                    "панель монтажная",
+                    "комплект для навески",
+                    "окно герметичное",
+                    "петли для корпусов",
+                    "щитовые аксессуары",
+                )
+                )
+                or (
+                    any(token in normalized for token in ("щмп", "щит", "щитка", "щитовые", "корпус"))
+                    and any(token in normalized for token in ("козырек", "кожух", "петл", "замок", "окно", "крепеж", "переходник", "планка", "уголок"))
+                )
+            )
+            and not any(token in normalized for token in ("печатная плата", "pcb", "rj45", "keystone", "патч"))
+        ):
+            return "switchboard_accessory"
+    if (
+        any(token in normalized for token in ("щит распредел", "силовой щит", "щит с монтажной панелью", "щит этажный", "щиток", "электрощит", "корпус распредел", "корпус учетно", "корпус для модульных устройств", "корпус мультимедиа", "бокс", "щрв", "щрн", "щурв", "щурн", "щмп"))
+        and any(token in normalized for token in ("встраив", "навес", "модул", "распредел", "учет", "щит", "этажн", "монтажн", "мультимедиа"))
+        and not any(token in normalized for token in ("заглуш", "рамк", "аксессуар", "комплектующ", "козырек", "кожух", "петл", "замок", "окно герметичное", "комплект для навески", "щитовые аксессуары"))
     ):
         return "distribution_enclosure"
     if any(token in normalized for token in ("предохранител", "плавк", "fuse")):
@@ -1824,6 +1849,15 @@ def _normalize_effective_entity_type_by_catalog_branch(
 
     if any(marker in normalized_branch for marker in tray_accessory_branch_markers):
         return "rack_accessory_strict"
+    if any(
+        marker in normalized_branch
+        for marker in (
+            "вспомогательные щитовые аксессуары",
+            "материалы для оформления и вспомогательные щитовые аксессуары",
+            "дополнительные двери",
+        )
+    ):
+        return "switchboard_accessory"
     if any(marker in normalized_branch for marker in tray_sheet_branch_markers):
         return "tray_sheet"
     if any(marker in normalized_branch for marker in cable_channel_body_branch_markers):
@@ -1998,6 +2032,9 @@ def _normalize_effective_entity_type_by_catalog_branch(
             "корпуса учетно распределительные навесные металлические",
             "корпуса распределительные встраиваемые пластиковые",
             "корпуса распределительные навесные пластиковые",
+            "корпуса распределительные встраиваемые",
+            "корпуса распределительные навесные",
+            "корпуса учетно распределительные навесные пластиковые",
         )
     ):
         return "distribution_enclosure"
@@ -2470,13 +2507,29 @@ def derive_branch_from_text(
                 return "преобразователи частоты, приводы"
             if effective_family == "power_accessory":
                 return "удлинители, сетевые фильтры, переходники, штепсельные вилки"
+            if effective_family == "switchboard_accessory":
+                if "двер" in merged:
+                    return "дополнительные двери"
+                if "материал" in merged and "оформлен" in merged:
+                    return "материалы для оформления и вспомогательные щитовые аксессуары"
+                return "вспомогательные щитовые аксессуары"
             if effective_family == "distribution_enclosure":
                 if any(token in merged for token in ("навес", "щрн", "щурн")):
                     if "пластик" in merged:
                         return "корпуса распределительные навесные пластиковые"
+                    if any(token in merged for token in ("металл", "металлическ", "сталь", "щмп", "учет", "щрн", "щурн")):
+                        return "корпуса учетно-распределительные навесные металлические"
+                    if "учет" not in merged and "щит распредел" in merged and "корпус учетно" not in merged:
+                        return "корпуса распределительные навесные"
                     return "корпуса учетно-распределительные навесные металлические"
                 if "пластик" in merged:
+                    if "учет" in merged and "навес" in merged:
+                        return "корпуса учетно-распределительные навесные пластиковые"
                     return "корпуса распределительные встраиваемые пластиковые"
+                if any(token in merged for token in ("металл", "металлическ", "сталь", "щмп", "учет", "щрв", "щурв", "этажн")):
+                    return "корпуса учетно-распределительные встраиваемые металлические"
+                if "учет" not in merged and any(token in merged for token in ("щит распредел", "щиток", "электрощит", "бокс")):
+                    return "корпуса распределительные встраиваемые"
                 return "корпуса учетно-распределительные встраиваемые металлические"
             if effective_family == "fuse":
                 return "плавкие предохранители"
@@ -2548,13 +2601,29 @@ def derive_branch_from_text(
             return "аксессуары и комплектующие для коробок"
         if registry_family == "power_accessory":
             return "удлинители, сетевые фильтры, переходники, штепсельные вилки"
+        if registry_family == "switchboard_accessory":
+            if "двер" in merged:
+                return "дополнительные двери"
+            if "материал" in merged and "оформлен" in merged:
+                return "материалы для оформления и вспомогательные щитовые аксессуары"
+            return "вспомогательные щитовые аксессуары"
         if registry_family == "distribution_enclosure":
             if any(token in merged for token in ("навес", "щрн", "щурн")):
                 if "пластик" in merged:
                     return "корпуса распределительные навесные пластиковые"
+                if any(token in merged for token in ("металл", "металлическ", "сталь", "щмп", "учет", "щрн", "щурн")):
+                    return "корпуса учетно-распределительные навесные металлические"
+                if "учет" not in merged and "щит распредел" in merged and "корпус учетно" not in merged:
+                    return "корпуса распределительные навесные"
                 return "корпуса учетно-распределительные навесные металлические"
             if "пластик" in merged:
+                if "учет" in merged and "навес" in merged:
+                    return "корпуса учетно-распределительные навесные пластиковые"
                 return "корпуса распределительные встраиваемые пластиковые"
+            if any(token in merged for token in ("металл", "металлическ", "сталь", "щмп", "учет", "щрв", "щурв", "этажн")):
+                return "корпуса учетно-распределительные встраиваемые металлические"
+            if "учет" not in merged and any(token in merged for token in ("щит распредел", "щиток", "электрощит", "бокс")):
+                return "корпуса распределительные встраиваемые"
             return "корпуса учетно-распределительные встраиваемые металлические"
         if registry_family == "cable_channel":
             if "перфор" in merged and any(token in merged for token in ("кабель", "канал", "короб")):
@@ -2825,6 +2894,7 @@ def derive_branch_from_text(
             "box",
             "box_accessory",
             "power_accessory",
+            "switchboard_accessory",
             "distribution_enclosure",
             "cable_conduit",
             "cable_channel",
@@ -3119,13 +3189,29 @@ def derive_branch_from_text(
         return "плавкие предохранители"
     if effective_entity_type == "power_accessory":
         return "удлинители, сетевые фильтры, переходники, штепсельные вилки"
+    if effective_entity_type == "switchboard_accessory":
+        if "двер" in merged:
+            return "дополнительные двери"
+        if "материал" in merged and "оформлен" in merged:
+            return "материалы для оформления и вспомогательные щитовые аксессуары"
+        return "вспомогательные щитовые аксессуары"
     if effective_entity_type == "distribution_enclosure":
         if any(token in merged for token in ("навес", "щрн", "щурн")):
             if "пластик" in merged:
                 return "корпуса распределительные навесные пластиковые"
+            if any(token in merged for token in ("металл", "металлическ", "сталь", "щмп", "учет", "щрн", "щурн")):
+                return "корпуса учетно-распределительные навесные металлические"
+            if "учет" not in merged and "щит распредел" in merged and "корпус учетно" not in merged:
+                return "корпуса распределительные навесные"
             return "корпуса учетно-распределительные навесные металлические"
         if "пластик" in merged:
+            if "учет" in merged and "навес" in merged:
+                return "корпуса учетно-распределительные навесные пластиковые"
             return "корпуса распределительные встраиваемые пластиковые"
+        if any(token in merged for token in ("металл", "металлическ", "сталь", "щмп", "учет", "щрв", "щурв", "этажн")):
+            return "корпуса учетно-распределительные встраиваемые металлические"
+        if "учет" not in merged and any(token in merged for token in ("щит распредел", "щиток", "электрощит", "бокс")):
+            return "корпуса распределительные встраиваемые"
         return "корпуса учетно-распределительные встраиваемые металлические"
     if effective_entity_type == "push_button":
         if "пост" in merged:

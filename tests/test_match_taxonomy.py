@@ -2919,6 +2919,24 @@ class MatchTaxonomyTests(unittest.TestCase):
             "entity_type": "other",
             "item_markers": {},
         }
+        generic_wall_features = self.matcher._extract_query_features("Щит распределительный навесной на 12 модулей")
+        generic_wall_features["entity_type"] = "distribution_enclosure"
+        generic_wall_candidate = {
+            "name": "Щит распределительный навесной на 12 модулей",
+            "normalized_name": "щит распределительный навесной на 12 модулей",
+            "branch_path": "корпуса распределительные навесные",
+            "entity_type": "other",
+            "item_markers": {},
+        }
+        accessory_features = self.matcher._extract_query_features("Козырек защитный ЩМП 300х150мм")
+        accessory_features["entity_type"] = "switchboard_accessory"
+        accessory_candidate = {
+            "name": "Козырек защитный ЩМП 300х150мм",
+            "normalized_name": "козырек защитный щмп 300х150мм",
+            "branch_path": "вспомогательные щитовые аксессуары",
+            "entity_type": "other",
+            "item_markers": {},
+        }
 
         self.assertEqual(
             self.matcher._effective_candidate_family_for_query(metal_features, metal_candidate),
@@ -2935,6 +2953,14 @@ class MatchTaxonomyTests(unittest.TestCase):
         self.assertEqual(
             self.matcher._effective_candidate_family_for_query(plastic_wall_features, plastic_wall_candidate),
             "distribution_enclosure",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(generic_wall_features, generic_wall_candidate),
+            "distribution_enclosure",
+        )
+        self.assertEqual(
+            self.matcher._effective_candidate_family_for_query(accessory_features, accessory_candidate),
+            "switchboard_accessory",
         )
 
     def test_effective_candidate_family_maps_other_power_accessory_branch(self):
