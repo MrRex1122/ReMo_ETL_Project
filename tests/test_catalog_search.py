@@ -2506,6 +2506,57 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(plug["search_effective_entity_type"], "power_accessory")
             self.assertEqual(plug["search_effective_family"], "power_accessory")
 
+    def test_build_search_catalog_maps_batch_tool_plumbing_and_heating_branches_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;"
+                    "Тип исполнения кабельного изделия;Производитель\n"
+                    "Очки защитные закрытого типа прозрачные;GLS-1;10;Защитные Очки;CLS-1;Очки;;ReMo\n"
+                    "Нутромер индикаторный 18-35 мм;BORE-1;10;Нутромеры;CLS-2;Нутромер;;ReMo\n"
+                    "Набор отверток диэлектрических 6 шт;SDSET-1;10;Наборы Отверток;CLS-3;Набор отверток;;ReMo\n"
+                    "Бита шестигранная HEX 5 25мм;HEXBIT-1;10;Биты Шестигранные HEX;CLS-4;Бита;;ReMo\n"
+                    "Съемник двухлапый ручной 150 мм;PULL-1;10;Съемники Ручные;CLS-5;Съемник;;ReMo\n"
+                    "Хомут для труб 32 мм оцинкованный;PCLAMP-1;10;Хомуты Для Труб;CLS-6;Хомут;;ReMo\n"
+                    "Отвод 110 мм для наружной канализации;SEWER-1;10;Фитинги Для Наружной Канализации;CLS-7;Отвод;;ReMo\n"
+                    "Сифон бутылочный для раковины 1 1/4;SIF-1;10;Сифоны;CLS-8;Сифон;;ReMo\n"
+                    "Зенковка коническая 16 мм HSS;CSINK-1;10;Зенкеры И Зенковки;CLS-9;Зенковка;;ReMo\n"
+                    "Нагревательный мат теплый пол 1.5 м2;HMAT-1;10;Нагревательные Маты;CLS-10;Нагревательный мат;;ReMo\n"
+                    "Изоляция из вспененного полиэтилена трубная 22x9;INS-1;10;Изоляция Из Вспененного Полиэтилена Трубная;CLS-11;Изоляция трубная;;ReMo\n"
+                    "Клапан обратный чугунный DN50;VALVE-2;10;Клапаны Обратные Чугунные;CLS-12;Клапан обратный;;ReMo\n"
+                    "Задвижка чугунная клиновая DN80;VALVE-3;10;Задвижки Чугунные Клиновые;CLS-13;Задвижка;;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, get_search_catalog_csv_path(root))
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+
+            expectations = {
+                "GLS-1": ("защитные очки", "safety_glasses"),
+                "BORE-1": ("нутромеры", "bore_gauge"),
+                "SDSET-1": ("наборы отверток", "screwdriver_set"),
+                "HEXBIT-1": ("биты шестигранные HEX", "hex_bit"),
+                "PULL-1": ("съемники ручные", "manual_puller"),
+                "PCLAMP-1": ("хомуты для труб", "pipe_clamp"),
+                "SEWER-1": ("фитинги для наружной канализации", "sewer_fitting"),
+                "SIF-1": ("сифоны", "siphon"),
+                "CSINK-1": ("зенкеры и зенковки", "countersink_tool"),
+                "HMAT-1": ("нагревательные маты", "heating_mat"),
+                "INS-1": ("изоляция из вспененного полиэтилена трубная", "pipe_insulation"),
+                "VALVE-2": ("клапаны обратные чугунные", "industrial_valve"),
+                "VALVE-3": ("задвижки чугунные клиновые", "industrial_valve"),
+            }
+
+            for article, (branch_path, family) in expectations.items():
+                row = built.loc[built["Артикул"] == article].iloc[0]
+                self.assertEqual(row["search_branch_path"], branch_path)
+                self.assertEqual(row["search_entity_type"], family)
+                self.assertEqual(row["search_effective_entity_type"], family)
+                self.assertEqual(row["search_effective_family"], family)
+
     def test_build_search_catalog_maps_floor_convectors_out_of_other(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

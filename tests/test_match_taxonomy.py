@@ -2963,6 +2963,38 @@ class MatchTaxonomyTests(unittest.TestCase):
             "switchboard_accessory",
         )
 
+    def test_effective_candidate_family_maps_other_batch_tool_plumbing_and_heating_branches(self):
+        cases = [
+            ("Очки защитные закрытого типа прозрачные", "safety_glasses", "защитные очки"),
+            ("Нутромер индикаторный 18-35 мм", "bore_gauge", "нутромеры"),
+            ("Набор отверток диэлектрических 6 шт", "screwdriver_set", "наборы отверток"),
+            ("Бита шестигранная HEX 5 25мм", "hex_bit", "биты шестигранные hex"),
+            ("Съемник двухлапый ручной 150 мм", "manual_puller", "съемники ручные"),
+            ("Хомут для труб 32 мм оцинкованный", "pipe_clamp", "хомуты для труб"),
+            ("Отвод 110 мм для наружной канализации", "sewer_fitting", "фитинги для наружной канализации"),
+            ("Сифон бутылочный для раковины 1 1/4", "siphon", "сифоны"),
+            ("Зенковка коническая 16 мм HSS", "countersink_tool", "зенкеры и зенковки"),
+            ("Нагревательный мат теплый пол 1.5 м2", "heating_mat", "нагревательные маты"),
+            ("Изоляция из вспененного полиэтилена трубная 22x9", "pipe_insulation", "изоляция из вспененного полиэтилена трубная"),
+            ("Клапан обратный чугунный DN50", "industrial_valve", "клапаны обратные чугунные"),
+            ("Задвижка чугунная клиновая DN80", "industrial_valve", "задвижки чугунные клиновые"),
+        ]
+
+        for query_text, family, branch_path in cases:
+            features = self.matcher._extract_query_features(query_text)
+            features["entity_type"] = family
+            candidate = {
+                "name": query_text,
+                "normalized_name": query_text.lower(),
+                "branch_path": branch_path,
+                "entity_type": "other",
+                "item_markers": {},
+            }
+            self.assertEqual(
+                self.matcher._effective_candidate_family_for_query(features, candidate),
+                family,
+            )
+
     def test_effective_candidate_family_maps_other_power_accessory_branch(self):
         strip_features = self.matcher._extract_query_features("Удлинитель силовой на 4 розетки 3м")
         strip_features["entity_type"] = "power_accessory"
