@@ -154,74 +154,39 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ============ ИНИЦИАЛИЗАЦИЯ SESSION STATE ============
-
-if 'matcher' not in st.session_state:
-    st.session_state.matcher = None
-if 'df_processed' not in st.session_state:
-    st.session_state.df_processed = None
-if 'stats' not in st.session_state:
-    st.session_state.stats = None
-if 'corrections' not in st.session_state:
-    st.session_state.corrections = {}
-if 'db_csv_path' not in st.session_state:
-    st.session_state.db_csv_path = str(get_merged_catalog_path(get_upload_dir() / "clean"))
-if 'matcher_db_csv' not in st.session_state:
-    st.session_state.matcher_db_csv = None
-if 'matcher_parallel_requests' not in st.session_state:
-    st.session_state.matcher_parallel_requests = get_matcher_parallel_requests()
-if 'matcher_mode' not in st.session_state:
-    st.session_state.matcher_mode = 'exact'
-if 'matcher_gemini_shortlist_limit' not in st.session_state:
-    st.session_state.matcher_gemini_shortlist_limit = get_matcher_gemini_shortlist_limit()
-if 'matcher_gemini_chunk_size' not in st.session_state:
-    st.session_state.matcher_gemini_chunk_size = get_matcher_gemini_chunk_size()
-if 'matcher_gemini_max_chunks' not in st.session_state:
-    st.session_state.matcher_gemini_max_chunks = get_matcher_gemini_max_chunks()
-if 'matcher_local_recall_pool' not in st.session_state:
-    st.session_state.matcher_local_recall_pool = get_matcher_local_recall_pool()
-if 'matcher_skip_weak_shortlist' not in st.session_state:
-    st.session_state.matcher_skip_weak_shortlist = get_matcher_skip_weak_shortlist()
-if 'matcher_settings_signature' not in st.session_state:
-    st.session_state.matcher_settings_signature = None
-if 'show_results' not in st.session_state:
-    st.session_state.show_results = False
-if 'show_corrections' not in st.session_state:
-    st.session_state.show_corrections = False
-if 'active_run_id' not in st.session_state:
-    st.session_state.active_run_id = None
-if 'active_run_status' not in st.session_state:
-    st.session_state.active_run_status = None
-if 'active_run_loaded_at' not in st.session_state:
-    st.session_state.active_run_loaded_at = None
-if 'active_run_mode' not in st.session_state:
-    st.session_state.active_run_mode = "view"
-if 'last_run_restore_attempted' not in st.session_state:
-    st.session_state.last_run_restore_attempted = False
-if 'processing_thread_started_run_id' not in st.session_state:
-    st.session_state.processing_thread_started_run_id = None
-
-if 'catalog_snapshot_bundle' not in st.session_state:
-    st.session_state.catalog_snapshot_bundle = None
-if 'catalog_snapshot_xlsx_status' not in st.session_state:
-    st.session_state.catalog_snapshot_xlsx_status = "idle"
-if 'catalog_snapshot_xlsx_path' not in st.session_state:
-    st.session_state.catalog_snapshot_xlsx_path = None
-if 'catalog_snapshot_xlsx_url' not in st.session_state:
-    st.session_state.catalog_snapshot_xlsx_url = None
-if 'catalog_snapshot_drive_csv_url' not in st.session_state:
-    st.session_state.catalog_snapshot_drive_csv_url = None
-if 'catalog_snapshot_drive_csv_name' not in st.session_state:
-    st.session_state.catalog_snapshot_drive_csv_name = None
-if 'catalog_snapshot_r2_csv_url' not in st.session_state:
-    st.session_state.catalog_snapshot_r2_csv_url = None
-if 'catalog_snapshot_r2_csv_key' not in st.session_state:
-    st.session_state.catalog_snapshot_r2_csv_key = None
-if 'search_catalog_export_url' not in st.session_state:
-    st.session_state.search_catalog_export_url = None
-if 'search_catalog_export_name' not in st.session_state:
-    st.session_state.search_catalog_export_name = None
-
-
+_ss = st.session_state
+if 'matcher'                         not in _ss: _ss.matcher                         = None
+if 'df_processed'                    not in _ss: _ss.df_processed                    = None
+if 'stats'                           not in _ss: _ss.stats                           = None
+if 'corrections'                     not in _ss: _ss.corrections                     = {}
+if 'db_csv_path'                     not in _ss: _ss.db_csv_path                     = str(get_merged_catalog_path(get_upload_dir() / "clean"))
+if 'matcher_db_csv'                  not in _ss: _ss.matcher_db_csv                  = None
+if 'matcher_parallel_requests'       not in _ss: _ss.matcher_parallel_requests       = get_matcher_parallel_requests()
+if 'matcher_mode'                    not in _ss: _ss.matcher_mode                    = 'exact'
+if 'matcher_gemini_shortlist_limit'  not in _ss: _ss.matcher_gemini_shortlist_limit  = get_matcher_gemini_shortlist_limit()
+if 'matcher_gemini_chunk_size'       not in _ss: _ss.matcher_gemini_chunk_size       = get_matcher_gemini_chunk_size()
+if 'matcher_gemini_max_chunks'       not in _ss: _ss.matcher_gemini_max_chunks       = get_matcher_gemini_max_chunks()
+if 'matcher_local_recall_pool'       not in _ss: _ss.matcher_local_recall_pool       = get_matcher_local_recall_pool()
+if 'matcher_skip_weak_shortlist'     not in _ss: _ss.matcher_skip_weak_shortlist     = get_matcher_skip_weak_shortlist()
+if 'matcher_settings_signature'      not in _ss: _ss.matcher_settings_signature      = None
+if 'show_results'                    not in _ss: _ss.show_results                    = False
+if 'show_corrections'                not in _ss: _ss.show_corrections                = False
+if 'active_run_id'                   not in _ss: _ss.active_run_id                   = None
+if 'active_run_status'               not in _ss: _ss.active_run_status               = None
+if 'active_run_loaded_at'            not in _ss: _ss.active_run_loaded_at            = None
+if 'active_run_mode'                 not in _ss: _ss.active_run_mode                 = "view"
+if 'last_run_restore_attempted'      not in _ss: _ss.last_run_restore_attempted      = False
+if 'processing_thread_started_run_id' not in _ss: _ss.processing_thread_started_run_id = None
+if 'catalog_snapshot_bundle'         not in _ss: _ss.catalog_snapshot_bundle         = None
+if 'catalog_snapshot_xlsx_status'    not in _ss: _ss.catalog_snapshot_xlsx_status    = "idle"
+if 'catalog_snapshot_xlsx_path'      not in _ss: _ss.catalog_snapshot_xlsx_path      = None
+if 'catalog_snapshot_xlsx_url'       not in _ss: _ss.catalog_snapshot_xlsx_url       = None
+if 'catalog_snapshot_drive_csv_url'  not in _ss: _ss.catalog_snapshot_drive_csv_url  = None
+if 'catalog_snapshot_drive_csv_name' not in _ss: _ss.catalog_snapshot_drive_csv_name = None
+if 'catalog_snapshot_r2_csv_url'     not in _ss: _ss.catalog_snapshot_r2_csv_url     = None
+if 'catalog_snapshot_r2_csv_key'     not in _ss: _ss.catalog_snapshot_r2_csv_key     = None
+if 'search_catalog_export_url'       not in _ss: _ss.search_catalog_export_url       = None
+if 'search_catalog_export_name'      not in _ss: _ss.search_catalog_export_name      = None
 
 
 def _catalog_source_path() -> Path:
