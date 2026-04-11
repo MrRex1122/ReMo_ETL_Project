@@ -4128,6 +4128,72 @@ class CatalogSearchTests(unittest.TestCase):
             self.assertEqual(readiness.search_path, search_path)
             self.assertEqual(readiness.search_format, "duckdb")
 
+    def test_build_search_catalog_maps_hacksaws_bits_pliers_flanges_electrodes_and_din_rails_out_of_other(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            merged_path = root / "price_clean_merged.csv"
+            merged_path.write_text(
+                (
+                    "Наименование;Артикул;Цена розничная;Название класса;Код класса;Тип изделия;Производитель\n"
+                    "Ножовка по металлу 300 мм;HACK-1;100;Ножовки;CLS-1;Ножовка;ReMo\n"
+                    "Набор бит 32 предмета;BSET-1;200;Наборы бит;CLS-2;Набор бит;ReMo\n"
+                    "Бита PZ2 50 мм;BPZ-1;50;Биты крест PZ (Pozidriv);CLS-3;Бита;ReMo\n"
+                    "Бумага шлифовальная P120;SAND-1;20;Бумага шлифовальная;CLS-4;Бумага шлифовальная;ReMo\n"
+                    "Пассатижи 180 мм;PLI-1;80;Плоскогубцы и пассатижи;CLS-5;Пассатижи;ReMo\n"
+                    "Клещи переставные 250 мм;TG-1;90;Переставные клещи;CLS-6;Клещи;ReMo\n"
+                    "Фланец стальной плоский DN50;FLG-1;120;Фланцы стальные плоские;CLS-7;Фланец;ReMo\n"
+                    "Электрод сварочный УОНИ 13/55;WELD-1;35;Электроды для сварки;CLS-8;Электрод;ReMo\n"
+                    "DIN-рейка оцинкованная 35мм;DIN-1;45;DIN-рейки;CLS-9;DIN-рейка;ReMo\n"
+                    "Коронка по металлу биметаллическая 35 мм;HOLE-3;65;Коронки по металлу;CLS-10;Коронка;ReMo\n"
+                    "Куртка летняя рабочая;WWL-1;500;Куртки летние;CLS-11;Куртка;ReMo\n"
+                    "Диммер скрытого монтажа 600Вт;SW-1;300;Светорегуляторы (диммеры) скрытого монтажа;CLS-12;Диммер;ReMo\n"
+                    "Клапан обратный стальной DN50;VALVE-4;900;Клапаны обратные стальные;CLS-13;Клапан;ReMo\n"
+                    "Задвижка стальная шиберная DN80;VALVE-5;1500;Задвижки стальные шиберные;CLS-14;Задвижка;ReMo\n"
+                ),
+                encoding="utf-8",
+            )
+
+            search_path = build_search_catalog_from_merged(merged_path, root / "price_clean_search.csv")
+            built = pd.read_csv(search_path, sep=";", encoding="utf-8")
+
+            family_by_article = built.set_index("Артикул")["search_effective_family"].to_dict()
+            branch_by_article = built.set_index("Артикул")["search_branch_path"].to_dict()
+
+            self.assertEqual(family_by_article["HACK-1"], "hacksaw")
+            self.assertEqual(branch_by_article["HACK-1"], "ножовки")
+            self.assertEqual(family_by_article["BSET-1"], "driver_bit_set")
+            self.assertEqual(branch_by_article["BSET-1"], "наборы бит")
+            self.assertEqual(family_by_article["BPZ-1"], "pozidriv_bit")
+            self.assertEqual(branch_by_article["BPZ-1"], "биты крест PZ (Pozidriv)")
+            self.assertEqual(family_by_article["SAND-1"], "sandpaper")
+            self.assertEqual(branch_by_article["SAND-1"], "бумага шлифовальная")
+            self.assertEqual(family_by_article["PLI-1"], "combination_pliers")
+            self.assertEqual(branch_by_article["PLI-1"], "плоскогубцы и пассатижи")
+            self.assertEqual(family_by_article["TG-1"], "tongue_groove_plier")
+            self.assertEqual(branch_by_article["TG-1"], "переставные клещи")
+            self.assertEqual(family_by_article["FLG-1"], "steel_flange")
+            self.assertEqual(branch_by_article["FLG-1"], "фланцы стальные плоские")
+            self.assertEqual(family_by_article["WELD-1"], "welding_electrode")
+            self.assertEqual(branch_by_article["WELD-1"], "электроды для сварки")
+            self.assertEqual(family_by_article["DIN-1"], "din_rail")
+            self.assertEqual(branch_by_article["DIN-1"], "din-рейки")
+            self.assertEqual(family_by_article["HOLE-3"], "hole_saw")
+            self.assertEqual(branch_by_article["HOLE-3"], "коронки по металлу")
+            self.assertEqual(family_by_article["WWL-1"], "workwear")
+            self.assertIn(branch_by_article["WWL-1"], {"костюмы летние", "куртки летние"})
+            self.assertEqual(family_by_article["SW-1"], "switch_wiring")
+            self.assertEqual(branch_by_article["SW-1"], "светорегуляторы (диммеры) скрытого монтажа")
+            self.assertEqual(family_by_article["VALVE-4"], "industrial_valve")
+            self.assertIn(
+                branch_by_article["VALVE-4"],
+                {"клапаны обратные стальные", "затворы поворотные дисковые стальные"},
+            )
+            self.assertEqual(family_by_article["VALVE-5"], "industrial_valve")
+            self.assertIn(
+                branch_by_article["VALVE-5"],
+                {"задвижки стальные шиберные", "затворы поворотные дисковые стальные"},
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

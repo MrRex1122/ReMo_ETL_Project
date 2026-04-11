@@ -4854,6 +4854,11 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("маникюр", "пилка для ногтей", "рашпиль по дереву"))
         ):
             return "file_tool"
+        if "ножовки" in branch_path or (
+            any(token in search_text for token in ("ножовка", "ножовки", "ножовка по металлу", "ножовка по дереву", "hacksaw", "hand saw"))
+            and not any(token in search_text for token in ("пильный диск", "полотно для сабельной пилы", "электролобзик", "циркулярная пила"))
+        ):
+            return "hacksaw"
         if "торцевые головки и наборы головок" in branch_path or (
             any(token in search_text for token in ("торцевая головка", "торцевые головки", "торцевых головок", "набор торцевых головок", "набор головок", "socket set", "socket wrench"))
             and not any(token in search_text for token in ("головка блока", "головка цилиндра", "торцевая фреза", "битодержатель", "бита"))
@@ -4879,6 +4884,11 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("компрессион", "пнд", "латун", "полипропилен", "ppr", "press fitting", "пресс фитинг", "пресс-фитинг"))
         ):
             return "axial_pex_fitting"
+        if "фланцы стальные плоские" in branch_path or (
+            any(token in search_text for token in ("фланец стальной плоский", "фланцы стальные плоские", "steel flange", "flat steel flange"))
+            and not any(token in search_text for token in ("пластиковый фланец", "прижимной фланец пнд", "фланцевый адаптер"))
+        ):
+            return "steel_flange"
         if "фитинги компрессионные для пнд труб пластиковые" in branch_path or (
             (
                 any(token in search_text for token in ("фитинги компрессионные для пнд труб пластиковые", "фитинг компрессионный пнд", "компрессионный фитинг пнд", "фитинг пнд компрессионный", "pnd compression fitting", "pe compression fitting"))
@@ -4892,6 +4902,11 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("сверл", "коронк", "диск", "плашк", "метчик", "зенкер"))
         ):
             return "metal_turning_tool"
+        if "электроды для сварки" in branch_path or (
+            any(token in search_text for token in ("электрод сварочный", "электроды для сварки", "электроды сварочные", "welding electrode", "stick electrode"))
+            and not any(token in search_text for token in ("электродвигатель", "электродрель", "держатель электрода"))
+        ):
+            return "welding_electrode"
         if "фрезы для станков" in branch_path or (
             any(token in search_text for token in ("фреза", "фрезы для станков", "концевая фреза", "кольцевая фреза", "milling cutter"))
             and not any(token in search_text for token in ("фрезер", "router", "коронк", "сверл", "диск", "бор-фреза", "бор фреза", "борфрез", "шарош"))
@@ -4905,8 +4920,8 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("фрезы для станков", "milling cutter", "коронка", "сверло", "диск"))
         ):
             return "router_bit"
-        if any(token in branch_path for token in ("костюмы летние", "костюмы утепленные", "костюмы сварщика", "брюки полукомбинезоны", "куртки утепленные")) or (
-            any(token in search_text for token in ("костюм летний", "костюмы летние", "костюм утепленный", "костюмы утепленные", "костюм сварщика", "костюмы сварщика", "полукомбинезон рабочий", "полукомбинезоны рабочие", "брюки рабочие", "куртка утепленная", "куртки утепленные", "workwear suit", "workwear jacket", "workwear overall"))
+        if any(token in branch_path for token in ("костюмы летние", "костюмы утепленные", "костюмы сварщика", "брюки полукомбинезоны", "куртки утепленные", "сигнальные костюмы", "куртки летние", "жилеты утепленные", "халаты рабочие")) or (
+            any(token in search_text for token in ("костюм летний", "костюмы летние", "костюм утепленный", "костюмы утепленные", "костюм сварщика", "костюмы сварщика", "полукомбинезон рабочий", "полукомбинезоны рабочие", "брюки рабочие", "куртка утепленная", "куртки утепленные", "сигнальный костюм", "сигнальные костюмы", "куртка летняя", "куртки летние", "жилет утепленный", "жилеты утепленные", "халат рабочий", "халаты рабочие", "workwear suit", "workwear jacket", "workwear overall"))
             and not any(token in search_text for token in ("купальник", "маскарад", "карнавальн"))
         ):
             return "workwear"
@@ -5010,6 +5025,11 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("кисть", "paint brush", "зубная щетка", "щетка стеклоочистителя"))
         ):
             return "wire_brush_tool"
+        if "бумага шлифовальная" in branch_path or (
+            any(token in search_text for token in ("бумага шлифовальная", "наждачная бумага", "шлифовальная бумага", "sandpaper", "abrasive paper"))
+            and not any(token in search_text for token in ("круг шлифовальный", "лента шлифовальная", "диск шлифовальный", "шлифовальный круг"))
+        ):
+            return "sandpaper"
         if "круги шлифовальные на липучке" in branch_path or (
             any(token in search_text for token in ("круг шлифовальный на липучке", "круги шлифовальные на липучке", "диск шлифовальный на липучке", "hook loop sanding disc", "sanding disc hook and loop"))
             and not any(token in search_text for token in ("отрезн", "алмазн", "пильный", "полировальн", "лепестков"))
@@ -5116,6 +5136,16 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("бокорез", "кусачки", "болторез", "клещи обжимные", "клещи токоизмерительные"))
         ):
             return "long_nose_pliers"
+        if "плоскогубцы и пассатижи" in branch_path or (
+            any(token in search_text for token in ("пассатижи", "плоскогубцы", "комбинированные плоскогубцы", "lineman pliers", "combination pliers"))
+            and not any(token in search_text for token in ("длинногубцы", "утконосы", "круглогубцы", "клещи переставные", "переставные клещи", "клещи обжимные", "клещи токоизмерительные"))
+        ):
+            return "combination_pliers"
+        if "переставные клещи" in branch_path or (
+            any(token in search_text for token in ("клещи переставные", "переставные клещи", "переставной ключ", "tongue groove plier", "water pump pliers"))
+            and not any(token in search_text for token in ("клещи токоизмерительные", "клещи обжимные", "длинногубцы", "пассатижи"))
+        ):
+            return "tongue_groove_plier"
         if "струбцины" in branch_path or (
             any(token in search_text for token in ("струбцина", "струбцины", "bar clamp", "f-clamp", "g-clamp", "clamping tool"))
             and not any(token in search_text for token in ("clamp meter", "токоизмер", "хомут", "клемм"))
@@ -5136,16 +5166,26 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("кабель", "провод", "wire", "fishing", "рыболов"))
         ):
             return "trimmer_line"
+        if any(token in branch_path for token in ("биты и наборы бит", "наборы бит")) or (
+            any(token in search_text for token in ("набор бит", "наборы бит", "driver bit set", "bit set"))
+            and not any(token in search_text for token in ("битодержатель", "отвертка", "набор отверток"))
+        ):
+            return "driver_bit_set"
         if "биты torx" in branch_path or (
             any(token in search_text for token in ("бита torx", "биты torx", "torx bit", "бит torx"))
             and not any(token in search_text for token in ("отвертка", "битодержатель", "шлицев", "крестов", "phillips", "pozidriv"))
         ):
             return "torx_bit"
         if "биты крест ph phillips" in branch_path or (
-            any(token in search_text for token in ("биты крест ph", "бита крест ph", "бита крест", "бита ph", "биты phillips", "phillips bit", "pozidriv bit", "бита pz"))
-            and not any(token in search_text for token in ("отвертка", "битодержатель", "torx", "шлицев", "имбус"))
+            any(token in search_text for token in ("биты крест ph", "бита крест ph", "бита ph", "биты phillips", "phillips bit"))
+            and not any(token in search_text for token in ("отвертка", "битодержатель", "torx", "шлицев", "имбус", "pozidriv", " pz"))
         ):
             return "phillips_bit"
+        if "биты крест pz pozidriv" in branch_path or (
+            any(token in search_text for token in ("биты крест pz", "бита крест pz", "бита pz", "биты pozidriv", "pozidriv bit"))
+            and not any(token in search_text for token in ("отвертка", "битодержатель", "torx", "шлицев", "имбус", "phillips"))
+        ):
+            return "pozidriv_bit"
         if any(token in branch_path for token in ("саморезы универсальные", "саморезы гипсокартон-дерево", "саморезы гипсокартон дерево", "саморезы гипсокартон-металл", "саморезы гипсокартон металл")) or (
             (
                 any(token in search_text for token in ("саморез универсальный", "саморезы универсальные", "универсальный саморез", "универсальные саморезы", "саморез гипсокартон-дерево", "саморезы гипсокартон-дерево", "саморез гипсокартон дерево", "саморезы гипсокартон дерево", "саморез гипсокартон-металл", "саморезы гипсокартон-металл", "саморез гипсокартон металл", "саморезы гипсокартон металл", "саморез для гипсокартона", "drywall screw", "self-tapping screw", "self tapping screw"))
@@ -5180,8 +5220,8 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("металл", "metal", "дерев", "wood", "bi-metal", "бур", "sds", "drill bit", "сверло"))
         ):
             return "concrete_hole_saw"
-        if "коронки" in branch_path or (
-            any(token in search_text for token in ("коронка", "коронки", "кольцевая коронка", "удлинитель для коронок", "hole saw", "bi-metal hole saw"))
+        if "коронки по металлу" in branch_path or "коронки" in branch_path or (
+            any(token in search_text for token in ("коронка", "коронки", "коронка по металлу", "коронки по металлу", "кольцевая коронка", "удлинитель для коронок", "hole saw", "bi-metal hole saw", "metal hole saw"))
             and not any(token in search_text for token in ("по бетону", "алмазная коронка по бетону", "бур", "sds", "сверло"))
         ):
             return "hole_saw"
@@ -5494,7 +5534,6 @@ class ReMoMatcher:
                     "pcb terminal",
                     "клеммы на din",
                     "terminal block",
-                    "din rail",
                 )
             )
             and not any(token in search_text for token in ("заглушк", "маркир", "аккумулятор", "акб"))
@@ -5510,6 +5549,11 @@ class ReMoMatcher:
             and not any(token in search_text for token in ("заземл", "pe", "клемм", "клеммник", "terminal block"))
         ):
             return "neutral_busbar"
+        if "din-рейки" in branch_path or "din рейки" in branch_path or (
+            any(token in search_text for token in ("din-рейка", "din рейка", "din rail"))
+            and not any(token in search_text for token in ("клемм", "клеммник", "terminal block", "маркер", "перемычк", "шина"))
+        ):
+            return "din_rail"
         if "силовые медные луженые наконечники тмл" in branch_path or (
             any(token in search_text for token in ("силовые медные луженые наконечники", "наконечник тмл", "тмл", "power terminal lug", "copper cable lug"))
             and not any(token in search_text for token in ("ншв", "ншви", "втулочн", "клеммный блок", "клеммник"))
@@ -5585,7 +5629,7 @@ class ReMoMatcher:
             )
         ) or (
             ("накладки" in branch_path and any(token in search_text for token in ("выключател", "розетк", "диммер", "механизм")))
-            or any(token in search_text for token in ("выключател", "переключател", "розетк", "рамк", "клавиш"))
+            or any(token in search_text for token in ("выключател", "переключател", "розетк", "рамк", "клавиш", "диммер", "светорегулятор"))
             and not any(token in search_text for token in ("rj45", "keystone", "патч", "pdu", "блок розеток", "zero u", "лючок", "кабель канал", "кабель-канал"))
         ):
             return "switch_wiring"
@@ -5631,6 +5675,15 @@ class ReMoMatcher:
             "tray_sheet",
             "contactor_starter",
             "control_relay",
+            "hacksaw",
+            "steel_flange",
+            "welding_electrode",
+            "sandpaper",
+            "combination_pliers",
+            "tongue_groove_plier",
+            "driver_bit_set",
+            "pozidriv_bit",
+            "din_rail",
             "light_signage",
             "safety_sign",
             "fire_detector",

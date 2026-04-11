@@ -4237,6 +4237,39 @@ class MatchTaxonomyTests(unittest.TestCase):
 
         self.assertEqual(len(pool), 300)
 
+    def test_effective_candidate_family_maps_other_final_batch_branches(self):
+        expectations = [
+            ("Ножовка по металлу 300 мм", "ножовки", "hacksaw"),
+            ("Набор бит 32 предмета", "наборы бит", "driver_bit_set"),
+            ("Бита PZ2 50 мм", "биты крест pz (pozidriv)", "pozidriv_bit"),
+            ("Бумага шлифовальная P120", "бумага шлифовальная", "sandpaper"),
+            ("Пассатижи 180 мм", "плоскогубцы и пассатижи", "combination_pliers"),
+            ("Клещи переставные 250 мм", "переставные клещи", "tongue_groove_plier"),
+            ("Фланец стальной плоский DN50", "фланцы стальные плоские", "steel_flange"),
+            ("Электрод сварочный УОНИ 13/55", "электроды для сварки", "welding_electrode"),
+            ("DIN-рейка оцинкованная 35мм", "din-рейки", "din_rail"),
+            ("Коронка по металлу биметаллическая 35 мм", "коронки по металлу", "hole_saw"),
+            ("Куртка летняя рабочая", "куртки летние", "workwear"),
+            ("Диммер скрытого монтажа 600Вт", "светорегуляторы (диммеры) скрытого монтажа", "switch_wiring"),
+            ("Клапан обратный стальной DN50", "клапаны обратные стальные", "industrial_valve"),
+            ("Задвижка стальная шиберная DN80", "задвижки стальные шиберные", "industrial_valve"),
+        ]
+
+        for query_text, branch_path, expected_family in expectations:
+            with self.subTest(branch_path=branch_path, expected_family=expected_family):
+                features = self.matcher._extract_query_features(query_text)
+                candidate = {
+                    "name": query_text,
+                    "normalized_name": normalize_text(query_text),
+                    "branch_path": branch_path,
+                    "entity_type": "other",
+                    "item_markers": {},
+                }
+                self.assertEqual(
+                    self.matcher._effective_candidate_family_for_query(features, candidate),
+                    expected_family,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
