@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C \"c:/Users/evgen/OneDrive/Documents/Projects/Viktor Halayava\" log --oneline -10)",
+      "Bash(git -C \"c:/Users/evgen/OneDrive/Documents/Projects/Viktor Halayava\" diff HEAD~10 HEAD --stat)",
+      "Bash(python3 -c ':*)",
+      "Bash(grep -n \"^    \\\\\"[a-z_]*\\\\\": {$\" \"c:/Users/evgen/OneDrive/Documents/Projects/Viktor Halayava/taxonomy_registry.py\")",
+      "Bash(py -c ':*)",
+      "Read(//usr/**)",
+      "Read(//c/Users/evgen/.venv/**)",
+      "Bash('/c/Users/evgen/OneDrive/Documents/Projects/Viktor Halayava/.venv/Scripts/python.exe' -c ':*)",
+      "Bash(.venv/Scripts/python.exe -c \"print\\('hello'\\)\")",
+      "Bash(node -e ':*)",
+      "Bash(echo \"exit: $?\")"
+    ]
+  }
+}
