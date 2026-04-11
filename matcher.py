@@ -320,6 +320,167 @@ def _merge_dicts(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, An
 class ReMoMatcher:
     """Matcher for mapping free-form commercial proposal rows to supplier catalog items."""
 
+    # Resolver path sets and per-path reject-code tables used in _reject_reason_for_result
+    # and _default_review_reason_for_result.  Centralising them here means adding a new
+    # resolver only requires one entry in the appropriate dict/set, not edits in multiple
+    # if-chains spread across two methods.
+
+    _RACK_TRAY_RESOLVER_PATHS = frozenset({
+        "rack_tray_resolver",
+        "rack_tray_series_resolver",
+        "rack_tray_support_series_resolver",
+        "rack_tray_holder_series_resolver",
+        "rack_tray_holder_short_article_resolver",
+        "rack_tray_console_series_resolver",
+        "rack_tray_console_universal_resolver",
+        "rack_tray_console_short_article_resolver",
+        "rack_tray_profile_series_resolver",
+        "rack_tray_fitting_series_resolver",
+        "rack_tray_corner_series_resolver",
+        "rack_tray_cpo_corner_series_resolver",
+        "rack_tray_cd_corner_series_resolver",
+        "rack_tray_branch_series_resolver",
+        "rack_tray_tee_series_resolver",
+        "rack_tray_dl_tee_series_resolver",
+        "rack_tray_dl_tee_100_series_resolver",
+        "rack_tray_dl_tee_200_series_resolver",
+        "rack_tray_fastener_series_resolver",
+        "rack_tray_channel_series_resolver",
+        "rack_tray_semantic_resolver",
+        "rack_tray_brush_resolver",
+        "rack_tray_organizer_resolver",
+        "rack_tray_shelf_resolver",
+        "rack_tray_plate_semantic_resolver",
+    })
+    # (family_gate_code, no_compatible_code) per rack_tray resolver path.
+    # Paths absent from this dict fall back to the generic rack_tray codes.
+    _RACK_TRAY_REJECT_CODES = {
+        "rack_tray_holder_series_resolver":          ("reject_rack_tray_holder_family_gate",                     "reject_rack_tray_holder_no_compatible_candidates"),
+        "rack_tray_holder_short_article_resolver":   ("reject_rack_tray_holder_short_article_family_gate",       "reject_rack_tray_holder_short_article_no_compatible_candidates"),
+        "rack_tray_console_series_resolver":         ("reject_rack_tray_console_family_gate",                    "reject_rack_tray_console_no_compatible_candidates"),
+        "rack_tray_console_universal_resolver":      ("reject_rack_tray_console_universal_family_gate",          "reject_rack_tray_console_universal_no_compatible_candidates"),
+        "rack_tray_console_short_article_resolver":  ("reject_rack_tray_console_short_article_family_gate",      "reject_rack_tray_console_short_article_no_compatible_candidates"),
+        "rack_tray_profile_series_resolver":         ("reject_rack_tray_profile_family_gate",                    "reject_rack_tray_profile_no_compatible_candidates"),
+        "rack_tray_corner_series_resolver":          ("reject_rack_tray_corner_family_gate",                     "reject_rack_tray_corner_no_compatible_candidates"),
+        "rack_tray_cpo_corner_series_resolver":      ("reject_rack_tray_cpo_corner_family_gate",                 "reject_rack_tray_cpo_corner_no_compatible_candidates"),
+        "rack_tray_cd_corner_series_resolver":       ("reject_rack_tray_cd_corner_family_gate",                  "reject_rack_tray_cd_corner_no_compatible_candidates"),
+        "rack_tray_branch_series_resolver":          ("reject_rack_tray_branch_family_gate",                     "reject_rack_tray_branch_no_compatible_candidates"),
+        "rack_tray_tee_series_resolver":             ("reject_rack_tray_tee_family_gate",                        "reject_rack_tray_tee_no_compatible_candidates"),
+        "rack_tray_dl_tee_series_resolver":          ("reject_rack_tray_dl_tee_family_gate",                     "reject_rack_tray_dl_tee_no_compatible_candidates"),
+        "rack_tray_dl_tee_100_series_resolver":      ("reject_rack_tray_dl_tee_100_family_gate",                 "reject_rack_tray_dl_tee_100_no_compatible_candidates"),
+        "rack_tray_dl_tee_200_series_resolver":      ("reject_rack_tray_dl_tee_200_family_gate",                 "reject_rack_tray_dl_tee_200_no_compatible_candidates"),
+        "rack_tray_fastener_series_resolver":        ("reject_rack_tray_fastener_family_gate",                   "reject_rack_tray_fastener_no_compatible_candidates"),
+        "rack_tray_brush_resolver":                  ("reject_rack_tray_brush_family_gate",                      "reject_rack_tray_brush_no_compatible_candidates"),
+        "rack_tray_organizer_resolver":              ("reject_rack_tray_organizer_family_gate",                   "reject_rack_tray_organizer_no_compatible_candidates"),
+        "rack_tray_shelf_resolver":                  ("reject_rack_tray_shelf_family_gate",                      "reject_rack_tray_shelf_no_compatible_candidates"),
+        "rack_tray_plate_semantic_resolver":         ("reject_rack_tray_plate_family_gate",                      "reject_rack_tray_plate_no_compatible_candidates"),
+    }
+
+    _TELECOM_RESOLVER_PATHS = frozenset({
+        "telecom_semantic_resolver",
+        "telecom_component_resolver",
+        "telecom_panel_resolver",
+        "telecom_block_panel_resolver",
+        "telecom_block_panel_unshielded_resolver",
+        "telecom_block_panel_shielded_resolver",
+        "telecom_modular_panel_resolver",
+        "telecom_modular_panel_unshielded_resolver",
+        "telecom_modular_panel_shielded_resolver",
+        "telecom_connector_resolver",
+        "telecom_connector_unshielded_resolver",
+        "telecom_connector_unshielded_cat6a_resolver",
+        "telecom_connector_shielded_resolver",
+        "telecom_connector_shielded_cat6a_resolver",
+        "telecom_keystone_resolver",
+        "telecom_keystone_unshielded_resolver",
+        "telecom_keystone_unshielded_cat6a_resolver",
+        "telecom_keystone_shielded_resolver",
+        "telecom_keystone_shielded_cat6a_resolver",
+        "telecom_construct_resolver",
+        "telecom_channel_construct_resolver",
+        "telecom_channel_single_port_construct_resolver",
+        "telecom_channel_single_port_assembly_resolver",
+        "telecom_channel_single_port_mount_resolver",
+        "telecom_channel_dual_port_construct_resolver",
+        "telecom_wallbox_construct_resolver",
+        "telecom_wallbox_single_port_construct_resolver",
+        "telecom_wallbox_dual_port_construct_resolver",
+        "telecom_floorbox_construct_resolver",
+        "telecom_floorbox_single_port_construct_resolver",
+        "telecom_floorbox_dual_port_construct_resolver",
+        "telecom_outlet_resolver",
+        "telecom_pdu_resolver",
+        "telecom_pdu_vertical_resolver",
+        "telecom_pdu_metered_resolver",
+        "telecom_airflow_resolver",
+        "telecom_airflow_panel_resolver",
+        "telecom_airflow_blanking_resolver",
+        "telecom_airflow_free_units_resolver",
+        "telecom_airflow_flow_control_resolver",
+        "telecom_optical_patch_resolver",
+        "telecom_optical_patch_singlemode_resolver",
+        "telecom_optical_patch_singlemode_duplex_resolver",
+        "telecom_optical_patch_multimode_resolver",
+        "telecom_optical_cross_resolver",
+        "telecom_optical_cross_populated_resolver",
+        "telecom_optical_cross_populated_1u_resolver",
+        "telecom_optical_cross_populated_1u_24_resolver",
+        "telecom_optical_cross_populated_1u_36_resolver",
+        "telecom_optical_cross_populated_2u_resolver",
+        "telecom_optical_resolver",
+        "telecom_infra_resolver",
+    })
+    # no_compatible reject code per telecom resolver path.
+    # Paths absent from this dict fall back to "reject_telecom_no_compatible_candidates".
+    _TELECOM_NO_COMPATIBLE_CODES = {
+        "telecom_block_panel_resolver":                       "reject_telecom_panel_no_compatible_candidates",
+        "telecom_modular_panel_resolver":                     "reject_telecom_panel_no_compatible_candidates",
+        "telecom_block_panel_unshielded_resolver":            "reject_telecom_block_panel_unshielded_no_compatible_candidates",
+        "telecom_block_panel_shielded_resolver":              "reject_telecom_block_panel_shielded_no_compatible_candidates",
+        "telecom_modular_panel_unshielded_resolver":          "reject_telecom_modular_panel_unshielded_no_compatible_candidates",
+        "telecom_modular_panel_shielded_resolver":            "reject_telecom_modular_panel_shielded_no_compatible_candidates",
+        "telecom_connector_unshielded_resolver":              "reject_telecom_connector_unshielded_no_compatible_candidates",
+        "telecom_connector_unshielded_cat6a_resolver":        "reject_telecom_connector_unshielded_cat6a_no_compatible_candidates",
+        "telecom_connector_shielded_resolver":                "reject_telecom_connector_shielded_no_compatible_candidates",
+        "telecom_connector_shielded_cat6a_resolver":          "reject_telecom_connector_shielded_cat6a_no_compatible_candidates",
+        "telecom_keystone_unshielded_resolver":               "reject_telecom_keystone_unshielded_no_compatible_candidates",
+        "telecom_keystone_unshielded_cat6a_resolver":         "reject_telecom_keystone_unshielded_cat6a_no_compatible_candidates",
+        "telecom_keystone_shielded_resolver":                 "reject_telecom_keystone_shielded_no_compatible_candidates",
+        "telecom_keystone_shielded_cat6a_resolver":           "reject_telecom_keystone_shielded_cat6a_no_compatible_candidates",
+        "telecom_keystone_resolver":                          "reject_telecom_keystone_no_compatible_candidates",
+        "telecom_construct_resolver":                         "reject_telecom_construct_no_compatible_candidates",
+        "telecom_channel_single_port_construct_resolver":     "reject_telecom_channel_single_port_construct_no_compatible_candidates",
+        "telecom_channel_single_port_assembly_resolver":      "reject_telecom_channel_single_port_assembly_no_compatible_candidates",
+        "telecom_channel_single_port_mount_resolver":         "reject_telecom_channel_single_port_mount_no_compatible_candidates",
+        "telecom_channel_dual_port_construct_resolver":       "reject_telecom_channel_dual_port_construct_no_compatible_candidates",
+        "telecom_channel_construct_resolver":                 "reject_telecom_channel_construct_no_compatible_candidates",
+        "telecom_wallbox_single_port_construct_resolver":     "reject_telecom_wallbox_single_port_construct_no_compatible_candidates",
+        "telecom_wallbox_dual_port_construct_resolver":       "reject_telecom_wallbox_dual_port_construct_no_compatible_candidates",
+        "telecom_wallbox_construct_resolver":                 "reject_telecom_wallbox_construct_no_compatible_candidates",
+        "telecom_floorbox_single_port_construct_resolver":    "reject_telecom_floorbox_single_port_construct_no_compatible_candidates",
+        "telecom_floorbox_dual_port_construct_resolver":      "reject_telecom_floorbox_dual_port_construct_no_compatible_candidates",
+        "telecom_floorbox_construct_resolver":                "reject_telecom_floorbox_construct_no_compatible_candidates",
+        "telecom_pdu_vertical_resolver":                      "reject_telecom_pdu_vertical_no_compatible_candidates",
+        "telecom_pdu_metered_resolver":                       "reject_telecom_pdu_metered_no_compatible_candidates",
+        "telecom_pdu_resolver":                               "reject_telecom_pdu_no_compatible_candidates",
+        "telecom_airflow_panel_resolver":                     "reject_telecom_airflow_panel_no_compatible_candidates",
+        "telecom_airflow_blanking_resolver":                  "reject_telecom_airflow_blanking_no_compatible_candidates",
+        "telecom_airflow_free_units_resolver":                "reject_telecom_airflow_free_units_no_compatible_candidates",
+        "telecom_airflow_flow_control_resolver":              "reject_telecom_airflow_flow_control_no_compatible_candidates",
+        "telecom_airflow_resolver":                           "reject_telecom_airflow_no_compatible_candidates",
+        "telecom_optical_patch_resolver":                     "reject_telecom_optical_patch_no_compatible_candidates",
+        "telecom_optical_patch_singlemode_resolver":          "reject_telecom_optical_patch_singlemode_no_compatible_candidates",
+        "telecom_optical_patch_singlemode_duplex_resolver":   "reject_telecom_optical_patch_singlemode_duplex_no_compatible_candidates",
+        "telecom_optical_patch_multimode_resolver":           "reject_telecom_optical_patch_multimode_no_compatible_candidates",
+        "telecom_optical_cross_resolver":                     "reject_telecom_optical_cross_no_compatible_candidates",
+        "telecom_optical_cross_populated_resolver":           "reject_telecom_optical_cross_populated_no_compatible_candidates",
+        "telecom_optical_cross_populated_1u_resolver":        "reject_telecom_optical_cross_populated_1u_no_compatible_candidates",
+        "telecom_optical_cross_populated_1u_24_resolver":     "reject_telecom_optical_cross_populated_1u_24_no_compatible_candidates",
+        "telecom_optical_cross_populated_1u_36_resolver":     "reject_telecom_optical_cross_populated_1u_36_no_compatible_candidates",
+        "telecom_optical_cross_populated_2u_resolver":        "reject_telecom_optical_cross_populated_2u_no_compatible_candidates",
+        "telecom_optical_resolver":                           "reject_telecom_optical_no_compatible_candidates",
+    }
+
     def __init__(
         self,
         gemini_api_key: str,
@@ -850,33 +1011,7 @@ class ReMoMatcher:
         query_features = query_features or {}
         query_article = self._normalize_article_lookup_value(query_features.get("query_article"))
         found_article = self._normalize_article_lookup_value(result.get("article"))
-        if normalized_path in {
-            "rack_tray_resolver",
-            "rack_tray_series_resolver",
-            "rack_tray_support_series_resolver",
-            "rack_tray_holder_series_resolver",
-            "rack_tray_holder_short_article_resolver",
-            "rack_tray_console_series_resolver",
-            "rack_tray_console_universal_resolver",
-            "rack_tray_console_short_article_resolver",
-            "rack_tray_profile_series_resolver",
-            "rack_tray_fitting_series_resolver",
-            "rack_tray_corner_series_resolver",
-            "rack_tray_cpo_corner_series_resolver",
-            "rack_tray_cd_corner_series_resolver",
-            "rack_tray_branch_series_resolver",
-            "rack_tray_tee_series_resolver",
-            "rack_tray_dl_tee_series_resolver",
-            "rack_tray_dl_tee_100_series_resolver",
-            "rack_tray_dl_tee_200_series_resolver",
-            "rack_tray_fastener_series_resolver",
-            "rack_tray_channel_series_resolver",
-            "rack_tray_semantic_resolver",
-            "rack_tray_brush_resolver",
-            "rack_tray_organizer_resolver",
-            "rack_tray_shelf_resolver",
-            "rack_tray_plate_semantic_resolver",
-        }:
+        if normalized_path in self._RACK_TRAY_RESOLVER_PATHS:
             if query_article and found_article and query_article != found_article:
                 return registry_verifier_default_review_reason(
                     taxonomy_rules,
@@ -936,113 +1071,15 @@ class ReMoMatcher:
                 return "reject_non_item_row"
             if normalized_reason == "empty_query":
                 return "reject_empty_query"
-        if normalized_path in {
-            "rack_tray_resolver",
-            "rack_tray_series_resolver",
-            "rack_tray_support_series_resolver",
-            "rack_tray_holder_series_resolver",
-            "rack_tray_holder_short_article_resolver",
-            "rack_tray_console_series_resolver",
-            "rack_tray_console_universal_resolver",
-            "rack_tray_console_short_article_resolver",
-            "rack_tray_profile_series_resolver",
-            "rack_tray_fitting_series_resolver",
-            "rack_tray_corner_series_resolver",
-            "rack_tray_cpo_corner_series_resolver",
-            "rack_tray_cd_corner_series_resolver",
-            "rack_tray_branch_series_resolver",
-            "rack_tray_tee_series_resolver",
-            "rack_tray_dl_tee_series_resolver",
-            "rack_tray_dl_tee_100_series_resolver",
-            "rack_tray_dl_tee_200_series_resolver",
-            "rack_tray_fastener_series_resolver",
-            "rack_tray_channel_series_resolver",
-            "rack_tray_semantic_resolver",
-            "rack_tray_brush_resolver",
-            "rack_tray_organizer_resolver",
-            "rack_tray_shelf_resolver",
-            "rack_tray_plate_semantic_resolver",
-        }:
+        if normalized_path in self._RACK_TRAY_RESOLVER_PATHS:
+            family_gate, no_compatible = self._RACK_TRAY_REJECT_CODES.get(
+                normalized_path,
+                ("reject_rack_tray_family_gate", "reject_rack_tray_no_compatible_candidates"),
+            )
             if normalized_reason == "strict_fallback_family_mismatch":
-                if normalized_path == "rack_tray_holder_series_resolver":
-                    return "reject_rack_tray_holder_family_gate"
-                if normalized_path == "rack_tray_holder_short_article_resolver":
-                    return "reject_rack_tray_holder_short_article_family_gate"
-                if normalized_path == "rack_tray_console_series_resolver":
-                    return "reject_rack_tray_console_family_gate"
-                if normalized_path == "rack_tray_console_universal_resolver":
-                    return "reject_rack_tray_console_universal_family_gate"
-                if normalized_path == "rack_tray_console_short_article_resolver":
-                    return "reject_rack_tray_console_short_article_family_gate"
-                if normalized_path == "rack_tray_profile_series_resolver":
-                    return "reject_rack_tray_profile_family_gate"
-                if normalized_path == "rack_tray_corner_series_resolver":
-                    return "reject_rack_tray_corner_family_gate"
-                if normalized_path == "rack_tray_cpo_corner_series_resolver":
-                    return "reject_rack_tray_cpo_corner_family_gate"
-                if normalized_path == "rack_tray_cd_corner_series_resolver":
-                    return "reject_rack_tray_cd_corner_family_gate"
-                if normalized_path == "rack_tray_branch_series_resolver":
-                    return "reject_rack_tray_branch_family_gate"
-                if normalized_path == "rack_tray_tee_series_resolver":
-                    return "reject_rack_tray_tee_family_gate"
-                if normalized_path == "rack_tray_dl_tee_series_resolver":
-                    return "reject_rack_tray_dl_tee_family_gate"
-                if normalized_path == "rack_tray_dl_tee_100_series_resolver":
-                    return "reject_rack_tray_dl_tee_100_family_gate"
-                if normalized_path == "rack_tray_dl_tee_200_series_resolver":
-                    return "reject_rack_tray_dl_tee_200_family_gate"
-                if normalized_path == "rack_tray_fastener_series_resolver":
-                    return "reject_rack_tray_fastener_family_gate"
-                if normalized_path == "rack_tray_brush_resolver":
-                    return "reject_rack_tray_brush_family_gate"
-                if normalized_path == "rack_tray_organizer_resolver":
-                    return "reject_rack_tray_organizer_family_gate"
-                if normalized_path == "rack_tray_shelf_resolver":
-                    return "reject_rack_tray_shelf_family_gate"
-                if normalized_path == "rack_tray_plate_semantic_resolver":
-                    return "reject_rack_tray_plate_family_gate"
-                return "reject_rack_tray_family_gate"
+                return family_gate
             if normalized_reason in no_compatible_reasons:
-                if normalized_path == "rack_tray_holder_series_resolver":
-                    return "reject_rack_tray_holder_no_compatible_candidates"
-                if normalized_path == "rack_tray_holder_short_article_resolver":
-                    return "reject_rack_tray_holder_short_article_no_compatible_candidates"
-                if normalized_path == "rack_tray_console_series_resolver":
-                    return "reject_rack_tray_console_no_compatible_candidates"
-                if normalized_path == "rack_tray_console_universal_resolver":
-                    return "reject_rack_tray_console_universal_no_compatible_candidates"
-                if normalized_path == "rack_tray_console_short_article_resolver":
-                    return "reject_rack_tray_console_short_article_no_compatible_candidates"
-                if normalized_path == "rack_tray_profile_series_resolver":
-                    return "reject_rack_tray_profile_no_compatible_candidates"
-                if normalized_path == "rack_tray_corner_series_resolver":
-                    return "reject_rack_tray_corner_no_compatible_candidates"
-                if normalized_path == "rack_tray_cpo_corner_series_resolver":
-                    return "reject_rack_tray_cpo_corner_no_compatible_candidates"
-                if normalized_path == "rack_tray_cd_corner_series_resolver":
-                    return "reject_rack_tray_cd_corner_no_compatible_candidates"
-                if normalized_path == "rack_tray_branch_series_resolver":
-                    return "reject_rack_tray_branch_no_compatible_candidates"
-                if normalized_path == "rack_tray_tee_series_resolver":
-                    return "reject_rack_tray_tee_no_compatible_candidates"
-                if normalized_path == "rack_tray_dl_tee_series_resolver":
-                    return "reject_rack_tray_dl_tee_no_compatible_candidates"
-                if normalized_path == "rack_tray_dl_tee_100_series_resolver":
-                    return "reject_rack_tray_dl_tee_100_no_compatible_candidates"
-                if normalized_path == "rack_tray_dl_tee_200_series_resolver":
-                    return "reject_rack_tray_dl_tee_200_no_compatible_candidates"
-                if normalized_path == "rack_tray_fastener_series_resolver":
-                    return "reject_rack_tray_fastener_no_compatible_candidates"
-                if normalized_path == "rack_tray_brush_resolver":
-                    return "reject_rack_tray_brush_no_compatible_candidates"
-                if normalized_path == "rack_tray_organizer_resolver":
-                    return "reject_rack_tray_organizer_no_compatible_candidates"
-                if normalized_path == "rack_tray_shelf_resolver":
-                    return "reject_rack_tray_shelf_no_compatible_candidates"
-                if normalized_path == "rack_tray_plate_semantic_resolver":
-                    return "reject_rack_tray_plate_no_compatible_candidates"
-                return "reject_rack_tray_no_compatible_candidates"
+                return no_compatible
         if normalized_path in {"grounding_review_resolver", "grounding_ptce_review_resolver"}:
             if normalized_reason == "strict_fallback_family_mismatch":
                 if normalized_path == "grounding_ptce_review_resolver":
@@ -1052,161 +1089,13 @@ class ReMoMatcher:
                 if normalized_path == "grounding_ptce_review_resolver":
                     return "reject_grounding_ptce_no_compatible_candidates"
                 return "reject_grounding_no_compatible_candidates"
-        if normalized_path in {
-            "telecom_semantic_resolver",
-            "telecom_component_resolver",
-            "telecom_panel_resolver",
-            "telecom_block_panel_resolver",
-            "telecom_block_panel_unshielded_resolver",
-            "telecom_block_panel_shielded_resolver",
-            "telecom_modular_panel_resolver",
-            "telecom_modular_panel_unshielded_resolver",
-            "telecom_modular_panel_shielded_resolver",
-            "telecom_connector_resolver",
-            "telecom_connector_unshielded_resolver",
-            "telecom_connector_unshielded_cat6a_resolver",
-            "telecom_connector_shielded_resolver",
-            "telecom_connector_shielded_cat6a_resolver",
-            "telecom_keystone_resolver",
-            "telecom_keystone_unshielded_resolver",
-            "telecom_keystone_unshielded_cat6a_resolver",
-            "telecom_keystone_shielded_resolver",
-            "telecom_keystone_shielded_cat6a_resolver",
-            "telecom_construct_resolver",
-            "telecom_channel_construct_resolver",
-            "telecom_channel_single_port_construct_resolver",
-            "telecom_channel_single_port_assembly_resolver",
-            "telecom_channel_single_port_mount_resolver",
-            "telecom_channel_dual_port_construct_resolver",
-            "telecom_wallbox_construct_resolver",
-            "telecom_wallbox_single_port_construct_resolver",
-            "telecom_wallbox_dual_port_construct_resolver",
-            "telecom_floorbox_construct_resolver",
-            "telecom_floorbox_single_port_construct_resolver",
-            "telecom_floorbox_dual_port_construct_resolver",
-            "telecom_outlet_resolver",
-            "telecom_pdu_resolver",
-            "telecom_pdu_vertical_resolver",
-            "telecom_pdu_metered_resolver",
-            "telecom_airflow_resolver",
-            "telecom_airflow_panel_resolver",
-            "telecom_airflow_blanking_resolver",
-            "telecom_airflow_free_units_resolver",
-            "telecom_airflow_flow_control_resolver",
-            "telecom_optical_patch_resolver",
-            "telecom_optical_patch_singlemode_resolver",
-            "telecom_optical_patch_singlemode_duplex_resolver",
-            "telecom_optical_patch_multimode_resolver",
-            "telecom_optical_cross_resolver",
-            "telecom_optical_cross_populated_resolver",
-            "telecom_optical_cross_populated_1u_resolver",
-            "telecom_optical_cross_populated_1u_24_resolver",
-            "telecom_optical_cross_populated_1u_36_resolver",
-            "telecom_optical_cross_populated_2u_resolver",
-            "telecom_optical_resolver",
-            "telecom_infra_resolver",
-        }:
+        if normalized_path in self._TELECOM_RESOLVER_PATHS:
             if normalized_reason == "non_target_family":
                 return "reject_telecom_non_target_family"
-            if normalized_path in {
-                "telecom_block_panel_resolver",
-                "telecom_modular_panel_resolver",
-                "telecom_block_panel_unshielded_resolver",
-                "telecom_block_panel_shielded_resolver",
-                "telecom_modular_panel_unshielded_resolver",
-                "telecom_modular_panel_shielded_resolver",
-            } and normalized_reason in no_compatible_reasons:
-                if normalized_path == "telecom_block_panel_unshielded_resolver":
-                    return "reject_telecom_block_panel_unshielded_no_compatible_candidates"
-                if normalized_path == "telecom_block_panel_shielded_resolver":
-                    return "reject_telecom_block_panel_shielded_no_compatible_candidates"
-                if normalized_path == "telecom_modular_panel_unshielded_resolver":
-                    return "reject_telecom_modular_panel_unshielded_no_compatible_candidates"
-                if normalized_path == "telecom_modular_panel_shielded_resolver":
-                    return "reject_telecom_modular_panel_shielded_no_compatible_candidates"
-                return "reject_telecom_panel_no_compatible_candidates"
-            if normalized_path == "telecom_connector_unshielded_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_connector_unshielded_no_compatible_candidates"
-            if normalized_path == "telecom_connector_unshielded_cat6a_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_connector_unshielded_cat6a_no_compatible_candidates"
-            if normalized_path == "telecom_connector_shielded_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_connector_shielded_no_compatible_candidates"
-            if normalized_path == "telecom_connector_shielded_cat6a_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_connector_shielded_cat6a_no_compatible_candidates"
-            if normalized_path == "telecom_keystone_unshielded_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_keystone_unshielded_no_compatible_candidates"
-            if normalized_path == "telecom_keystone_unshielded_cat6a_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_keystone_unshielded_cat6a_no_compatible_candidates"
-            if normalized_path == "telecom_keystone_shielded_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_keystone_shielded_no_compatible_candidates"
-            if normalized_path == "telecom_keystone_shielded_cat6a_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_keystone_shielded_cat6a_no_compatible_candidates"
-            if normalized_path == "telecom_keystone_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_keystone_no_compatible_candidates"
-            if normalized_path == "telecom_construct_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_construct_no_compatible_candidates"
-            if normalized_path == "telecom_channel_single_port_construct_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_channel_single_port_construct_no_compatible_candidates"
-            if normalized_path == "telecom_channel_single_port_assembly_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_channel_single_port_assembly_no_compatible_candidates"
-            if normalized_path == "telecom_channel_single_port_mount_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_channel_single_port_mount_no_compatible_candidates"
-            if normalized_path == "telecom_channel_dual_port_construct_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_channel_dual_port_construct_no_compatible_candidates"
-            if normalized_path == "telecom_channel_construct_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_channel_construct_no_compatible_candidates"
-            if normalized_path == "telecom_wallbox_single_port_construct_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_wallbox_single_port_construct_no_compatible_candidates"
-            if normalized_path == "telecom_wallbox_dual_port_construct_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_wallbox_dual_port_construct_no_compatible_candidates"
-            if normalized_path == "telecom_wallbox_construct_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_wallbox_construct_no_compatible_candidates"
-            if normalized_path == "telecom_floorbox_single_port_construct_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_floorbox_single_port_construct_no_compatible_candidates"
-            if normalized_path == "telecom_floorbox_dual_port_construct_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_floorbox_dual_port_construct_no_compatible_candidates"
-            if normalized_path == "telecom_floorbox_construct_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_floorbox_construct_no_compatible_candidates"
-            if normalized_path == "telecom_pdu_vertical_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_pdu_vertical_no_compatible_candidates"
-            if normalized_path == "telecom_pdu_metered_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_pdu_metered_no_compatible_candidates"
-            if normalized_path == "telecom_pdu_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_pdu_no_compatible_candidates"
-            if normalized_path == "telecom_airflow_panel_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_airflow_panel_no_compatible_candidates"
-            if normalized_path == "telecom_airflow_blanking_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_airflow_blanking_no_compatible_candidates"
-            if normalized_path == "telecom_airflow_free_units_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_airflow_free_units_no_compatible_candidates"
-            if normalized_path == "telecom_airflow_flow_control_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_airflow_flow_control_no_compatible_candidates"
-            if normalized_path == "telecom_airflow_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_airflow_no_compatible_candidates"
-            if normalized_path == "telecom_optical_patch_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_optical_patch_no_compatible_candidates"
-            if normalized_path == "telecom_optical_patch_singlemode_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_optical_patch_singlemode_no_compatible_candidates"
-            if normalized_path == "telecom_optical_patch_singlemode_duplex_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_optical_patch_singlemode_duplex_no_compatible_candidates"
-            if normalized_path == "telecom_optical_patch_multimode_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_optical_patch_multimode_no_compatible_candidates"
-            if normalized_path == "telecom_optical_cross_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_optical_cross_no_compatible_candidates"
-            if normalized_path == "telecom_optical_cross_populated_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_optical_cross_populated_no_compatible_candidates"
-            if normalized_path == "telecom_optical_cross_populated_1u_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_optical_cross_populated_1u_no_compatible_candidates"
-            if normalized_path == "telecom_optical_cross_populated_1u_24_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_optical_cross_populated_1u_24_no_compatible_candidates"
-            if normalized_path == "telecom_optical_cross_populated_1u_36_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_optical_cross_populated_1u_36_no_compatible_candidates"
-            if normalized_path == "telecom_optical_cross_populated_2u_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_optical_cross_populated_2u_no_compatible_candidates"
-            if normalized_path == "telecom_optical_resolver" and normalized_reason in no_compatible_reasons:
-                return "reject_telecom_optical_no_compatible_candidates"
             if normalized_reason in no_compatible_reasons:
-                return "reject_telecom_no_compatible_candidates"
+                return self._TELECOM_NO_COMPATIBLE_CODES.get(
+                    normalized_path, "reject_telecom_no_compatible_candidates"
+                )
         if normalized_path == "semantic_resolver":
             if normalized_reason == "non_target_family":
                 return "reject_semantic_non_target_family"
