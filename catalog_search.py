@@ -534,26 +534,6 @@ def _looks_like_patch_cord(normalized: str, phrase_normalized: str) -> bool:
     return connector_pair == "rj45-rj45"
 
 
-def _detect_port_count(normalized: str) -> str:
-    direct_match = re.search(
-        r"\b(\d{1,3})\s*(?:Ð¿Ð¾Ñ€Ñ‚|Ð¿Ð¾Ñ€Ñ‚Ð°|Ð¿Ð¾Ñ€Ñ‚Ð¾Ð²|Ð¿Ð¾ÑÑ‚|Ð¿Ð¾ÑÑ‚Ð°|Ð¿Ð¾ÑÑ‚Ð¾Ð²|Ð¼ÐµÑÑ‚|Ð¼ÐµÑÑ‚Ð°|Ð¼ÐµÑÑ‚Ð½Ð°Ñ)\b",
-        normalized,
-        flags=re.IGNORECASE,
-    )
-    if direct_match:
-        return direct_match.group(1)
-
-    word_patterns = (
-        (r"\bÐ¾Ð´Ð½(?:Ð¾Ð³Ð¾|Ð°|Ð¾|Ð¾Ð¼ÐµÑÑ‚Ð½\w*)\s*(?:Ð¿Ð¾Ñ€Ñ‚|Ð¿Ð¾Ñ€Ñ‚Ð°|Ð¿Ð¾Ñ€Ñ‚Ð¾Ð²)?", "1"),
-        (r"\bÐ´Ð²(?:Ð°|ÑƒÑ…|ÑƒÑ…Ð¿Ð¾Ñ€Ñ‚\w*|ÑƒÑ…Ð¼ÐµÑÑ‚\w*)\s*(?:Ð¿Ð¾Ñ€Ñ‚|Ð¿Ð¾Ñ€Ñ‚Ð°|Ð¿Ð¾Ñ€Ñ‚Ð¾Ð²)?", "2"),
-        (r"\bÑ‚Ñ€(?:Ð¸|ÐµÑ…)\s*(?:Ð¿Ð¾Ñ€Ñ‚|Ð¿Ð¾Ñ€Ñ‚Ð°|Ð¿Ð¾Ñ€Ñ‚Ð¾Ð²)?", "3"),
-        (r"\bÑ‡ÐµÑ‚Ñ‹Ñ€(?:Ðµ|ÐµÑ…)\s*(?:Ð¿Ð¾Ñ€Ñ‚|Ð¿Ð¾Ñ€Ñ‚Ð°|Ð¿Ð¾Ñ€Ñ‚Ð¾Ð²)?", "4"),
-    )
-    for pattern, value in word_patterns:
-        if re.search(pattern, normalized, flags=re.IGNORECASE):
-            return value
-    return ""
-
 
 def _detect_port_count_precise(normalized: str) -> str:
     direct_match = re.search(
@@ -708,20 +688,6 @@ def looks_like_telecom_rack_query(normalized: str) -> bool:
         )
     )
 
-
-def _looks_like_ats_sts_device(normalized: str) -> bool:
-    if "ÑÑ‚Ð°Ñ‚Ð¸Ñ‡ÐµÑÐº" in normalized and "Ð¿ÐµÑ€ÐµÐºÐ»ÑŽÑ‡Ð°Ñ‚ÐµÐ»" in normalized:
-        return True
-    if "switch" in normalized and any(marker in normalized for marker in ("ats", "sts", "transfer")):
-        return True
-    if not re.search(r"\b(?:ats|sts)\b", normalized, flags=re.IGNORECASE):
-        return False
-    if any(marker in normalized for marker in ("ÐºÐ¾Ð½Ð½ÐµÐºÑ‚Ð¾Ñ€", "pin", "rgb", "mono", "germ", "hip-", "arl-")):
-        return False
-    return any(
-        marker in normalized
-        for marker in ("Ð¿ÐµÑ€ÐµÐºÐ»ÑŽÑ‡", "Ð²Ð²Ð¾Ð´ Ñ€ÐµÐ·ÐµÑ€Ð²Ð°", "bypass", "Ð±Ð°Ð¹Ð¿Ð°Ñ", "transfer", "power", "pdu", "Ð½Ð¾Ð¼Ð¸Ð½Ð°Ð»", "16a", "32a")
-    )
 
 
 def _looks_like_optical_patch_cord(normalized: str, phrase_normalized: str) -> bool:
@@ -4360,18 +4326,6 @@ def extract_item_markers(
     if "19 inch" in normalized:
         markers["rack_size"] = "19 inch"
         markers["rack_mount_19"] = "yes"
-
-    if "ÐºÐ°Ð±ÐµÐ»ÑŒ ÐºÐ°Ð½Ð°Ð»" in normalized or "ÐºÐ°Ð±ÐµÐ»ÑŒ-ÐºÐ°Ð½Ð°Ð»" in original.lower():
-        markers["installation_kind"] = "cable_channel"
-
-    if "ÐºÐ¾Ð½ÑÑ‚Ñ€ÑƒÐºÑ‚Ð¸Ð²" in normalized or "Ð² ÑÐ±Ð¾Ñ€Ðµ" in normalized:
-        markers["component_kind"] = "assembly"
-    elif "Ð½Ð°ÐºÐ»Ð°Ð´Ðº" in normalized:
-        markers["component_kind"] = "adapter"
-
-    detected_port_count = _detect_port_count(normalized)
-    if detected_port_count:
-        markers["port_count"] = detected_port_count
 
     if "\u043a\u0430\u0431\u0435\u043b\u044c \u043a\u0430\u043d\u0430\u043b" in normalized or "\u043a\u0430\u0431\u0435\u043b\u044c-\u043a\u0430\u043d\u0430\u043b" in original.lower():
         markers["installation_kind"] = "cable_channel"
