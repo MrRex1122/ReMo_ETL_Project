@@ -3271,19 +3271,12 @@ def main():
             "Если в строке есть артикул, поиск идет сначала по нему; если артикула нет, используется поиск по названию и семейству."
         )
 
-        run_for_display = _get_active_or_preferred_run()
-        if run_for_display is not None:
-            if run_for_display.status in ("queued", "running"):
-                _render_active_run_panel_live()
-            else:
-                _render_active_run_panel_static()
-
         uploaded_file = st.file_uploader(
             "Выберите Excel файл коммерческого предложения",
             type=['xlsx', 'xls'],
             help="Поддерживаются ReMo-шаблоны и близкие Excel-файлы с колонками вроде 'Наименование' / 'Артикул'. Если заголовки лежат в первой строке таблицы, сервис попробует поднять их автоматически."
         )
-        
+
         if uploaded_file:
             logger.info(f"📤 Файл загружен пользователем: {uploaded_file.name} ({uploaded_file.size} байт)")
             st.info(f"📄 Файл выбран: {uploaded_file.name}")
@@ -3311,7 +3304,7 @@ def main():
                     try:
                         run_id = _start_processing_run(uploaded_file)
                         logger.info("✅ Processing run created from UI: %s", run_id)
-                        st.rerun()
+                        st.success(f"✅ Прогон `{run_id}` запущен в фоне.")
                     except Exception as e:
                         logger.error(f"❌ Ошибка при запуске фоновой обработки: {e}", exc_info=True)
                         st.markdown(
@@ -3319,6 +3312,15 @@ def main():
                             unsafe_allow_html=True,
                         )
                         st.error(str(e))
+
+        # Панель прогресса рендерится ПОСЛЕ формы, чтобы видеть
+        # только что созданный прогон (session_state уже обновлён).
+        run_for_display = _get_active_or_preferred_run()
+        if run_for_display is not None:
+            if run_for_display.status in ("queued", "running"):
+                _render_active_run_panel_live()
+            else:
+                _render_active_run_panel_static()
     
     with tab1:
         st.divider()
