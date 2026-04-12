@@ -3310,13 +3310,8 @@ def main():
                 else:
                     try:
                         run_id = _start_processing_run(uploaded_file)
-                        st.markdown(
-                            '<div class="success-box">✅ Прогон запущен в фоне. '
-                            'Страница может быть обновлена без потери результата.</div>',
-                            unsafe_allow_html=True,
-                        )
-                        st.info(f"ID нового прогона: `{run_id}`")
                         logger.info("✅ Processing run created from UI: %s", run_id)
+                        st.rerun()
                     except Exception as e:
                         logger.error(f"❌ Ошибка при запуске фоновой обработки: {e}", exc_info=True)
                         st.markdown(
