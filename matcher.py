@@ -7704,6 +7704,11 @@ class ReMoMatcher:
         }
         strictness = self._match_strictness_for_query(query_features or {})
 
+        _input_article = self._clean_text_value((query_features or {}).get("query_article"))
+        if _input_article and _input_article.lower() in query.lower():
+            _input_article = ""
+        _article_hint = f"Артикул/модель из входного документа: {_input_article}\n" if _input_article else ""
+
         def build_prompt(context_text: str) -> str:
             if candidates:
                 if strictness == "strict":
@@ -7725,6 +7730,7 @@ class ReMoMatcher:
                 return (
                     "Ты выбираешь лучший товар только из уже отобранного короткого списка.\n"
                     f"Запрос КП: {query}\n"
+                    f"{_article_hint}"
                     f"Строка типа: {(query_features or {}).get('row_type', 'item')}\n"
                     f"Режим строгости: {strictness}\n"
                     f"Категории: {' | '.join(branches or [])}\n"
@@ -7737,6 +7743,7 @@ class ReMoMatcher:
             return (
                 "Ты эксперт по технической номенклатуре оборудования, кабеля и материалов.\n"
                 f"Запрос пользователя: {query}\n"
+                f"{_article_hint}"
                 "Найди лучший товар в каталоге ниже.\n"
                 f"{context_text}\n"
                 "Верни только JSON: "
@@ -7908,7 +7915,7 @@ class ReMoMatcher:
                 candidates=shortlist,
             )
         except TypeError:
-            result = self._match_with_gemini(query)
+            result = self._match_with_gemini(query, query_features=query_features)
         found_name = self._clean_text_value((result or {}).get("found_name"))
         if result:
             result["gemini_shortlist_count"] = len(shortlist)
@@ -8593,7 +8600,7 @@ class ReMoMatcher:
                     return _finalize(result, stage_of_failure="local_recall", reason_code="no_compatible_candidates")
                 gemini_attempted = True
                 gemini_started_at = time.perf_counter()
-                gemini_result = self._match_with_gemini(query_text)
+                gemini_result = self._match_with_gemini(query_text, query_features=query_features)
                 gemini_total_ms += round((time.perf_counter() - gemini_started_at) * 1000, 2)
                 gemini_model = str(gemini_result.get("gemini_model") or gemini_model or "")
                 gemini_result_status = str(gemini_result.get("gemini_result_status") or gemini_result_status or "")
