@@ -178,6 +178,9 @@ def request_processing_run_cancel(run_id: str) -> bool:
 
 
 def is_processing_run_cancel_requested(run_id: str) -> bool:
+    cancel_flag = build_run_artifacts(run_id).run_dir / "cancel.flag"
+    if cancel_flag.exists():
+        return True
     with _ACTIVE_RUN_THREADS_LOCK:
         _cleanup_dead_threads_locked()
         cancel_event = _ACTIVE_RUN_CANCEL_EVENTS.get(run_id)

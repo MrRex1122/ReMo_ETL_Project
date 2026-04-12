@@ -15,6 +15,8 @@ import logging
 import io
 import json
 import re
+import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -67,7 +69,6 @@ from main import convert_csv
 from processing_runs import (
     build_run_artifacts,
     create_processing_run,
-    get_processing_run_cancel_event,
     get_latest_active_processing_run,
     get_preferred_run_for_restore,
     get_processing_run,
@@ -79,20 +80,17 @@ from processing_runs import (
     load_processing_run_match_diagnostics,
     load_processing_run_progress,
     load_processing_run_stats,
-    mark_processing_run_completed,
-    mark_processing_run_failed,
-    mark_processing_run_interrupted,
-    mark_processing_run_started,
     mark_stale_running_runs_as_interrupted,
     request_processing_run_cancel,
-    register_processing_run_thread,
     save_processing_run_draft,
-    unregister_processing_run_thread,
     write_processing_run_coverage_audit,
     write_processing_run_match_diagnostics,
-    write_processing_run_error,
     write_processing_run_progress,
-    write_processing_run_result,
+)
+from processing_worker import (
+    build_main_kp_result_df as _build_main_kp_result_df,
+    compute_business_run_summary as _compute_business_run_summary,
+    request_cancel as _request_worker_cancel,
 )
 from snapshot_export import (
     build_public_export_url,
@@ -442,165 +440,6 @@ def get_matcher() -> ReMoMatcher:
     return st.session_state.matcher
 
 
-def _run_processing_job(run_id: str, matcher_settings: dict[str, Any]) -> None:
-    cancel_event = get_processing_run_cancel_event(run_id)
-
-    def _is_cancel_requested() -> bool:
-        return bool(cancel_event and cancel_event.is_set())
-
-    try:
-        run = get_processing_run(run_id)
-        if run is None:
-            raise RuntimeError(f"Run not found: {run_id}")
-
-        mark_processing_run_started(run_id)
-        write_processing_run_progress(
-            run_id,
-            stage="matcher_init",
-            percent=0.02,
-            message="Инициализация matcher и загрузка каталога",
-        )
-        logger.info("🚀 Processing run started in background: %s", run_id)
-
-        matcher = _create_matcher_instance(str(run.catalog_source_path), matcher_settings)
-        if _is_cancel_requested():
-            raise InterruptedError("Run cancelled by user")
-        artifacts = build_run_artifacts(run_id)
-        write_processing_run_progress(
-            run_id,
-            stage="processing",
-            percent=0.08,
-            message="Matcher готов, начинается обработка файла",
-        )
-        logger.info("⏳ Background run %s: processing %s", run_id, run.input_file_path)
-
-        def _progress_callback(
-            *,
-            stage: str,
-            current: int | None = None,
-            total: int | None = None,
-            message: str | None = None,
-        ) -> None:
-            percent = None
-            if stage == "matching" and total:
-                percent = 0.08 + (0.87 * (max(0, min(int(current or 0), int(total))) / max(1, int(total))))
-            elif stage == "reading_excel":
-                percent = 0.08
-            elif stage == "saving_results":
-                percent = 0.97
-            write_processing_run_progress(
-                run_id,
-                stage=stage,
-                current=current,
-                total=total,
-                message=message,
-                percent=percent,
-            )
-
-        df_result, stats = matcher.process_excel(
-            str(run.input_file_path),
-            output_path=str(artifacts.result_xlsx_path),
-            progress_callback=_progress_callback,
-            cancel_requested=_is_cancel_requested,
-            build_runtime_diagnostics=False,
-        )
-
-        if bool(stats.get("_interrupted")) or _is_cancel_requested():
-            partial_total = int(stats.get("total", len(df_result)))
-            partial_processed = int(stats.get("processed", 0))
-            try:
-                save_processing_run_draft(run_id, df_result)
-            except Exception:
-                logger.exception("Failed to save interrupted run draft: %s", run_id)
-            write_processing_run_progress(
-                run_id,
-                stage="interrupted",
-                current=partial_processed,
-                total=partial_total,
-                percent=(partial_processed / partial_total) if partial_total > 0 else 0.0,
-                message="Обработка остановлена пользователем. Частичный черновик сохранен.",
-            )
-            mark_processing_run_interrupted(run_id, "Run cancelled by user")
-            logger.info("🛑 Processing run interrupted by user: %s processed=%s total=%s", run_id, partial_processed, partial_total)
-            return
-
-        write_processing_run_progress(
-            run_id,
-            stage="saving_results",
-            current=int(stats.get("total", len(df_result))),
-            total=int(stats.get("total", len(df_result))),
-            percent=0.98,
-            message="Сохранение результатов",
-        )
-        stats["diagnostics_mode"] = "lite"
-        stats["runtime_diagnostics_saved"] = False
-        business_summary = _compute_business_run_summary(df_result, stats)
-        stats["business_summary"] = business_summary
-        stats["business_total"] = int(business_summary.get("total", 0))
-        stats["business_found"] = int(business_summary.get("found", 0))
-        stats["business_not_found"] = int(business_summary.get("not_found", 0))
-        stats["business_requires_review"] = int(business_summary.get("requires_review", 0))
-        stats["business_errors"] = int(business_summary.get("errors", 0))
-        stats["business_skipped_non_item"] = int(business_summary.get("skipped_non_item", 0))
-        stats["business_blank_rows"] = int(business_summary.get("blank_rows", 0))
-
-        try:
-            _build_main_kp_result_df(df_result).to_excel(artifacts.result_xlsx_path, index=False, engine="openpyxl")
-        except Exception:
-            logger.exception("Failed to save trimmed KP workbook for run %s", run_id)
-
-        write_processing_run_result(run_id, df_result, stats)
-        rows_total = int(business_summary.get("total", 0))
-        found_count = int(business_summary.get("found", 0))
-        missing_count = int(business_summary.get("not_found", 0))
-        requires_review_count = int(business_summary.get("requires_review", 0))
-        mark_processing_run_completed(
-            run_id,
-            result_csv_path=artifacts.result_csv_path,
-            stats_json_path=artifacts.stats_json_path,
-            rows_total=rows_total,
-            found_count=found_count,
-            missing_count=missing_count,
-            requires_review_count=requires_review_count,
-        )
-        write_processing_run_progress(
-            run_id,
-            stage="completed",
-            current=rows_total,
-            total=rows_total,
-            percent=1.0,
-            message="Обработка завершена",
-        )
-        logger.info("✅ Processing run completed: %s", run_id)
-        logger.info(
-            "ℹ️ Coverage audit is not built synchronously during background run %s; use the manual audit action in Debug/Admin.",
-            run_id,
-        )
-    except InterruptedError as exc:
-        logger.info("🛑 Processing run interrupted: %s reason=%s", run_id, exc)
-        write_processing_run_progress(
-            run_id,
-            stage="interrupted",
-            message=str(exc) or "Обработка остановлена пользователем",
-        )
-        mark_processing_run_interrupted(run_id, str(exc) or "Run cancelled by user")
-    except Exception as exc:
-        logger.error("❌ Processing run failed: %s", run_id, exc_info=True)
-        error_text = str(exc)
-        try:
-            write_processing_run_error(run_id, error_text)
-            write_processing_run_progress(
-                run_id,
-                stage="failed",
-                message=error_text,
-            )
-        except Exception:
-            logger.exception("Failed to write run error file: %s", run_id)
-        mark_processing_run_failed(run_id, error_text)
-    finally:
-        unregister_processing_run_thread(run_id)
-
-
 def _start_processing_run(uploaded_file) -> str:
     logger.info("📄 Обработка файла: %s", uploaded_file.name)
     catalog_source_path, source_kind = _resolve_catalog_source_for_run()
@@ -616,18 +455,18 @@ def _start_processing_run(uploaded_file) -> str:
         run.run_id,
         stage="queued",
         percent=0.0,
-        message="Прогон создан и ожидает запуска фонового потока",
+        message="Прогон создан и ожидает запуска фонового процесса",
     )
 
     matcher_settings = _current_matcher_runtime_settings()
-    worker = threading.Thread(
-        target=_run_processing_job,
-        args=(run.run_id, matcher_settings),
-        daemon=True,
-        name=f"processing-run-{run.run_id}",
+    settings_path = artifacts.run_dir / "settings.json"
+    settings_path.write_text(json.dumps(matcher_settings, ensure_ascii=False), encoding="utf-8")
+    worker_script = str(Path(__file__).resolve().parent / "processing_worker.py")
+    proc = subprocess.Popen(
+        [sys.executable, worker_script, run.run_id, str(settings_path)],
+        cwd=str(Path(__file__).resolve().parent),
     )
-    register_processing_run_thread(run.run_id, worker)
-    worker.start()
+    logger.info("🚀 Worker subprocess started: pid=%s run_id=%s source=%s", proc.pid, run.run_id, source_kind)
     st.session_state.active_run_id = run.run_id
     st.session_state.active_run_status = "queued"
     st.session_state.active_run_loaded_at = None
@@ -635,7 +474,6 @@ def _start_processing_run(uploaded_file) -> str:
     st.session_state.processing_thread_started_run_id = run.run_id
     st.session_state.df_processed = None
     st.session_state.stats = None
-    logger.info("🧵 Background processing thread started: run_id=%s source=%s", run.run_id, source_kind)
     return run.run_id
 
 
@@ -958,6 +796,7 @@ def _render_active_run_panel_contents(run_for_display: Any) -> None:
                 disabled=cancel_already_requested,
             ):
                 current_progress = _load_run_progress_safe(run_for_display.run_id) or {}
+                _request_worker_cancel(run_for_display.run_id)
                 request_processing_run_cancel(run_for_display.run_id)
                 write_processing_run_progress(
                     run_for_display.run_id,
@@ -1874,124 +1713,6 @@ def _prepare_df_for_display(df: pd.DataFrame) -> pd.DataFrame:
         if display_df[col].dtype == object:
             display_df[col] = display_df[col].astype(str)
     return display_df
-
-
-_DEBUG_RESULT_COLUMNS = {
-    "Ошибка сопоставления",
-    "Путь категории",
-    "Уровень уверенности",
-    "Альтернативы",
-    "Источник решения",
-    "Совместимость решения",
-    "Причина несовместимости",
-    "Этап отказа",
-    "Код причины",
-    "Класс причины",
-    "Verifier decision",
-    "Auto accept",
-    "Gemini shortlist",
-    "Gemini visible candidates",
-    "Gemini truncated",
-}
-
-
-def _looks_like_material_unit_cost_column(column_name: object) -> bool:
-    normalized = normalize_header(column_name).lower().replace("ё", "е")
-    compact = normalized.replace(" ", "")
-    return (
-        "стоим" in normalized
-        and "материал" in normalized
-        and "общ" not in normalized
-        and "работ" not in normalized
-        and ("за ед" in normalized or "за еди" in normalized or "заед" in compact)
-    )
-
-
-def _build_main_kp_result_df(df: pd.DataFrame) -> pd.DataFrame:
-    hidden_columns = set(_DEBUG_RESULT_COLUMNS)
-    if any(_looks_like_material_unit_cost_column(column) for column in df.columns):
-        hidden_columns.add("Цена")
-    visible_columns = [column for column in df.columns if column not in hidden_columns]
-    if "Найденная номенклатура" in visible_columns:
-        cutoff_index = visible_columns.index("Найденная номенклатура")
-        visible_columns = visible_columns[: cutoff_index + 1]
-    return df.loc[:, visible_columns].copy()
-
-
-def _is_source_query_column(column_name: object) -> bool:
-    normalized = normalize_header(column_name).lower().replace("ё", "е")
-    if "найден" in normalized:
-        return False
-    return "наименован" in normalized or "номенклатур" in normalized
-
-
-def _compute_business_run_summary(df: pd.DataFrame, stats: dict[str, Any] | None = None) -> dict[str, int]:
-    if df is None or df.empty:
-        return {
-            "total": 0,
-            "found": 0,
-            "not_found": 0,
-            "requires_review": 0,
-            "errors": 0,
-            "skipped_non_item": 0,
-            "blank_rows": 0,
-        }
-
-    query_columns: list[str] = []
-    preferred_query_column = str((stats or {}).get("input_query_column") or "").strip()
-    if preferred_query_column and preferred_query_column in df.columns:
-        query_columns.append(preferred_query_column)
-    for column in df.columns:
-        if column in query_columns:
-            continue
-        if _is_source_query_column(column):
-            query_columns.append(str(column))
-
-    if query_columns:
-        nonempty_query_mask = pd.Series(False, index=df.index)
-        for column in query_columns:
-            nonempty_query_mask = nonempty_query_mask | (df[column].fillna("").astype(str).str.strip() != "")
-    else:
-        nonempty_query_mask = pd.Series(True, index=df.index)
-
-    section_mask = pd.Series(False, index=df.index)
-    if "Код причины" in df.columns:
-        section_mask = section_mask | (
-            df["Код причины"].fillna("").astype(str).str.strip().str.lower() == "section_row_detected"
-        )
-    if "Причина отсутствия" in df.columns:
-        section_mask = section_mask | (
-            df["Причина отсутствия"].fillna("").astype(str).str.contains("Строка-раздел", regex=False)
-        )
-
-    business_mask = nonempty_query_mask & ~section_mask
-
-    if "Найденная номенклатура" in df.columns:
-        missing_mask = (
-            df["Найденная номенклатура"].isna()
-            | (df["Найденная номенклатура"].astype(str).str.strip() == "")
-            | (df["Найденная номенклатура"].astype(str).str.strip() == MISSING_POSITION_TEXT)
-        )
-    else:
-        missing_mask = pd.Series(False, index=df.index)
-
-    review_mask = pd.Series(False, index=df.index)
-    if "Требует проверки" in df.columns:
-        review_mask = df["Требует проверки"].fillna("").astype(str).str.lower() == "да"
-
-    error_mask = pd.Series(False, index=df.index)
-    if "Ошибка сопоставления" in df.columns:
-        error_mask = df["Ошибка сопоставления"].fillna("").astype(str).str.strip() != ""
-
-    return {
-        "total": int(business_mask.sum()),
-        "found": int((business_mask & ~missing_mask).sum()),
-        "not_found": int((business_mask & missing_mask).sum()),
-        "requires_review": int((business_mask & review_mask).sum()),
-        "errors": int((business_mask & error_mask).sum()),
-        "skipped_non_item": int(section_mask.sum()),
-        "blank_rows": int((~nonempty_query_mask).sum()),
-    }
 
 
 def _summary_mapping_to_df(summary: dict[str, Any], *, labels: dict[str, str] | None = None) -> pd.DataFrame:
