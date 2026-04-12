@@ -1660,14 +1660,6 @@ class ReMoMatcher:
                     "reason_code": article_sanity_reason,
                 }
             )
-            logger.info(
-                "🔍 Article lookup: query=%s article=%s source=%s status=%s reason=%s",
-                query_text[:80],
-                query_article[:60],
-                article_source,
-                article_lookup_status,
-                article_sanity_reason or "—",
-            )
         if article_match is not None and not article_sanity_reason:
             article_reason = "Exact article match from input column."
             resolution_source = "article_exact"
@@ -8287,49 +8279,6 @@ class ReMoMatcher:
             if article_resolution.get("result") is not None:
                 return _finalize(article_resolution["result"], stage_of_failure="resolved", reason_code="resolved")
 
-            # ── Fast-exit: article was explicitly provided in input column ──
-            # If the article column had a value but _resolve_article_stack could
-            # not match it (exact / designation / series / typo / affinity all
-            # missed), the product is almost certainly absent from the catalog.
-            # Skipping the expensive Gemini pipeline avoids both wasted API calls
-            # and nonsensical matches (e.g. "Станок сверлильный" for a monitor).
-            if (
-                article_source == "column"
-                and query_article
-                and not article_lookup_hit
-                and not article_series_candidates
-                and not article_typo_candidates
-                and not article_affinity_candidates
-            ):
-                logger.info(
-                    "⏩ Column-article fast-exit: query=%s article=%s — "
-                    "article not found in catalog, skipping Gemini pipeline",
-                    query_text[:120],
-                    query_article[:80],
-                )
-                trace_steps.append(
-                    {
-                        "stage": "column_article_fast_exit",
-                        "status": "not_found",
-                        "article_source": article_source,
-                        "query_article": query_article,
-                    }
-                )
-                result = self._build_missing_result(
-                    query_text,
-                    (
-                        f"Артикул «{query_article}» из входного файла не найден в каталоге. "
-                        "Поиск по названию через Gemini пропущен."
-                    ),
-                    compatibility_status="unresolved_column_article_not_in_catalog",
-                    incompatibility_reason="column_article_not_in_catalog",
-                )
-                return _finalize(
-                    result,
-                    stage_of_failure="catalog_gap",
-                    reason_code="column_article_not_in_catalog",
-                )
-
             preferred_result, preferred_entry = self._resolve_direct_exact_stack(
                 query_text,
                 normalized_query,
@@ -9233,7 +9182,6 @@ class ReMoMatcher:
             "article_extracted_exact_count": 0,
             "name_exact_count": 0,
             "normalized_name_exact_count": 0,
-            "column_article_fast_exit_count": 0,
             "diagnostic_stage_counts": {},
             "diagnostic_reason_class_counts": {},
             "diagnostic_reason_code_counts": {},
@@ -9382,8 +9330,6 @@ class ReMoMatcher:
             incompatibility_reason = str(result.get("incompatibility_reason") or "").strip()
             if compatibility_status == "unresolved_no_compatible_candidates" and incompatibility_reason.startswith("strict_class"):
                 stats["strict_class_unresolved_count"] += 1
-            if incompatibility_reason == "column_article_not_in_catalog":
-                stats["column_article_fast_exit_count"] += 1
 
             stage_of_failure = str(result.get("stage_of_failure") or "").strip()
             if not stage_of_failure:
