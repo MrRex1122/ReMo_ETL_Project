@@ -4606,6 +4606,11 @@ class ReMoMatcher:
         branch_path = self._normalize_text(self._clean_text_value(item.get("branch_path")))
         if not search_text and not branch_path:
             return ""
+        if any(
+            token in branch_path
+            for token in ("мониторы для офиса", "мониторы для видеонаблюдения", "мониторы профессиональные", "мониторы сенсорные")
+        ):
+            return "monitor"
         cable_channel_accessory_tokens = (
             "углы",
             "тройники",

@@ -402,6 +402,24 @@ DEFAULT_FAMILY_REGISTRY: Dict[str, Dict[str, Any]] = {
             "negative_patterns": ["rj45", "keystone", "патч", "pdu", "блок розеток", "zero u", "лючок", "кабель-канал", "кабель канал", "удлинител", "сетевой фильтр", "штепсель", "вилка"],
         },
     },
+    "monitor": {
+        "entity_types": ["monitor"],
+        "default_branches": [
+            "мониторы для офиса",
+            "мониторы для видеонаблюдения",
+            "мониторы профессиональные",
+            "мониторы сенсорные",
+        ],
+        "retrieval_mode": "branch_limited",
+        "strictness": "semi_strict",
+        "audited": False,
+        "weak_match_policy": "reject_in_exact",
+        "classifier": {
+            "priority": 70,
+            "positive_patterns": ["монитор", "дисплей"],
+            "negative_patterns": ["мониторинг", "мониторинга", "snmp", "карта сетевого"],
+        },
+    },
     "lighting_fixture": {
         "entity_types": ["lighting_fixture"],
         "default_branches": [
