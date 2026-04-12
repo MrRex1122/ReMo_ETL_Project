@@ -111,7 +111,7 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
-ACTIVE_RUN_AUTOREFRESH_MS = 5000
+ACTIVE_RUN_AUTOREFRESH_MS = 1000
 ACTIVE_RUN_FRAGMENT_REFRESH_INTERVAL = f"{max(1, ACTIVE_RUN_AUTOREFRESH_MS // 1000)}s"
 CATALOG_AUDIT_FRAGMENT_REFRESH_INTERVAL = "2s"
 CATALOG_AUDIT_PROGRESS_LOG_INTERVAL_SEC = 5.0
@@ -934,7 +934,7 @@ def _render_active_run_panel_contents(run_for_display: Any) -> None:
         if progress_message:
             st.caption(progress_message)
         if auto_refresh_allowed:
-            st.caption("Статус обновляется автоматически каждые 5 секунд.")
+            st.caption("Статус обновляется автоматически каждую секунду.")
     if run_for_display.status == "completed":
         st.caption(
             "Статистика: "
@@ -985,11 +985,15 @@ def _render_active_run_panel_contents(run_for_display: Any) -> None:
 def _render_active_run_panel_live() -> None:
     run_for_display = _refresh_active_run_for_display()
     if run_for_display is None:
-        st.rerun()
         return
     _render_active_run_panel_contents(run_for_display)
     if run_for_display.status not in ("queued", "running"):
-        st.rerun()
+        # Делаем полный rerun только один раз при переходе в финальный статус,
+        # чтобы обновить основную страницу (загрузить результаты).
+        last_completed = st.session_state.get("_completion_rerun_run_id")
+        if last_completed != run_for_display.run_id:
+            st.session_state["_completion_rerun_run_id"] = run_for_display.run_id
+            st.rerun()
 
 
 def _render_active_run_panel_static() -> None:
