@@ -88,7 +88,6 @@ from processing_runs import (
     write_processing_run_progress,
 )
 from processing_worker import (
-    _is_source_query_column as _is_source_query_column,
     build_main_kp_result_df as _build_main_kp_result_df,
     compute_business_run_summary as _compute_business_run_summary,
     request_cancel as _request_worker_cancel,
@@ -1809,7 +1808,6 @@ def show_corrections_table(df, *, visible_columns: list[str] | None = None):
     else:
         df_view = base_df.copy()
     original_index = df_view.index.copy()
-    disabled_columns = [column for column in df_view.columns if _is_source_query_column(column)]
     editor_df = _prepare_df_for_editor(df_view)
     
     # Редактируемая таблица
@@ -1818,7 +1816,6 @@ def show_corrections_table(df, *, visible_columns: list[str] | None = None):
     edited_df = st.data_editor(
         editor_df,
         width="stretch",
-        disabled=disabled_columns,
         num_rows="fixed"
     )
 
