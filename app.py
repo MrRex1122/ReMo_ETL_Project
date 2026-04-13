@@ -1711,7 +1711,7 @@ def _prepare_df_for_display(df: pd.DataFrame) -> pd.DataFrame:
     display_df = df.copy()
     for col in display_df.columns:
         if display_df[col].dtype == object:
-            display_df[col] = display_df[col].astype(str)
+            display_df[col] = display_df[col].map(lambda value: "" if pd.isna(value) else str(value))
     return display_df
 
 
@@ -1732,7 +1732,7 @@ def _render_static_result_table(
     font_size: str = "0.92rem",
 ) -> None:
     """Показать таблицу без встроенного скролла и пагинации."""
-    display_df = _prepare_df_for_display(df).where(pd.notna(df), "")
+    display_df = _prepare_df_for_display(df)
     if display_df.empty:
         st.info("📭 Нет строк для отображения.")
         return

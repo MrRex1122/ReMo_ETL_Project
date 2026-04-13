@@ -106,10 +106,12 @@ class AppUiRegressionTests(unittest.TestCase):
         self.assertNotIn('page = st.slider("Страница"', app_source)
         self.assertNotIn('show_filter = st.selectbox(', app_source)
         self.assertNotIn('sort_by = st.selectbox("Сортировать по"', app_source)
+        self.assertNotIn('.where(pd.notna(df), "")', app_source)
 
     def test_corrections_table_uses_arrow_safe_editor_input_without_disabling_columns(self):
         app_source = Path("app.py").read_text(encoding="utf-8")
         self.assertIn("def _prepare_df_for_editor", app_source)
+        self.assertIn('display_df[col] = display_df[col].map(lambda value: "" if pd.isna(value) else str(value))', app_source)
         self.assertIn("editor_df = _prepare_df_for_editor(df_view)", app_source)
         self.assertIn("st.data_editor(", app_source)
         self.assertNotIn("disabled=disabled_columns", app_source)
