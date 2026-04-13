@@ -1715,6 +1715,58 @@ def _prepare_df_for_display(df: pd.DataFrame) -> pd.DataFrame:
     return display_df
 
 
+def _render_static_result_table(
+    df: pd.DataFrame,
+    *,
+    table_class: str = "remo-static-result-table",
+    table_layout: str = "fixed",
+    font_size: str = "0.92rem",
+) -> None:
+    """Показать таблицу без встроенного скролла и пагинации."""
+    display_df = _prepare_df_for_display(df).where(pd.notna(df), "")
+    if display_df.empty:
+        st.info("📭 Нет строк для отображения.")
+        return
+
+    st.markdown(
+        f"""
+        <style>
+        table.{table_class} {{
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: {table_layout};
+            font-size: {font_size};
+        }}
+        table.{table_class} thead th {{
+            background: #f3f5f7;
+            border-bottom: 1px solid #d7dce3;
+            font-weight: 600;
+            padding: 0.55rem 0.7rem;
+            text-align: left;
+            vertical-align: top;
+            white-space: normal;
+            word-break: break-word;
+        }}
+        table.{table_class} tbody td {{
+            border-bottom: 1px solid #eceff3;
+            padding: 0.5rem 0.7rem;
+            vertical-align: top;
+            white-space: normal;
+            word-break: break-word;
+        }}
+        table.{table_class} tbody tr:nth-child(even) {{
+            background: #fafbfc;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        display_df.to_html(index=False, escape=True, border=0, classes=table_class),
+        unsafe_allow_html=True,
+    )
+
+
 def _summary_mapping_to_df(summary: dict[str, Any], *, labels: dict[str, str] | None = None) -> pd.DataFrame:
     prepared_rows = []
     for key, value in summary.items():
@@ -1864,7 +1916,12 @@ def _render_debug_run_section(run) -> None:
                 key=f"download_full_result_csv_{run.run_id}",
                 on_click="ignore",
             )
-        st.dataframe(_prepare_df_for_display(df), width="stretch")
+        _render_static_result_table(
+            df,
+            table_class="remo-static-full-result-table",
+            table_layout="auto",
+            font_size="0.82rem",
+        )
     st.divider()
     _render_catalog_coverage_audit(run, df)
     st.divider()
@@ -3089,6 +3146,7 @@ def main():
                 _render_main_kp_statistics(stats, df)
                 st.divider()
                 st.caption("На главной вкладке показана КП-версия результата без технических debug-колонок. Полная таблица доступна во вкладке «Debug / Admin».")
+                main_result_df = _build_main_kp_result_df(df)
 
                 default_mode = "Коррекция" if st.session_state.get("active_run_mode") == "correction" else "Просмотр"
                 mode = st.radio(
@@ -3100,11 +3158,12 @@ def main():
                 st.session_state.active_run_mode = "correction" if mode == "Коррекция" else "view"
 
                 if mode == "Коррекция":
-                    edited_df = show_corrections_table(df, visible_columns=list(_build_main_kp_result_df(df).columns))
+                    edited_df = show_corrections_table(df, visible_columns=list(main_result_df.columns))
                     if not _dataframes_equal_for_persistence(edited_df, df):
                         save_processing_run_draft(run.run_id, edited_df)
                         st.session_state.df_processed = edited_df.copy()
                         df = edited_df
+                        main_result_df = _build_main_kp_result_df(df)
                         run = get_processing_run(run.run_id) or run
                         st.session_state.active_run_loaded_at = run.updated_at
                         st.caption(f"Черновик правок автосохранен: {run.updated_at}")
@@ -3113,63 +3172,9 @@ def main():
                         run = get_processing_run(run.run_id) or run
                         st.session_state.active_run_loaded_at = run.updated_at
                         st.success("✓ Правки сохранены")
-
-                col1, col2, col3 = st.columns(3)
-
-                with col1:
-                    show_filter = st.selectbox(
-                        "Фильтр",
-                        ["Все", "Найдены", "Не найдены", "С ошибками"]
-                    )
-
-                with col2:
-                    sort_by = st.selectbox("Сортировать по", ["По порядку", "Названию", "Цене"])
-
-                with col3:
-                    page_size = st.slider("Строк на странице", 5, 50, 20)
-
-                missing_mask = (
-                    df['Найденная номенклатура'].isna()
-                    | (df['Найденная номенклатура'].astype(str).str.strip() == '')
-                    | (df['Найденная номенклатура'].astype(str).str.strip() == MISSING_POSITION_TEXT)
-                )
-                error_mask = (
-                    df['Ошибка сопоставления'].notna()
-                    & (df['Ошибка сопоставления'].astype(str).str.strip() != '')
-                ) if 'Ошибка сопоставления' in df.columns else pd.Series(False, index=df.index)
-
-                if show_filter == "Найдены":
-                    df_view = df[~missing_mask]
-                elif show_filter == "Не найдены":
-                    df_view = df[missing_mask]
-                elif show_filter == "С ошибками":
-                    df_view = df[error_mask]
                 else:
-                    df_view = df
-
-                if sort_by == "Названию":
-                    df_view = df_view.sort_values(by=df.columns[1], na_position='last')
-                elif sort_by == "Цене":
-                    df_view = df_view.sort_values(by='Цена', ascending=False, na_position='last')
-
-                st.info(f"📌 Отображено {len(df_view)} из {len(df)} записей")
-
-                total_pages = (len(df_view) + page_size - 1) // page_size
-                max_pages = max(1, total_pages)
-                if max_pages > 1:
-                    page = st.slider("Страница", 1, max_pages, 1)
-                else:
-                    page = 1
-                    st.caption("Страница 1 из 1")
-
-                start_idx = (page - 1) * page_size
-                end_idx = start_idx + page_size
-
-                main_df_view = _build_main_kp_result_df(df_view)
-                st.dataframe(_prepare_df_for_display(main_df_view.iloc[start_idx:end_idx]), width="stretch")
-
-                if max_pages > 1:
-                    st.markdown(f"Страница {page} из {max_pages}")
+                    st.info(f"📌 Показано {len(main_result_df)} строк")
+                    _render_static_result_table(main_result_df)
 
                 st.divider()
 
