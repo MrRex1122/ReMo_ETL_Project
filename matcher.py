@@ -4139,10 +4139,11 @@ class ReMoMatcher:
         query_signature = self._extract_cable_designation_signature(query_text)
         if query_signature:
             candidate_signature = self._extract_cable_designation_signature(candidate_name or candidate_normalized)
+            _cable_like_families = {"bulk_twisted_pair", "cable", "wire", "other", ""}
             strong_cable_designation_query = (
                 query_type in {"bulk_twisted_pair", "cable", "wire"}
                 or "кабель" in query_text.lower().replace("ё", "е")
-                or len(self._cable_designation_base_tokens(query_signature)) >= 2
+                or (len(self._cable_designation_base_tokens(query_signature)) >= 2 and query_type in _cable_like_families)
             )
             if (
                 strong_cable_designation_query
