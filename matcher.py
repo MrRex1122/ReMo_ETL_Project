@@ -524,10 +524,10 @@ class ReMoMatcher:
         self.client = None
         self.legacy_genai = None
         self.model_name: str | None = None
-        self.parallel_requests = min(25, max(1, int(parallel_requests or get_matcher_parallel_requests())))
+        self.parallel_requests = min(50, max(1, int(parallel_requests or get_matcher_parallel_requests())))
         self._gemini_request_limit = self.parallel_requests
         self._gemini_request_semaphore = threading.BoundedSemaphore(self._gemini_request_limit)
-        self.gemini_chunk_parallelism = max(1, min(4, self.parallel_requests))
+        self.gemini_chunk_parallelism = max(1, min(6, self.parallel_requests))
         self.catalog_sample_items = max(50, int(catalog_sample_items))
         self.match_mode = self._sanitize_match_mode(match_mode)
         self.gemini_shortlist_limit = self._sanitize_int_setting(
@@ -7467,7 +7467,7 @@ class ReMoMatcher:
         configured = int(getattr(self, "_gemini_request_limit", 0) or 0)
         if configured > 0:
             return max(1, configured)
-        return min(25, max(1, int(getattr(self, "parallel_requests", 1) or 1)))
+        return min(50, max(1, int(getattr(self, "parallel_requests", 1) or 1)))
 
     def _get_gemini_request_semaphore(self) -> threading.BoundedSemaphore:
         limit = self._get_gemini_request_limit()
@@ -7656,6 +7656,22 @@ class ReMoMatcher:
                 gemini_result_status="no_valid_candidate",
             )
 
+        # ── Confidence floor: отсекаем заведомо плохие матчи ──
+        gemini_confidence_floor = float(getattr(self, "gemini_confidence_floor", 0.4) or 0.4)
+        if confidence < gemini_confidence_floor and compatibility != "compatible":
+            logger.info(
+                "⛔ Gemini result below confidence floor: query=%s found=%s confidence=%.2f floor=%.2f compat=%s",
+                self._clean_text_value(query)[:120], found_name, confidence, gemini_confidence_floor, compatibility,
+            )
+            return self._build_missing_result(
+                query,
+                rejection_reason or reasoning or f"Уверенность Gemini ({confidence:.0%}) ниже порога ({gemini_confidence_floor:.0%})",
+                compatibility_status="rejected_low_confidence",
+                incompatibility_reason=f"gemini_confidence_below_floor_{confidence:.2f}",
+                gemini_model=model_name,
+                gemini_result_status="confidence_floor_rejected",
+            )
+
         return self._build_result_from_item(
             matched_item,
             score=max(0.0, min(0.999, confidence)),
@@ -7730,8 +7746,11 @@ class ReMoMatcher:
                     )
                 else:
                     selection_policy = (
-                        "Выбери лучший кандидат из списка. Если есть только слабое совпадение, допустим best-effort, "
-                        "но укажи compatibility=\"weakly_compatible\" и кратко опиши риск."
+                        "Выбери лучший кандидат из списка, но ТОЛЬКО если он действительно относится к тому же типу товара. "
+                        "Если ни один кандидат не подходит по назначению (например, запрошен контроллер, а предложены клеммы; "
+                        "запрошен кабель DisplayPort, а предложены силовые кабели; запрошена скоба, а предложен полкодержатель), "
+                        "верни found_name=null и compatibility=\"incompatible\" с rejection_reason. "
+                        "Слабое совпадение (weakly_compatible) допустимо только если товар того же типа, но отличается маркой/моделью."
                     )
                 return (
                     "Ты выбираешь лучший товар только из уже отобранного короткого списка.\n"
@@ -9018,6 +9037,12 @@ class ReMoMatcher:
                 yield idx, self._execute_match_task(query, context, use_cache=True)
             return
 
+        logger.info(
+            "⚡ Parallel matching: tasks=%s workers=%s semaphore_slots=%s chunk_parallelism=%s",
+            len(tasks), workers,
+            int(getattr(self, "_gemini_request_limit", 0)),
+            int(getattr(self, "gemini_chunk_parallelism", 0)),
+        )
         pool = ThreadPoolExecutor(max_workers=workers)
         future_map: Dict[Any, int] = {}
         for task in tasks:

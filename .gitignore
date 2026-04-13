@@ -43,6 +43,7 @@ env/
 
 # Database/Cache
 *.db
+*.duckdb
 *.sqlite
 *.sqlite3
 matcher_cache.db

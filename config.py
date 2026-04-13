@@ -18,7 +18,7 @@ DEFAULT_PRICE_CONVERTED_CSV_NAME = "price_converted.csv"
 DEFAULT_SAMPLE_XLSX_NAME = "РеМо_Шаблон_коммерческого_предложения_020625.xlsx"
 DEFAULT_MATCHER_CACHE_DB_NAME = "matcher_cache.db"
 DEFAULT_MATCHER_MODELS = "gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.0-flash"
-DEFAULT_MATCHER_PARALLEL_REQUESTS = 25
+DEFAULT_MATCHER_PARALLEL_REQUESTS = 50
 DEFAULT_MATCHER_LOCAL_CONFIDENCE_THRESHOLD = 0.92
 DEFAULT_MATCHER_LOCAL_MARGIN_THRESHOLD = 0.08
 DEFAULT_MATCHER_CONTEXT_CHUNK_SIZE = 500
@@ -106,7 +106,8 @@ def get_matcher_parallel_requests() -> int:
     try:
         value = int(raw)
         # Ограничиваем параллелизм, чтобы не упереться в rate-limit API.
-        return min(25, max(1, value))
+        # Gemini 2.5 Flash: 2000 RPM ≈ 33 req/sec — допустимо до 50 concurrent.
+        return min(50, max(1, value))
     except ValueError:
         return DEFAULT_MATCHER_PARALLEL_REQUESTS
 
