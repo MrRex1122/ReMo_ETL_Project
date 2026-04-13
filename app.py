@@ -1728,42 +1728,15 @@ def _render_static_result_table(
         st.info("📭 Нет строк для отображения.")
         return
 
-    st.markdown(
-        f"""
-        <style>
-        table.{table_class} {{
-            width: 100%;
-            border-collapse: collapse;
-            table-layout: {table_layout};
-            font-size: {font_size};
-        }}
-        table.{table_class} thead th {{
-            background: #f3f5f7;
-            border-bottom: 1px solid #d7dce3;
-            font-weight: 600;
-            padding: 0.55rem 0.7rem;
-            text-align: left;
-            vertical-align: top;
-            white-space: normal;
-            word-break: break-word;
-        }}
-        table.{table_class} tbody td {{
-            border-bottom: 1px solid #eceff3;
-            padding: 0.5rem 0.7rem;
-            vertical-align: top;
-            white-space: normal;
-            word-break: break-word;
-        }}
-        table.{table_class} tbody tr:nth-child(even) {{
-            background: #fafbfc;
-        }}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        display_df.to_html(index=False, escape=True, border=0, classes=table_class),
-        unsafe_allow_html=True,
+    # Высота подбирается так, чтобы таблица раскрывалась целиком без внутреннего вертикального скролла.
+    row_height_px = 35
+    header_height_px = 38
+    table_height = max(140, header_height_px + len(display_df.index) * row_height_px)
+
+    st.dataframe(
+        display_df,
+        width="stretch",
+        height=table_height,
     )
 
 
