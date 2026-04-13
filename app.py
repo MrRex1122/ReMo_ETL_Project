@@ -88,6 +88,7 @@ from processing_runs import (
     write_processing_run_progress,
 )
 from processing_worker import (
+    _is_source_query_column as _is_source_query_column,
     build_main_kp_result_df as _build_main_kp_result_df,
     compute_business_run_summary as _compute_business_run_summary,
     request_cancel as _request_worker_cancel,
@@ -1715,6 +1716,15 @@ def _prepare_df_for_display(df: pd.DataFrame) -> pd.DataFrame:
     return display_df
 
 
+def _prepare_df_for_editor(df: pd.DataFrame) -> pd.DataFrame:
+    """Сделать DataFrame безопасным для st.data_editor без принудительной строкификации чисел."""
+    editor_df = df.copy()
+    for col in editor_df.columns:
+        if editor_df[col].dtype == object:
+            editor_df[col] = editor_df[col].map(lambda value: "" if pd.isna(value) else str(value))
+    return editor_df
+
+
 def _render_static_result_table(
     df: pd.DataFrame,
     *,
@@ -1800,12 +1810,13 @@ def show_corrections_table(df, *, visible_columns: list[str] | None = None):
         df_view = base_df.copy()
     original_index = df_view.index.copy()
     disabled_columns = [column for column in df_view.columns if _is_source_query_column(column)]
+    editor_df = _prepare_df_for_editor(df_view)
     
     # Редактируемая таблица
     st.write("**Отредактируйте результаты в таблице ниже:**")
     
     edited_df = st.data_editor(
-        df_view,
+        editor_df,
         width="stretch",
         disabled=disabled_columns,
         num_rows="fixed"

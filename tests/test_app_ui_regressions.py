@@ -107,6 +107,13 @@ class AppUiRegressionTests(unittest.TestCase):
         self.assertNotIn('show_filter = st.selectbox(', app_source)
         self.assertNotIn('sort_by = st.selectbox("Сортировать по"', app_source)
 
+    def test_corrections_table_uses_arrow_safe_editor_input_and_imports_source_column_helper(self):
+        app_source = Path("app.py").read_text(encoding="utf-8")
+        self.assertIn("_is_source_query_column as _is_source_query_column", app_source)
+        self.assertIn("def _prepare_df_for_editor", app_source)
+        self.assertIn("editor_df = _prepare_df_for_editor(df_view)", app_source)
+        self.assertIn("st.data_editor(", app_source)
+
     def test_debug_tab_exposes_full_result_downloads(self):
         app_source = Path("app.py").read_text(encoding="utf-8")
         self.assertIn("Полная таблица результата", app_source)
