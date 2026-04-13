@@ -108,6 +108,16 @@ class AppUiRegressionTests(unittest.TestCase):
         self.assertNotIn('sort_by = st.selectbox("Сортировать по"', app_source)
         self.assertNotIn('.where(pd.notna(df), "")', app_source)
 
+    def test_matcher_slider_values_are_clamped_before_widget_render(self):
+        app_source = Path("app.py").read_text(encoding="utf-8")
+        self.assertIn("def _clamp_int_session_state_value", app_source)
+        self.assertIn('"matcher_parallel_requests"', app_source)
+        self.assertIn("max_value=25", app_source)
+        self.assertIn('"matcher_gemini_shortlist_limit"', app_source)
+        self.assertIn('"matcher_gemini_chunk_size"', app_source)
+        self.assertIn('"matcher_gemini_max_chunks"', app_source)
+        self.assertIn('"matcher_local_recall_pool"', app_source)
+
     def test_corrections_table_uses_arrow_safe_editor_input_without_disabling_columns(self):
         app_source = Path("app.py").read_text(encoding="utf-8")
         self.assertIn("def _prepare_df_for_editor", app_source)

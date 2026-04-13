@@ -1785,6 +1785,19 @@ def _full_result_download_filename(run, extension: str) -> str:
     return f"result_full_{run_id}{suffix}"
 
 
+def _clamp_int_session_state_value(key: str, *, min_value: int, max_value: int, fallback: int) -> int:
+    """Нормализовать int-значение в session_state под границы Streamlit widget."""
+    raw_value = st.session_state.get(key, fallback)
+    try:
+        normalized = int(raw_value)
+    except (TypeError, ValueError):
+        normalized = int(fallback)
+    normalized = max(min_value, min(max_value, normalized))
+    if st.session_state.get(key) != normalized:
+        st.session_state[key] = normalized
+    return normalized
+
+
 def show_corrections_table(df, *, visible_columns: list[str] | None = None):
     if visible_columns is not None:
         visible_columns = [column for column in visible_columns if column in df.columns]
@@ -2911,9 +2924,38 @@ def main():
                     bundle.public_xlsx_url,
                     use_container_width=True,
                 )
-
+        
         st.subheader("2️⃣ Тонкая настройка matcher")
-        parallel_requests = int(st.session_state.get("matcher_parallel_requests", get_matcher_parallel_requests()))
+        parallel_requests = _clamp_int_session_state_value(
+            "matcher_parallel_requests",
+            min_value=1,
+            max_value=25,
+            fallback=get_matcher_parallel_requests(),
+        )
+        _clamp_int_session_state_value(
+            "matcher_gemini_shortlist_limit",
+            min_value=24,
+            max_value=200,
+            fallback=get_matcher_gemini_shortlist_limit(),
+        )
+        _clamp_int_session_state_value(
+            "matcher_gemini_chunk_size",
+            min_value=6,
+            max_value=20,
+            fallback=get_matcher_gemini_chunk_size(),
+        )
+        _clamp_int_session_state_value(
+            "matcher_gemini_max_chunks",
+            min_value=1,
+            max_value=12,
+            fallback=get_matcher_gemini_max_chunks(),
+        )
+        _clamp_int_session_state_value(
+            "matcher_local_recall_pool",
+            min_value=100,
+            max_value=1000,
+            fallback=get_matcher_local_recall_pool(),
+        )
         st.info(
             f"Текущий параллелизм matcher: до {parallel_requests} строк одновременно. "
             "Это главный рычаг ускорения, если Gemini и сеть выдерживают нагрузку."
