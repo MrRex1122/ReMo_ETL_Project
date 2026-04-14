@@ -2287,6 +2287,13 @@ class ReMoMatcher:
         compatibility = self._clean_text_value(gemini_result.get("compatibility_status"))
         if compatibility != "weakly_compatible":
             return True
+        # If Gemini selected a concrete named item (not "missing"),
+        # trust the semantic match — it is almost always more accurate
+        # than local text scoring which frequently picks wrong subtypes
+        # (e.g. "пламени" instead of "линейный", "М16" instead of "клин 6х40").
+        found_name = self._clean_text_value(gemini_result.get("found_name"))
+        if found_name and found_name != MISSING_POSITION_TEXT:
+            return True
         if self._should_reject_weak_resolution_in_exact_mode(query_features):
             return False
         if retrieval_mode == "whole_category" and compatible_entries:
