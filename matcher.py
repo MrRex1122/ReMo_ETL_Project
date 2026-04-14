@@ -7947,38 +7947,19 @@ class ReMoMatcher:
             result["gemini_visible_candidates"] = visible_candidates
             result["gemini_truncated_candidates"] = truncated_candidates
         if not result or not found_name or found_name == MISSING_POSITION_TEXT:
-            # If Gemini found something but confidence was below floor,
-            # return None to allow local fallback instead of a hard "not found".
-            result_status = str((result or {}).get("gemini_result_status") or "")
-            if result_status == "confidence_floor_rejected":
-                return None
-            if strictness == "strict" and result:
-                return result
+            # Gemini returned no valid match — return None so the caller
+            # falls through to local fallback instead of hard "not found".
             return None
         matched_item = self._lookup_catalog_item_by_name(found_name, candidate_pool=shortlist)
         reject_weak_exact = self._should_reject_weak_resolution_in_exact_mode(query_features)
         if str(result.get("compatibility_status") or "").strip() == "weakly_compatible" and (
             strictness == "strict" or reject_weak_exact
         ):
-            return self._build_missing_result(
-                query,
-                "Gemini нашел только частично совместимый кандидат; для этой позиции требуется строго совместимое совпадение.",
-                compatibility_status="unresolved_no_compatible_candidates",
-                incompatibility_reason=(
-                    "exact_mode_requires_compatible_match"
-                    if reject_weak_exact and strictness != "strict"
-                    else "strict_class_requires_compatible_match"
-                ),
-                gemini_shortlist_count=len(shortlist),
-                gemini_visible_candidates=visible_candidates,
-                gemini_truncated_candidates=truncated_candidates,
-                gemini_model=str(result.get("gemini_model") or ""),
-                gemini_result_status=(
-                    "weakly_compatible_rejected_exact_mode"
-                    if reject_weak_exact and strictness != "strict"
-                    else "weakly_compatible_rejected_strict"
-                ),
+            logger.info(
+                "🧠 Gemini weakly-compatible result rejected, falling back to local: query=%s strictness=%s",
+                query[:120], strictness,
             )
+            return None  # allow local fallback to find a fully compatible candidate
         if matched_item and not self._is_gemini_result_family_valid(query_features, matched_item):
             query_family = self._entity_family(query_features.get("entity_type", ""))
             result_family = self._entity_family(matched_item.get("entity_type", ""))
@@ -7988,36 +7969,16 @@ class ReMoMatcher:
                 query_family or "other",
                 result_family or "other",
             )
-            rejected = self._build_missing_result(
-                query,
-                "Gemini выбрал кандидата из несовместимого товарного семейства; позиция отклонена.",
-                compatibility_status="rejected_incompatible_gemini",
-                incompatibility_reason="gemini_family_gate_rejected",
-                gemini_shortlist_count=len(shortlist),
-                gemini_visible_candidates=visible_candidates,
-                gemini_truncated_candidates=truncated_candidates,
-                gemini_model=str(result.get("gemini_model") or ""),
-                gemini_result_status="family_gate_rejected",
-            )
-            if strictness == "strict":
-                return rejected
+            # Return None so the caller falls through to local fallback
+            # regardless of strictness — local fallback has its own
+            # compatibility and family checks.
             return None
         if matched_item and self._is_hard_incompatible_match(query_features, matched_item):
             reason = self._hard_incompatibility_reason(query_features, matched_item) or "gemini_selected_incompatible_candidate"
             logger.info("Skipping Gemini result due to hard incompatibility: query=%s found=%s reason=%s", query, result.get("found_name"), reason)
-            rejected = self._build_missing_result(
-                query,
-                "Gemini выбрал несовместимого кандидата; позиция отклонена.",
-                compatibility_status="rejected_incompatible_gemini",
-                incompatibility_reason=reason,
-                gemini_shortlist_count=len(shortlist),
-                gemini_visible_candidates=visible_candidates,
-                gemini_truncated_candidates=truncated_candidates,
-                gemini_model=str(result.get("gemini_model") or ""),
-                gemini_result_status="hard_incompatibility_rejected",
-            )
-            if strictness == "strict":
-                return rejected
+            # Return None so the caller falls through to local fallback
+            # regardless of strictness — local fallback has its own
+            # hard-incompatibility checks.
             return None
         result["alternatives"] = result.get("alternatives") or self._format_alternatives(scored_entries, skip_first=True)
         if result.get("requires_review") not in {"да", "нет"}:
