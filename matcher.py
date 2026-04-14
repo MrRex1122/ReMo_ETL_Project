@@ -9135,6 +9135,16 @@ class ReMoMatcher:
         df = self._promote_embedded_header_row(df)
         query_column, article_column = self._resolve_input_columns(df)
 
+        # Save original input articles before they get overwritten by matched DB articles.
+        # These will be appended to the query column (Наименование) after matching
+        # so the user can see the original model/article in the result output.
+        _original_input_articles: dict[int, str] = {}
+        if article_column and article_column in df.columns:
+            for _oa_idx in df.index:
+                _oa_val = self._clean_text_value(df.at[_oa_idx, article_column])
+                if _oa_val:
+                    _original_input_articles[int(_oa_idx)] = _oa_val
+
         if "Цена" not in df.columns:
             df["Цена"] = pd.Series([None] * len(df), dtype="float64")
         else:
@@ -9389,6 +9399,14 @@ class ReMoMatcher:
             stats[key] = round(float(stats.get(key) or 0.0), 2)
 
         df = self._apply_kp_cost_columns(df)
+
+        # Append original input article to the query column (Наименование)
+        # so it's visible in the result output alongside the item name.
+        if _original_input_articles:
+            for _oa_idx, _oa_art in _original_input_articles.items():
+                _oa_name = str(df.at[_oa_idx, query_column]).strip()
+                if _oa_art and _oa_art not in _oa_name:
+                    df.at[_oa_idx, query_column] = f"{_oa_name} [{_oa_art}]"
 
         if cancel_requested is not None and cancel_requested():
             if build_runtime_diagnostics:
