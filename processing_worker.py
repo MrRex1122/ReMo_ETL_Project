@@ -90,11 +90,10 @@ def build_main_kp_result_df(df: pd.DataFrame) -> pd.DataFrame:
     if "Найденная номенклатура" in visible_columns:
         cutoff_index = visible_columns.index("Найденная номенклатура")
         visible_columns = visible_columns[: cutoff_index + 1]
-    # Ensure key business-result columns are always included,
-    # even if they were after the cutoff point or hidden.
-    for result_col in ("Цена", "Причина отсутствия", "Требует проверки"):
-        if result_col in df.columns and result_col not in visible_columns:
-            visible_columns.append(result_col)
+    # Ensure DB price is always visible — it is NOT a duplicate of
+    # input cost columns like "Стоимость материал за ед."
+    if "Цена" in df.columns and "Цена" not in visible_columns:
+        visible_columns.append("Цена")
     return df.loc[:, visible_columns].copy()
 
 

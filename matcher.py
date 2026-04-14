@@ -8710,8 +8710,7 @@ class ReMoMatcher:
             )
             ambiguous = (
                 query_features.get("row_type") == "section"
-                or margin < max(0.05, getattr(self, "local_margin_threshold", 0.08))
-                or top_branch_gap < 0.15
+                or not strong_local
             )
 
             shortlist_count = min(len(scored_entries), int(getattr(self, "gemini_shortlist_limit", 96)))
@@ -8725,18 +8724,17 @@ class ReMoMatcher:
 
             weak_shortlist = self._is_weak_shortlist(scored_entries, ranked_branches)
             gemini_result: Optional[Dict[str, Any]] = None
-            use_candidate_tiebreaker = ambiguous and self._should_use_candidate_tiebreaker_gemini(
-                query_features,
-                scored_entries,
-                margin,
-                top_branch_gap,
-            )
-            if not use_candidate_tiebreaker:
+            # If the position is not confidently resolved locally (strong_local),
+            # always use Gemini for validation. This replaces the old narrow
+            # "tiebreaker" logic that only called Gemini for 2-8 candidates
+            # with low margin — which skipped ~90% of positions.
+            use_gemini_validation = not strong_local and len(scored_entries) >= 1
+            if not use_gemini_validation:
                 trace_steps.append(
                     {
                         "stage": "gemini_selection",
                         "status": "skipped",
-                        "reason_code": "candidate_tiebreaker_not_needed",
+                        "reason_code": "strong_local_match",
                     }
                 )
             elif weak_shortlist and bool(getattr(self, "skip_weak_shortlist", False)):
@@ -9038,10 +9036,12 @@ class ReMoMatcher:
             return
 
         logger.info(
-            "⚡ Parallel matching: tasks=%s workers=%s semaphore_slots=%s chunk_parallelism=%s",
+            "⚡ Parallel matching: tasks=%s workers=%s semaphore_slots=%s chunk_parallelism=%s chunk_size=%s max_chunks=%s",
             len(tasks), workers,
             int(getattr(self, "_gemini_request_limit", 0)),
             int(getattr(self, "gemini_chunk_parallelism", 0)),
+            int(getattr(self, "gemini_chunk_size", 12)),
+            int(getattr(self, "gemini_max_chunks", 8)),
         )
         pool = ThreadPoolExecutor(max_workers=workers)
         future_map: Dict[Any, int] = {}
