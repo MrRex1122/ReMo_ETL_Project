@@ -2929,7 +2929,7 @@ def main():
         parallel_requests = _clamp_int_session_state_value(
             "matcher_parallel_requests",
             min_value=1,
-            max_value=25,
+            max_value=50,
             fallback=get_matcher_parallel_requests(),
         )
         _clamp_int_session_state_value(
@@ -2941,7 +2941,7 @@ def main():
         _clamp_int_session_state_value(
             "matcher_gemini_chunk_size",
             min_value=6,
-            max_value=20,
+            max_value=48,
             fallback=get_matcher_gemini_chunk_size(),
         )
         _clamp_int_session_state_value(
@@ -2973,7 +2973,7 @@ def main():
             st.slider(
                 "Параллельных строк matcher",
                 min_value=1,
-                max_value=25,
+                max_value=50,
                 step=1,
                 key="matcher_parallel_requests",
                 help="Сколько строк matcher обрабатывает одновременно. Ускоряет прогон, но повышает нагрузку на Gemini API и CPU.",
@@ -2989,10 +2989,10 @@ def main():
             st.slider(
                 "Кандидатов в 1 запрос Gemini",
                 min_value=6,
-                max_value=20,
-                step=2,
+                max_value=48,
+                step=6,
                 key="matcher_gemini_chunk_size",
-                help="Сколько кандидатов включать в один вызов модели.",
+                help="Сколько кандидатов включать в один вызов Gemini. Gemini 2.5 Flash легко обрабатывает 24-48 за раз.",
             )
             st.slider(
                 "Максимум запросов Gemini на позицию",

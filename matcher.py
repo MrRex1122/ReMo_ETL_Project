@@ -539,8 +539,8 @@ class ReMoMatcher:
         self.gemini_chunk_size = self._sanitize_int_setting(
             gemini_chunk_size if gemini_chunk_size is not None else get_matcher_gemini_chunk_size(),
             minimum=6,
-            maximum=20,
-            fallback=12,
+            maximum=48,
+            fallback=24,
         )
         self.gemini_max_chunks = self._sanitize_int_setting(
             gemini_max_chunks if gemini_max_chunks is not None else get_matcher_gemini_max_chunks(),
