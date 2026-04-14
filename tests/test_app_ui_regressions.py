@@ -112,7 +112,7 @@ class AppUiRegressionTests(unittest.TestCase):
         app_source = Path("app.py").read_text(encoding="utf-8")
         self.assertIn("def _clamp_int_session_state_value", app_source)
         self.assertIn('"matcher_parallel_requests"', app_source)
-        self.assertIn("max_value=25", app_source)
+        self.assertIn("max_value=50", app_source)
         self.assertIn('"matcher_gemini_shortlist_limit"', app_source)
         self.assertIn('"matcher_gemini_chunk_size"', app_source)
         self.assertIn('"matcher_gemini_max_chunks"', app_source)

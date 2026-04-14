@@ -84,12 +84,17 @@ def _looks_like_material_unit_cost_column(column_name: object) -> bool:
 
 def build_main_kp_result_df(df: pd.DataFrame) -> pd.DataFrame:
     hidden_columns = set(_DEBUG_RESULT_COLUMNS)
-    if any(_looks_like_material_unit_cost_column(column) for column in df.columns):
-        hidden_columns.add("Цена")
+    # Note: "Цена" is the DB price for the matched item — never hide it.
+    # It is NOT a duplicate of input cost columns like "Стоимость материал за ед."
     visible_columns = [column for column in df.columns if column not in hidden_columns]
     if "Найденная номенклатура" in visible_columns:
         cutoff_index = visible_columns.index("Найденная номенклатура")
         visible_columns = visible_columns[: cutoff_index + 1]
+    # Ensure key business-result columns are always included,
+    # even if they were after the cutoff point or hidden.
+    for result_col in ("Цена", "Причина отсутствия", "Требует проверки"):
+        if result_col in df.columns and result_col not in visible_columns:
+            visible_columns.append(result_col)
     return df.loc[:, visible_columns].copy()
 
 
