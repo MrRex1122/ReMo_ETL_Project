@@ -126,6 +126,13 @@ class AppUiRegressionTests(unittest.TestCase):
         self.assertIn("st.data_editor(", app_source)
         self.assertNotIn("disabled=disabled_columns", app_source)
 
+    def test_matcher_cache_caption_uses_safe_counter_helper(self):
+        app_source = Path("app.py").read_text(encoding="utf-8")
+        self.assertIn("def _get_matcher_cache_entry_count", app_source)
+        self.assertIn("FROM sqlite_master", app_source)
+        self.assertIn("_cache_count = _get_matcher_cache_entry_count(cache_file)", app_source)
+        self.assertNotIn('_cache_conn.execute("SELECT COUNT(*) FROM match_cache")', app_source)
+
     def test_debug_tab_exposes_full_result_downloads(self):
         app_source = Path("app.py").read_text(encoding="utf-8")
         self.assertIn("Полная таблица результата", app_source)

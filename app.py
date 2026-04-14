@@ -1726,6 +1726,29 @@ def _ensure_history_table_exists(conn: sqlite3.Connection) -> None:
     """)
     conn.commit()
 
+def _get_matcher_cache_entry_count(cache_file: Path) -> int | str:
+    """Вернуть количество записей в matcher cache, даже если таблица ещё не создана."""
+    conn: sqlite3.Connection | None = None
+    try:
+        conn = sqlite3.connect(str(cache_file))
+        table_exists = conn.execute(
+            """
+            SELECT 1
+            FROM sqlite_master
+            WHERE type = 'table' AND name = 'match_cache'
+            """
+        ).fetchone()
+        if table_exists is None:
+            return 0
+        row = conn.execute("SELECT COUNT(*) FROM match_cache").fetchone()
+        return int(row[0]) if row else 0
+    except sqlite3.DatabaseError as exc:
+        logger.warning("Failed to read matcher cache count from %s: %s", cache_file, exc)
+        return "?"
+    finally:
+        if conn is not None:
+            conn.close()
+
 def _prepare_df_for_display(df: pd.DataFrame) -> pd.DataFrame:
     """Сделать DataFrame безопасным для отображения в Streamlit/Arrow."""
     display_df = df.copy()
@@ -3107,12 +3130,7 @@ def main():
         cache_exists = cache_file.exists()
         cache_size_kb = round(cache_file.stat().st_size / 1024, 1) if cache_exists else 0
         if cache_exists:
-            try:
-                _cache_conn = sqlite3.connect(str(cache_file))
-                _cache_count = _cache_conn.execute("SELECT COUNT(*) FROM match_cache").fetchone()[0]
-                _cache_conn.close()
-            except Exception:
-                _cache_count = "?"
+            _cache_count = _get_matcher_cache_entry_count(cache_file)
             st.caption(f"Кэш: `{cache_file}` ({cache_size_kb} KB, {_cache_count} записей)")
         else:
             st.caption(f"Кэш: `{cache_file}` (не существует)")
