@@ -186,6 +186,26 @@ if 'catalog_snapshot_r2_csv_key'     not in _ss: _ss.catalog_snapshot_r2_csv_key
 if 'search_catalog_export_url'       not in _ss: _ss.search_catalog_export_url       = None
 if 'search_catalog_export_name'      not in _ss: _ss.search_catalog_export_name      = None
 
+# ---- Auto-detect stale matcher defaults after deploy/env change ----
+# If config defaults changed (code deploy, env var update), reset session
+# state to new defaults so old sessions don't silently keep obsolete values
+# like chunk_size=12 when the new default is 24.
+_MATCHER_CURRENT_DEFAULTS = {
+    "matcher_parallel_requests": get_matcher_parallel_requests(),
+    "matcher_gemini_shortlist_limit": get_matcher_gemini_shortlist_limit(),
+    "matcher_gemini_chunk_size": get_matcher_gemini_chunk_size(),
+    "matcher_gemini_max_chunks": get_matcher_gemini_max_chunks(),
+    "matcher_local_recall_pool": get_matcher_local_recall_pool(),
+    "matcher_skip_weak_shortlist": get_matcher_skip_weak_shortlist(),
+}
+_defaults_sig = tuple(sorted(_MATCHER_CURRENT_DEFAULTS.items()))
+if _ss.get('_matcher_defaults_signature') != _defaults_sig:
+    for _key, _val in _MATCHER_CURRENT_DEFAULTS.items():
+        _ss[_key] = _val
+    _ss.matcher_settings_signature = None
+    _ss.matcher = None
+    _ss._matcher_defaults_signature = _defaults_sig
+
 
 def _catalog_source_path() -> Path:
     """Вернуть актуальный источник каталога для matcher и выгрузки."""
@@ -3019,6 +3039,12 @@ def main():
         shortlist_limit = int(st.session_state.get("matcher_gemini_shortlist_limit", get_matcher_gemini_shortlist_limit()))
         chunk_size = int(st.session_state.get("matcher_gemini_chunk_size", get_matcher_gemini_chunk_size()))
         max_chunks = int(st.session_state.get("matcher_gemini_max_chunks", get_matcher_gemini_max_chunks()))
+        parallel_val = int(st.session_state.get("matcher_parallel_requests", get_matcher_parallel_requests()))
+        recall_val = int(st.session_state.get("matcher_local_recall_pool", get_matcher_local_recall_pool()))
+        st.caption(
+            f"**Активные настройки:** workers={parallel_val}, shortlist={shortlist_limit}, "
+            f"chunk_size={chunk_size}, max_chunks={max_chunks}, recall_pool={recall_val}"
+        )
         st.caption(
             f"Gemini chunking: до {shortlist_limit} кандидатов, "
             f"до {max_chunks} запросов на строку, по {chunk_size} кандидатов за запрос."
@@ -3029,12 +3055,33 @@ def main():
         current_mode = str(st.session_state.get("matcher_mode", "exact"))
         st.session_state.matcher_mode = _safe_matcher_mode_select(current_mode, mode_options)
 
-        if st.button("✅ Применить параметры matcher"):
-            st.session_state.matcher = None
-            st.session_state.matcher_db_csv = None
-            st.session_state.matcher_settings_signature = None
-            st.success("✓ Параметры применены. Matcher будет переинициализирован при следующем запуске.")
-        
+        col_apply, col_reset = st.columns(2)
+        with col_apply:
+            if st.button("✅ Применить параметры matcher"):
+                st.session_state.matcher = None
+                st.session_state.matcher_db_csv = None
+                st.session_state.matcher_settings_signature = None
+                st.success("✓ Параметры применены. Matcher будет переинициализирован при следующем запуске.")
+        with col_reset:
+            if st.button("🔄 Сбросить к дефолтам"):
+                _reset_defaults = {
+                    "matcher_parallel_requests": get_matcher_parallel_requests(),
+                    "matcher_gemini_shortlist_limit": get_matcher_gemini_shortlist_limit(),
+                    "matcher_gemini_chunk_size": get_matcher_gemini_chunk_size(),
+                    "matcher_gemini_max_chunks": get_matcher_gemini_max_chunks(),
+                    "matcher_local_recall_pool": get_matcher_local_recall_pool(),
+                    "matcher_skip_weak_shortlist": get_matcher_skip_weak_shortlist(),
+                }
+                for _rk, _rv in _reset_defaults.items():
+                    st.session_state[_rk] = _rv
+                st.session_state.matcher = None
+                st.session_state.matcher_db_csv = None
+                st.session_state.matcher_settings_signature = None
+                st.session_state._matcher_defaults_signature = tuple(sorted(_reset_defaults.items()))
+                _vals = ", ".join(f"{k.replace('matcher_', '')}={v}" for k, v in _reset_defaults.items())
+                st.success(f"✓ Настройки сброшены к дефолтам: {_vals}")
+                st.rerun()
+
         st.divider()
         
         st.subheader("📚 О приложении")
