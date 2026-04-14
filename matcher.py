@@ -7955,11 +7955,16 @@ class ReMoMatcher:
         if str(result.get("compatibility_status") or "").strip() == "weakly_compatible" and (
             strictness == "strict" or reject_weak_exact
         ):
+            # Don't reject here — return the Gemini result as-is.
+            # The caller has _should_accept_weak_gemini_result() which
+            # compares against local compatible candidates and decides
+            # whether to keep or discard the Gemini pick.  Rejecting
+            # blindly here causes regressions: Gemini often selects the
+            # correct item even when compatibility is "weakly_compatible".
             logger.info(
-                "🧠 Gemini weakly-compatible result rejected, falling back to local: query=%s strictness=%s",
+                "🧠 Gemini weakly-compatible result passed through for caller quality check: query=%s strictness=%s",
                 query[:120], strictness,
             )
-            return None  # allow local fallback to find a fully compatible candidate
         if matched_item and not self._is_gemini_result_family_valid(query_features, matched_item):
             query_family = self._entity_family(query_features.get("entity_type", ""))
             result_family = self._entity_family(matched_item.get("entity_type", ""))
