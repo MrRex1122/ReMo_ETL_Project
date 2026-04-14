@@ -7947,6 +7947,11 @@ class ReMoMatcher:
             result["gemini_visible_candidates"] = visible_candidates
             result["gemini_truncated_candidates"] = truncated_candidates
         if not result or not found_name or found_name == MISSING_POSITION_TEXT:
+            # If Gemini found something but confidence was below floor,
+            # return None to allow local fallback instead of a hard "not found".
+            result_status = str((result or {}).get("gemini_result_status") or "")
+            if result_status == "confidence_floor_rejected":
+                return None
             if strictness == "strict" and result:
                 return result
             return None
