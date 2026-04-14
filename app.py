@@ -3055,13 +3055,32 @@ def main():
         """)
         
         st.divider()
-        
-        if st.button("🗑️ Очистить кэш"):
-            cache_file = get_matcher_cache_db_path()
-            if cache_file.exists():
-                os.unlink(cache_file)
+
+        cache_file = get_matcher_cache_db_path()
+        cache_exists = cache_file.exists()
+        cache_size_kb = round(cache_file.stat().st_size / 1024, 1) if cache_exists else 0
+        if cache_exists:
+            try:
+                _cache_conn = sqlite3.connect(str(cache_file))
+                _cache_count = _cache_conn.execute("SELECT COUNT(*) FROM match_cache").fetchone()[0]
+                _cache_conn.close()
+            except Exception:
+                _cache_count = "?"
+            st.caption(f"Кэш: `{cache_file}` ({cache_size_kb} KB, {_cache_count} записей)")
+        else:
+            st.caption(f"Кэш: `{cache_file}` (не существует)")
+
+        if st.button("🗑️ Очистить кэш matcher"):
+            if cache_exists:
+                try:
+                    os.unlink(cache_file)
+                    logger.info("🗑️ Matcher cache deleted: %s (was %.1f KB)", cache_file, cache_size_kb)
+                except OSError as exc:
+                    logger.warning("Failed to delete cache file %s: %s", cache_file, exc)
                 st.session_state.matcher = None
-                st.success("✓ Кэш очищен")
+                st.session_state.matcher_settings_signature = None
+                st.success(f"Кэш очищен ({_cache_count} записей удалено). Следующий прогон пойдёт без кэша.")
+                st.rerun()
             else:
                 st.info("Кэш уже пуст")
     
