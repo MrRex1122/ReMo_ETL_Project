@@ -7663,20 +7663,17 @@ class ReMoMatcher:
                 gemini_result_status="no_valid_candidate",
             )
 
-        # ── Confidence floor: отсекаем заведомо плохие матчи ──
+        # ── Confidence floor: логируем низкую уверенность, но не отсекаем ──
+        # Ранее confidence floor возвращал _build_missing_result → local
+        # fallback часто уходил в ДРУГУЮ ветку/семейство и находил мусор
+        # (например, «УРМ-ОРИОН» железо вместо «Программное обеспечение»).
+        # Теперь пропускаем результат дальше — caller сам решит через
+        # _should_accept_weak_gemini_result.
         gemini_confidence_floor = float(getattr(self, "gemini_confidence_floor", 0.4) or 0.4)
         if confidence < gemini_confidence_floor and compatibility != "compatible":
             logger.info(
-                "⛔ Gemini result below confidence floor: query=%s found=%s confidence=%.2f floor=%.2f compat=%s",
+                "⚠️ Gemini result below confidence floor (passed through): query=%s found=%s confidence=%.2f floor=%.2f compat=%s",
                 self._clean_text_value(query)[:120], found_name, confidence, gemini_confidence_floor, compatibility,
-            )
-            return self._build_missing_result(
-                query,
-                rejection_reason or reasoning or f"Уверенность Gemini ({confidence:.0%}) ниже порога ({gemini_confidence_floor:.0%})",
-                compatibility_status="rejected_low_confidence",
-                incompatibility_reason=f"gemini_confidence_below_floor_{confidence:.2f}",
-                gemini_model=model_name,
-                gemini_result_status="confidence_floor_rejected",
             )
 
         return self._build_result_from_item(
