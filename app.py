@@ -1914,33 +1914,63 @@ def _fmt_size(n: int) -> str:
     return f"{n} B"
 
 
+def _render_dir_files(folder: Path, key_prefix: str) -> None:
+    """List files in a folder with individual delete buttons."""
+    if not folder.exists() or not any(f for f in folder.iterdir() if f.is_file()):
+        st.info("Пусто.")
+        return
+    files = sorted([f for f in folder.iterdir() if f.is_file()], key=lambda f: f.stat().st_size, reverse=True)
+    for f in files:
+        size = f.stat().st_size
+        mtime = datetime.fromtimestamp(f.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+        col_name, col_btn = st.columns([5, 1])
+        col_name.caption(f"`{f.name}` — {_fmt_size(size)} — {mtime}")
+        if col_btn.button("🗑️", key=f"del_{key_prefix}_{f.name}", help=f"Удалить {f.name}"):
+            f.unlink(missing_ok=True)
+            logger.info("🗑️ Deleted file: %s", f)
+            st.rerun()
+
+
 def _render_storage_explorer() -> None:
     st.subheader("💾 Storage Explorer")
     upload_dir = get_upload_dir()
-    if not upload_dir.exists():
-        st.info(f"Директория данных не найдена: `{upload_dir}`")
+
+    # --- Volume root scan (catches files outside remo_data/) ---
+    volume_root = Path(os.environ["RAILWAY_VOLUME_MOUNT_PATH"]) if os.environ.get("RAILWAY_VOLUME_MOUNT_PATH") else None
+    scan_root = volume_root if volume_root and volume_root.exists() else upload_dir
+
+    st.caption(f"Сканирование: `{scan_root}`")
+
+    if not scan_root.exists():
+        st.info(f"Директория не найдена: `{scan_root}`")
         return
 
-    # --- Summary by subdirectory ---
-    subdirs = ["runs", "raw", "converted", "clean"]
-    rows = []
-    for name in subdirs:
-        p = upload_dir / name
-        if p.exists():
-            size = _dir_size_bytes(p)
-            count = sum(1 for f in p.rglob("*") if f.is_file())
-            rows.append({"Папка": name, "Размер": _fmt_size(size), "Файлов": count, "_bytes": size})
-    # also account for files directly in upload_dir
-    direct_files = [f for f in upload_dir.iterdir() if f.is_file()]
-    if direct_files:
-        direct_size = sum(f.stat().st_size for f in direct_files)
-        rows.append({"Папка": "(корень)", "Размер": _fmt_size(direct_size), "Файлов": len(direct_files), "_bytes": direct_size})
+    # Top-level size breakdown
+    top_rows = []
+    for entry in sorted(scan_root.iterdir()):
+        if entry.is_dir():
+            size = _dir_size_bytes(entry)
+            count = sum(1 for f in entry.rglob("*") if f.is_file())
+            top_rows.append({"Путь": str(entry.relative_to(scan_root)), "Размер": _fmt_size(size), "Файлов": count, "_bytes": size})
+        elif entry.is_file():
+            size = entry.stat().st_size
+            top_rows.append({"Путь": entry.name, "Размер": _fmt_size(size), "Файлов": 1, "_bytes": size})
 
-    if rows:
-        df_summary = pd.DataFrame(rows).drop(columns=["_bytes"]).sort_values("Папка")
-        st.dataframe(df_summary, use_container_width=True, hide_index=True)
+    if top_rows:
+        total = sum(r["_bytes"] for r in top_rows)
+        st.caption(f"Итого видимо: **{_fmt_size(total)}**")
+        df_top = pd.DataFrame(top_rows).drop(columns=["_bytes"]).sort_values("_bytes" if "_bytes" in top_rows[0] else "Размер")
+        # sort by size desc
+        df_top = pd.DataFrame(top_rows).drop(columns=["_bytes"])
+        size_order = sorted(range(len(top_rows)), key=lambda i: top_rows[i]["_bytes"], reverse=True)
+        df_top = df_top.iloc[size_order].reset_index(drop=True)
+        st.dataframe(df_top, use_container_width=True, hide_index=True)
 
     st.divider()
+
+    if not upload_dir.exists():
+        st.info(f"Папка данных приложения не найдена: `{upload_dir}`")
+        return
 
     # --- Runs cleanup ---
     runs_dir = upload_dir / "runs"
@@ -1957,7 +1987,7 @@ def _render_storage_explorer() -> None:
         for d in run_dirs:
             size = _dir_size_bytes(d)
             mtime = datetime.fromtimestamp(d.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
-            run_rows.append({"run_id": d.name, "Дата": mtime, "Размер": _fmt_size(size), "_bytes": size, "_path": str(d)})
+            run_rows.append({"run_id": d.name, "Дата": mtime, "Размер": _fmt_size(size), "_bytes": size})
 
         total_runs_size = sum(r["_bytes"] for r in run_rows)
         st.caption(f"{len(run_rows)} прогонов, всего {_fmt_size(total_runs_size)}")
@@ -1993,25 +2023,16 @@ def _render_storage_explorer() -> None:
 
     st.divider()
 
+    # --- Clean folder files ---
+    st.markdown("**Файлы каталога (`clean/`)**")
+    _render_dir_files(upload_dir / "clean", "clean")
+
+    st.divider()
+
     # --- Raw / converted CSV files ---
     for folder_name, label in [("raw", "Сырые CSV (`raw/`)"), ("converted", "Конвертированные CSV (`converted/`)")]:
-        folder = upload_dir / folder_name
         st.markdown(f"**{label}**")
-        if not folder.exists() or not any(folder.iterdir()):
-            st.info("Пусто.")
-            continue
-        files = sorted(folder.iterdir(), key=lambda f: f.stat().st_mtime, reverse=True)
-        for f in files:
-            if not f.is_file():
-                continue
-            size = f.stat().st_size
-            mtime = datetime.fromtimestamp(f.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
-            col_name, col_btn = st.columns([5, 1])
-            col_name.caption(f"`{f.name}` — {_fmt_size(size)} — {mtime}")
-            if col_btn.button("🗑️", key=f"del_file_{folder_name}_{f.name}", help=f"Удалить {f.name}"):
-                f.unlink(missing_ok=True)
-                logger.info("🗑️ Deleted file: %s", f)
-                st.rerun()
+        _render_dir_files(upload_dir / folder_name, folder_name)
 
 
 def _render_debug_run_section(run) -> None:
