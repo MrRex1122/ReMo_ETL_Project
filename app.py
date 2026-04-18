@@ -1959,11 +1959,8 @@ def _render_storage_explorer() -> None:
     if top_rows:
         total = sum(r["_bytes"] for r in top_rows)
         st.caption(f"Итого видимо: **{_fmt_size(total)}**")
-        df_top = pd.DataFrame(top_rows).drop(columns=["_bytes"]).sort_values("_bytes" if "_bytes" in top_rows[0] else "Размер")
-        # sort by size desc
-        df_top = pd.DataFrame(top_rows).drop(columns=["_bytes"])
-        size_order = sorted(range(len(top_rows)), key=lambda i: top_rows[i]["_bytes"], reverse=True)
-        df_top = df_top.iloc[size_order].reset_index(drop=True)
+        top_rows_sorted = sorted(top_rows, key=lambda r: r["_bytes"], reverse=True)
+        df_top = pd.DataFrame(top_rows_sorted).drop(columns=["_bytes"]).reset_index(drop=True)
         st.dataframe(df_top, use_container_width=True, hide_index=True)
 
     st.divider()
