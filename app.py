@@ -15,6 +15,7 @@ import logging
 import io
 import json
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -80,6 +81,7 @@ from processing_runs import (
     load_processing_run_match_diagnostics,
     load_processing_run_progress,
     load_processing_run_stats,
+    get_processing_runs_dir,
     mark_stale_running_runs_as_interrupted,
     request_processing_run_cancel,
     save_processing_run_draft,
@@ -1898,6 +1900,120 @@ def _load_run_results_for_ui(run) -> tuple[pd.DataFrame | None, dict[str, Any] |
         return None, None, exc
 
 
+def _dir_size_bytes(path: Path) -> int:
+    return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
+
+
+def _fmt_size(n: int) -> str:
+    if n >= 1024 ** 3:
+        return f"{n / 1024**3:.2f} GB"
+    if n >= 1024 ** 2:
+        return f"{n / 1024**2:.1f} MB"
+    if n >= 1024:
+        return f"{n / 1024:.0f} KB"
+    return f"{n} B"
+
+
+def _render_storage_explorer() -> None:
+    st.subheader("💾 Storage Explorer")
+    upload_dir = get_upload_dir()
+    if not upload_dir.exists():
+        st.info(f"Директория данных не найдена: `{upload_dir}`")
+        return
+
+    # --- Summary by subdirectory ---
+    subdirs = ["runs", "raw", "converted", "clean"]
+    rows = []
+    for name in subdirs:
+        p = upload_dir / name
+        if p.exists():
+            size = _dir_size_bytes(p)
+            count = sum(1 for f in p.rglob("*") if f.is_file())
+            rows.append({"Папка": name, "Размер": _fmt_size(size), "Файлов": count, "_bytes": size})
+    # also account for files directly in upload_dir
+    direct_files = [f for f in upload_dir.iterdir() if f.is_file()]
+    if direct_files:
+        direct_size = sum(f.stat().st_size for f in direct_files)
+        rows.append({"Папка": "(корень)", "Размер": _fmt_size(direct_size), "Файлов": len(direct_files), "_bytes": direct_size})
+
+    if rows:
+        df_summary = pd.DataFrame(rows).drop(columns=["_bytes"]).sort_values("Папка")
+        st.dataframe(df_summary, use_container_width=True, hide_index=True)
+
+    st.divider()
+
+    # --- Runs cleanup ---
+    runs_dir = upload_dir / "runs"
+    st.markdown("**Прогоны (`runs/`)**")
+    if not runs_dir.exists() or not any(runs_dir.iterdir()):
+        st.info("Папка прогонов пуста.")
+    else:
+        run_dirs = sorted(
+            [d for d in runs_dir.iterdir() if d.is_dir()],
+            key=lambda d: d.stat().st_mtime,
+            reverse=True,
+        )
+        run_rows = []
+        for d in run_dirs:
+            size = _dir_size_bytes(d)
+            mtime = datetime.fromtimestamp(d.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+            run_rows.append({"run_id": d.name, "Дата": mtime, "Размер": _fmt_size(size), "_bytes": size, "_path": str(d)})
+
+        total_runs_size = sum(r["_bytes"] for r in run_rows)
+        st.caption(f"{len(run_rows)} прогонов, всего {_fmt_size(total_runs_size)}")
+
+        df_runs = pd.DataFrame(run_rows)[["run_id", "Дата", "Размер"]]
+        st.dataframe(df_runs, use_container_width=True, hide_index=True)
+
+        col_old, col_all = st.columns(2)
+        with col_old:
+            cutoff_days = st.number_input("Удалить старше (дней)", min_value=1, value=7, step=1, key="storage_cutoff_days")
+            if st.button("🗑️ Удалить старые прогоны", key="delete_old_runs"):
+                cutoff_ts = time.time() - cutoff_days * 86400
+                deleted, freed = 0, 0
+                for d in run_dirs:
+                    if d.stat().st_mtime < cutoff_ts:
+                        freed += _dir_size_bytes(d)
+                        shutil.rmtree(d, ignore_errors=True)
+                        deleted += 1
+                logger.info("🗑️ Storage cleanup: deleted %d runs older than %d days, freed %s", deleted, cutoff_days, _fmt_size(freed))
+                st.success(f"Удалено {deleted} прогонов, освобождено {_fmt_size(freed)}")
+                st.rerun()
+        with col_all:
+            st.write("")
+            st.write("")
+            if st.button("🗑️ Удалить ВСЕ прогоны", type="primary", key="delete_all_runs"):
+                freed = 0
+                for d in run_dirs:
+                    freed += _dir_size_bytes(d)
+                    shutil.rmtree(d, ignore_errors=True)
+                logger.info("🗑️ Storage cleanup: deleted ALL %d runs, freed %s", len(run_dirs), _fmt_size(freed))
+                st.success(f"Удалено {len(run_dirs)} прогонов, освобождено {_fmt_size(freed)}")
+                st.rerun()
+
+    st.divider()
+
+    # --- Raw / converted CSV files ---
+    for folder_name, label in [("raw", "Сырые CSV (`raw/`)"), ("converted", "Конвертированные CSV (`converted/`)")]:
+        folder = upload_dir / folder_name
+        st.markdown(f"**{label}**")
+        if not folder.exists() or not any(folder.iterdir()):
+            st.info("Пусто.")
+            continue
+        files = sorted(folder.iterdir(), key=lambda f: f.stat().st_mtime, reverse=True)
+        for f in files:
+            if not f.is_file():
+                continue
+            size = f.stat().st_size
+            mtime = datetime.fromtimestamp(f.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+            col_name, col_btn = st.columns([5, 1])
+            col_name.caption(f"`{f.name}` — {_fmt_size(size)} — {mtime}")
+            if col_btn.button("🗑️", key=f"del_file_{folder_name}_{f.name}", help=f"Удалить {f.name}"):
+                f.unlink(missing_ok=True)
+                logger.info("🗑️ Deleted file: %s", f)
+                st.rerun()
+
+
 def _render_debug_run_section(run) -> None:
     st.subheader("Debug по выбранному прогону")
     if run is None:
@@ -3106,7 +3222,9 @@ def main():
                 st.rerun()
 
         st.divider()
-        
+        _render_storage_explorer()
+        st.divider()
+
         st.subheader("📚 О приложении")
         st.markdown("""
         **ReMo Matcher v1.0**
