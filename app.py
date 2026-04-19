@@ -1895,6 +1895,12 @@ def _load_run_results_for_ui(run) -> tuple[pd.DataFrame | None, dict[str, Any] |
             df = st.session_state.df_processed
             stats = st.session_state.stats
         return df, stats, None
+    except FileNotFoundError as exc:
+        logger.warning("⚠️ Run files missing for %s, clearing active run: %s", run.run_id, exc)
+        st.session_state.active_run_id = None
+        st.session_state.active_run_status = None
+        _clear_loaded_run_cache()
+        return None, None, exc
     except Exception as exc:
         logger.error("❌ Не удалось загрузить результаты прогона %s: %s", run.run_id, exc, exc_info=True)
         return None, None, exc
