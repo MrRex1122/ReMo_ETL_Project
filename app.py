@@ -22,7 +22,7 @@ import threading
 import time
 import uuid
 from typing import Any
-from cloudflare_r2_export import upload_file_to_r2
+from cloudflare_r2_export import download_file_from_r2, list_r2_objects, upload_file_to_r2
 from catalog_search import (
     build_search_taxonomy_bootstrap_draft,
     build_search_taxonomy_branch_probe,
@@ -1968,6 +1968,113 @@ def _render_storage_explorer() -> None:
         top_rows_sorted = sorted(top_rows, key=lambda r: r["_bytes"], reverse=True)
         df_top = pd.DataFrame(top_rows_sorted).drop(columns=["_bytes"]).reset_index(drop=True)
         st.dataframe(df_top, use_container_width=True, hide_index=True)
+
+    st.divider()
+
+    # --- DB Backup / Restore via R2 ---
+    _BACKUP_PREFIX = "db-backup/"
+    _BACKUP_FILES = {
+        "price_clean_merged.csv": upload_dir / "clean" / "price_clean_merged.csv",
+        "price_clean_search.duckdb": upload_dir / "clean" / "price_clean_search.duckdb",
+    }
+    with st.expander("☁️ Бэкап / Восстановление БД (Cloudflare R2)", expanded=False):
+        r2_account_id, r2_bucket, r2_access_key, r2_secret_key, r2_public_url = _get_r2_config()
+        r2_ready = all([r2_account_id, r2_bucket, r2_access_key, r2_secret_key])
+        if not r2_ready:
+            st.warning("R2 не настроен: нужны CLOUDFLARE_R2_ACCOUNT_ID, CLOUDFLARE_R2_BUCKET, CLOUDFLARE_R2_ACCESS_KEY_ID, CLOUDFLARE_R2_SECRET_ACCESS_KEY.")
+        else:
+            st.markdown("**Шаг 1 — Загрузить БД в R2**")
+            col_b1, col_b2 = st.columns(2)
+            for fname, fpath in _BACKUP_FILES.items():
+                exists = fpath.exists()
+                size_str = _fmt_size(fpath.stat().st_size) if exists else "нет файла"
+                (col_b1 if fname.endswith(".csv") else col_b2).caption(f"`{fname}` — {size_str}")
+            if st.button("⬆️ Backup обоих файлов в R2", key="r2_backup_btn", disabled=not r2_ready):
+                errors = []
+                for fname, fpath in _BACKUP_FILES.items():
+                    if not fpath.exists():
+                        errors.append(f"{fname}: файл не найден")
+                        continue
+                    try:
+                        with st.spinner(f"Загружаю {fname}..."):
+                            upload_file_to_r2(
+                                source_path=fpath,
+                                account_id=r2_account_id,
+                                bucket=r2_bucket,
+                                access_key_id=r2_access_key,
+                                secret_access_key=r2_secret_key,
+                                object_key=f"{_BACKUP_PREFIX}{fname}",
+                                public_base_url=r2_public_url,
+                            )
+                        st.success(f"✓ {fname} загружен в R2")
+                    except Exception as exc:
+                        errors.append(f"{fname}: {exc}")
+                        logger.error("❌ R2 backup failed for %s: %s", fname, exc, exc_info=True)
+                if errors:
+                    for e in errors:
+                        st.error(f"❌ {e}")
+
+            st.divider()
+            st.markdown("**Шаг 2 — Очистить `clean/`**")
+            st.caption("Удалит всё содержимое папки clean/ на Railway volume.")
+            if st.button("🗑️ Очистить clean/ полностью", key="r2_clear_clean_btn", type="primary"):
+                clean_dir_backup = upload_dir / "clean"
+                if clean_dir_backup.exists():
+                    freed = _dir_size_bytes(clean_dir_backup)
+                    shutil.rmtree(clean_dir_backup, ignore_errors=True)
+                    clean_dir_backup.mkdir(parents=True, exist_ok=True)
+                    logger.info("🗑️ Cleared clean/ dir, freed %s", _fmt_size(freed))
+                    st.success(f"Папка clean/ очищена, освобождено {_fmt_size(freed)}")
+                    st.rerun()
+                else:
+                    st.info("Папка clean/ уже пуста")
+
+            st.divider()
+            st.markdown("**Шаг 3 — Восстановить БД из R2**")
+            # Check what's in R2
+            try:
+                r2_objects = list_r2_objects(
+                    account_id=r2_account_id, bucket=r2_bucket,
+                    access_key_id=r2_access_key, secret_access_key=r2_secret_key,
+                    prefix=_BACKUP_PREFIX,
+                )
+                r2_map = {obj["key"].removeprefix(_BACKUP_PREFIX): obj["size"] for obj in r2_objects}
+            except Exception as exc:
+                r2_map = {}
+                st.warning(f"Не удалось получить список объектов R2: {exc}")
+
+            if r2_map:
+                for fname, size in r2_map.items():
+                    st.caption(f"`{fname}` в R2 — {_fmt_size(size)}")
+            else:
+                st.info("Бэкапов в R2 не найдено (префикс `db-backup/`)")
+
+            if st.button("⬇️ Восстановить БД из R2", key="r2_restore_btn", disabled=not r2_map):
+                errors = []
+                for fname in _BACKUP_FILES:
+                    if fname not in r2_map:
+                        errors.append(f"{fname}: не найден в R2")
+                        continue
+                    dest = upload_dir / "clean" / fname
+                    try:
+                        with st.spinner(f"Скачиваю {fname}..."):
+                            size = download_file_from_r2(
+                                dest_path=dest,
+                                account_id=r2_account_id,
+                                bucket=r2_bucket,
+                                access_key_id=r2_access_key,
+                                secret_access_key=r2_secret_key,
+                                object_key=f"{_BACKUP_PREFIX}{fname}",
+                            )
+                        st.success(f"✓ {fname} восстановлен ({_fmt_size(size)})")
+                    except Exception as exc:
+                        errors.append(f"{fname}: {exc}")
+                        logger.error("❌ R2 restore failed for %s: %s", fname, exc, exc_info=True)
+                if errors:
+                    for e in errors:
+                        st.error(f"❌ {e}")
+                else:
+                    st.rerun()
 
     st.divider()
 

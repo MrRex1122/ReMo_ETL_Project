@@ -184,3 +184,50 @@ def upload_file_to_r2(
         endpoint_url=endpoint_url,
         download_url=download_url,
     )
+
+
+def download_file_from_r2(
+    *,
+    dest_path: Path,
+    account_id: str,
+    bucket: str,
+    access_key_id: str,
+    secret_access_key: str,
+    object_key: str,
+) -> int:
+    """Download object_key from R2 to dest_path. Returns file size in bytes."""
+    dest_path = Path(dest_path)
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    normalized_object_key = str(object_key).lstrip("/")
+    client = _build_r2_client(
+        account_id=account_id,
+        access_key_id=access_key_id,
+        secret_access_key=secret_access_key,
+    )
+    logger.info("☁️ R2 download start: bucket=%s key=%s dest=%s", bucket, normalized_object_key, dest_path)
+    client.download_file(str(bucket).strip(), normalized_object_key, str(dest_path), Config=_build_transfer_config())
+    size = dest_path.stat().st_size
+    logger.info("✅ R2 download complete: dest=%s size_bytes=%s", dest_path, size)
+    return size
+
+
+def list_r2_objects(
+    *,
+    account_id: str,
+    bucket: str,
+    access_key_id: str,
+    secret_access_key: str,
+    prefix: str = "",
+) -> list[dict]:
+    """Return list of {key, size} dicts for objects under prefix."""
+    client = _build_r2_client(
+        account_id=account_id,
+        access_key_id=access_key_id,
+        secret_access_key=secret_access_key,
+    )
+    paginator = client.get_paginator("list_objects_v2")
+    result = []
+    for page in paginator.paginate(Bucket=str(bucket).strip(), Prefix=prefix):
+        for obj in page.get("Contents", []):
+            result.append({"key": obj["Key"], "size": obj["Size"]})
+    return result
