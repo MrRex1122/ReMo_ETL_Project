@@ -2028,7 +2028,19 @@ def _render_storage_explorer() -> None:
 
     # --- Clean folder files ---
     st.markdown("**Файлы каталога (`clean/`)**")
-    _render_dir_files(upload_dir / "clean", "clean")
+    clean_dir = upload_dir / "clean"
+    _CLEAN_KEEP = {"price_clean_merged.csv", "price_clean_search.duckdb"}
+    if clean_dir.exists():
+        taxonomy_files = [f for f in clean_dir.iterdir() if f.is_file() and f.name not in _CLEAN_KEEP]
+        if taxonomy_files:
+            tax_size = sum(f.stat().st_size for f in taxonomy_files)
+            if st.button(f"🗑️ Удалить артефакты таксономии ({len(taxonomy_files)} файлов, {_fmt_size(tax_size)})", key="delete_taxonomy_artifacts"):
+                for f in taxonomy_files:
+                    f.unlink(missing_ok=True)
+                logger.info("🗑️ Deleted %d taxonomy artifacts, freed %s", len(taxonomy_files), _fmt_size(tax_size))
+                st.success(f"Удалено {len(taxonomy_files)} файлов, освобождено {_fmt_size(tax_size)}")
+                st.rerun()
+    _render_dir_files(clean_dir, "clean")
 
     st.divider()
 
