@@ -1978,7 +1978,7 @@ def _render_storage_explorer() -> None:
         "price_clean_search.duckdb": upload_dir / "clean" / "price_clean_search.duckdb",
     }
     with st.expander("☁️ Бэкап / Восстановление БД (Cloudflare R2)", expanded=False):
-        r2_account_id, r2_bucket, r2_access_key, r2_secret_key, r2_public_url = _get_r2_config()
+        r2_account_id, r2_bucket, r2_access_key, r2_secret_key, r2_public_url = _get_cloudflare_r2_export_config()
         r2_ready = all([r2_account_id, r2_bucket, r2_access_key, r2_secret_key])
         if not r2_ready:
             st.warning("R2 не настроен: нужны CLOUDFLARE_R2_ACCOUNT_ID, CLOUDFLARE_R2_BUCKET, CLOUDFLARE_R2_ACCESS_KEY_ID, CLOUDFLARE_R2_SECRET_ACCESS_KEY.")
